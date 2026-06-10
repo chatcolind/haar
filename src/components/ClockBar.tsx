@@ -5,8 +5,9 @@ import { useState, useEffect, useRef } from 'react';
 const TIME_SIGS = ['4/4', '3/4', '6/8', '5/4'];
 const SNAP_OPTS = ['1 bar', '2 bar', 'free'];
 
-export default function ClockBar() {
+export default function ClockBar({ onBpmChange }: { onBpmChange?: (bpm: number) => void }) {
   const [bpm, setBpm] = useState(110);
+  const updateBpm = (v: number) => { setBpm(v); onBpmChange?.(v); };
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState('110');
   const [timeSig, setTimeSig] = useState('4/4');
@@ -21,7 +22,7 @@ export default function ClockBar() {
     setTaps(recent);
     if (recent.length >= 2) {
       const avg = (recent[recent.length - 1] - recent[0]) / (recent.length - 1);
-      setBpm(Math.round(60000 / avg));
+      updateBpm(Math.round(60000 / avg));
     }
     setFlashTap(true);
     setTimeout(() => setFlashTap(false), 120);
@@ -47,7 +48,7 @@ export default function ClockBar() {
 
   const confirmEdit = () => {
     const val = parseInt(editVal);
-    if (!isNaN(val) && val >= 40 && val <= 250) setBpm(val);
+    if (!isNaN(val) && val >= 40 && val <= 250) updateBpm(val);
     setEditing(false);
   };
 
@@ -86,8 +87,8 @@ export default function ClockBar() {
           color: 'var(--pink)', letterSpacing: '3px', textTransform: 'uppercase',
         }}>BPM</span>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          <button onClick={() => setBpm(b => Math.min(250, b + 1))} style={{ ...inactiveBtnStyle, padding: '1px 6px', fontSize: '11px' }}>▲</button>
-          <button onClick={() => setBpm(b => Math.max(40, b - 1))} style={{ ...inactiveBtnStyle, padding: '1px 6px', fontSize: '11px' }}>▼</button>
+          <button onClick={() => updateBpm(Math.min(250, bpm + 1))} style={{ ...inactiveBtnStyle, padding: '1px 6px', fontSize: '11px' }}>▲</button>
+          <button onClick={() => updateBpm(Math.max(40, bpm - 1))} style={{ ...inactiveBtnStyle, padding: '1px 6px', fontSize: '11px' }}>▼</button>
         </div>
         {editing ? (
           <input
