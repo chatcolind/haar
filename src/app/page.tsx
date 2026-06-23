@@ -11,6 +11,7 @@ import FooterBar from '@/components/FooterBar';
 import { useAudio } from '@/hooks/useAudio';
 import { useBankEngine } from '@/hooks/useBankEngine';
 import { Snapshot } from '@/audio/snapshot';
+import { PRESETS, Preset } from '@/audio/presets';
 
 const EFFECT_TYPES = [
   'Reverb','Tape','Delay','Chorus','Filter','Pitch','Modulate','Grain',
@@ -129,10 +130,12 @@ function BankPicker({ source, onSelect, onCancel, banks }: {
   );
 }
 
-function ToneControls({ audio, bpm, onSnapshotLoad }: {
+function ToneControls({ audio, bpm, onSnapshotLoad, onPresetLoad, onLoadPreset }: {
   audio: ReturnType<typeof useAudio>;
   bpm: number;
   onSnapshotLoad?: (cb: (snap: Snapshot) => void) => void;
+  onPresetLoad?: (cb: (p: Preset) => void) => void;
+  onLoadPreset?: (p: Preset) => void;
 }) {
   const [unisonVoices, setUnisonVoices] = useState(1);
   const [unisonDetune, setUnisonDetune] = useState(20);
@@ -197,6 +200,25 @@ function ToneControls({ audio, bpm, onSnapshotLoad }: {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'10px', width:'220px' }}>
+
+      {/* Presets */}
+      <div style={{ background:'var(--cream-dark)', border:'1px solid var(--border)', borderLeft:'3px solid var(--pink)', padding:'8px 10px' }}>
+        <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>PRESETS — TAP TO PLAY</div>
+        <div style={{ display:'flex', flexDirection:'column', gap:'3px' }}>
+          {PRESETS.map((p, i) => (
+            <button key={p.name} onClick={() => onLoadPreset?.(p)} style={{
+              fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'12px', letterSpacing:'1px',
+              textAlign:'left' as const, padding:'5px 8px', cursor:'pointer',
+              background:'var(--cream-light)', border:'1px solid var(--border)',
+              borderLeft:`2px solid ${['#E8B800','#1B5CE8','#D63020','#9020C0','#80C0E0','#808040'][i]}`,
+              color:'var(--dark)', display:'flex', justifyContent:'space-between', alignItems:'center',
+            }}>
+              <span>{p.name}</span>
+              <span style={{ fontFamily:'Space Mono, monospace', fontSize:'8px', color:'var(--light)' }}>{p.description}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Source selector */}
       <div style={{ display:'flex', gap:'3px', flexWrap:'wrap' }}>
@@ -412,7 +434,7 @@ function FieldControls({ recRunning, recSecs, onRec, onStop }: {
   );
 }
 
-function SignalSection({ inputLabel, isField=false, chain, bankEngine, audio, bpm, editingBankId, onSnapshotLoad }: {
+function SignalSection({ inputLabel, isField=false, chain, bankEngine, audio, bpm, editingBankId, onSnapshotLoad, onPresetLoad, onLoadPreset }: {
   inputLabel:string; isField?:boolean;
   chain: ReturnType<typeof useChain>;
   bankEngine: ReturnType<typeof useBankEngine>;
@@ -420,6 +442,8 @@ function SignalSection({ inputLabel, isField=false, chain, bankEngine, audio, bp
   bpm: number;
   editingBankId: number | null;
   onSnapshotLoad?: (cb: (snap: Snapshot) => void) => void;
+  onPresetLoad?: (cb: (p: Preset) => void) => void;
+  onLoadPreset?: (p: Preset) => void;
 }) {
   const [showPicker, setShowPicker]   = useState(false);
   const [showEffects, setShowEffects] = useState(false);
@@ -477,7 +501,7 @@ function SignalSection({ inputLabel, isField=false, chain, bankEngine, audio, bp
           onReset={() => { setBallX(1.0); setBallY(0.8); audio.onBallMove(1.0,0.8); }}
         />
         {!isField ? (
-          <ToneControls audio={audio} bpm={bpm} onSnapshotLoad={onSnapshotLoad} />
+          <ToneControls audio={audio} bpm={bpm} onSnapshotLoad={onSnapshotLoad} onPresetLoad={onPresetLoad} onLoadPreset={onLoadPreset} />
         ) : (
           <FieldControls recRunning={recRunning} recSecs={recSecs} onRec={startRec} onStop={stopRec} />
         )}
@@ -584,6 +608,68 @@ export default function Home() {
     snapshotLoaderRef.current = cb;
   }, []);
 
+  const presetLoaderRef = useRef<((p: Preset) => void) | null>(null);
+  const handlePresetLoad = useCallback((cb: (p: Preset) => void) => {
+    presetLoaderRef.current = cb;
+  }, []);
+
+  // Ball state lifted so presets can set it
+  const [toneBallX, setToneBallX] = useState(1.0);
+  const [toneBallY, setToneBallY] = useState(0.8);
+
+  const handleLoadPreset = useCallback((p: Preset) => {
+    // 1. Stop anything currently playing
+    audio.stop();
+
+    // 2. Load the effects chain
+    toneChain.loadFromSnapshot(p.effects.map(e => ({
+      name: e.name, dotX: 0.5, dotY: 0.5, level: 70, muted: false,
+    })));
+
+    // 3. Set ToneControls local state (unison, scale, steps, pattern, rate)
+    if (presetLoaderRef.current) presetLoaderRef.current(p);
+
+    // 4. Set audio engine state
+    audio.changeNote(p.rootNote, p.octave);
+    audio.changeShape(p.shape);
+    audio.setNoise(false);
+    audio.changeOscillator(p.oscType);
+    audio.setTriggerMode(p.triggerMode);
+    audio.updateArpConfig({
+      scale: p.scale, steps: p.steps, pattern: p.pattern,
+      stepRate: p.stepRate, bpm: p.bpm,
+    });
+    setBpm(p.bpm);
+    audio.setBpm(p.bpm);
+
+    // 5. Set ball
+    setToneBallX(p.ballX);
+    setToneBallY(p.ballY);
+
+    // 6. Start playing, then apply unison, ball, effect params, noise once audio is live
+    setTimeout(() => {
+      audio.play({
+        scale: p.scale, steps: p.steps, pattern: p.pattern,
+        stepRate: p.stepRate, bpm: p.bpm,
+      });
+
+      setTimeout(() => {
+        audio.setUnison(p.unisonVoices, p.unisonDetune);
+        audio.onBallMove(p.ballX, p.ballY);
+        if (p.noise) audio.setNoise(true, 'pink');
+        // Apply each effect's parameters
+        p.effects.forEach((eff, idx) => {
+          const mod = toneChain.modules[idx];
+          if (mod) {
+            eff.params.forEach((val, pIdx) => {
+              audio.onEffectParamChange?.(mod.id, eff.name, pIdx, val);
+            });
+          }
+        });
+      }, 250);
+    }, 150);
+  }, [audio, toneChain]);
+
   // When edit is pressed on a bank — load snapshot into tone controls
   const handleEditBank = useCallback((bankId: number) => {
     const snapshot = bankEngine.getEditSnapshot(bankId);
@@ -632,6 +718,8 @@ export default function Home() {
               bpm={bpm}
               editingBankId={bankEngine.editingBankId}
               onSnapshotLoad={handleSnapshotLoad}
+              onPresetLoad={handlePresetLoad}
+              onLoadPreset={handleLoadPreset}
             />
           </div>
           <div style={{ paddingLeft:'28px' }}>
