@@ -442,9 +442,15 @@ function SignalSection({ inputLabel, isField=false, chain, bankEngine, audio, bp
             <ChainModule
               name={mod.name} stage={`fx · stage ${idx+1}`}
               accentColor={ALL_ACCENTS[mod.name]||'var(--light)'}
-              isActive={mod.id===chain.activeId} volume={mod.volume} isMuted={mod.muted}
+              isActive={mod.id===chain.activeId} isMuted={mod.muted}
+              params={mod.params}
               onActivate={() => chain.setActiveId(mod.id)}
-              onVolumeChange={v => chain.updateModule(mod.id,{volume:v})}
+              onParamChange={(paramIdx, val) => {
+                const newParams = [...(mod.params ?? [])];
+                newParams[paramIdx] = val;
+                chain.updateModule(mod.id, { params: newParams });
+                audio.onEffectParamChange?.(mod.id, mod.name, paramIdx, val);
+              }}
               onMute={() => chain.updateModule(mod.id,{muted:!mod.muted})}
               onRemove={() => chain.removeEffect(mod.id)}
             />

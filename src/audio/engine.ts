@@ -376,3 +376,117 @@ export function setBallPosition(x: number, y: number): void {
   if (dryGain) dryGain.gain.rampTo(1 - y, 0.05);
   if (wetGain) wetGain.gain.rampTo(y, 0.05);
 }
+
+// ── Per-effect parameter control ──────────────────────────────────────────────
+export function applyEffectParam(id: number, name: string, paramIdx: number, value: number): void {
+  const effect = chainEffects.find(e => e.id === id);
+  if (!effect || effect.muted) return;
+  const node = effect.node as any;
+  const pct  = value / 100;
+
+  try {
+    // Custom smooth classes — use setParams(x, y)
+    // We store last known x/y per effect and update the changed axis
+    if (!applyEffectParam._state) applyEffectParam._state = {};
+    const key = `${id}`;
+    if (!applyEffectParam._state[key]) applyEffectParam._state[key] = [0.5, 0.5];
+    const [cx, cy] = applyEffectParam._state[key];
+
+    switch (name) {
+      case 'Reverb': {
+        // paramIdx 0=decay(x), 1=pre-delay(x2), 2=wet(y)
+        // Map: x=room size via feedback, y=wet
+        if (paramIdx === 0) {
+          const nx = (value - 0.5) / (20 - 0.5); // decay 0.5-20s → 0-1
+          applyEffectParam._state[key] = [nx, cy];
+          node.setParams?.(nx, cy);
+        }
+        if (paramIdx === 1) {
+          // pre-delay — set directly on delays
+          if (node._delays) node._delays.forEach((d: any) => { d.delayTime.rampTo(value/1000, 0.1); });
+        }
+        if (paramIdx === 2) {
+          applyEffectParam._state[key] = [cx, pct];
+          node.setParams?.(cx, pct);
+        }
+        break;
+      }
+      case 'Tape': {
+        // x=wow/flutter, y=wet
+        if (paramIdx === 0) { applyEffectParam._state[key] = [pct, cy]; node.setParams?.(pct, cy); }
+        if (paramIdx === 1) { applyEffectParam._state[key] = [pct, cy]; node.setParams?.(pct, cy); } // HF maps to x too
+        if (paramIdx === 2) { applyEffectParam._state[key] = [cx, pct]; node.setParams?.(cx, pct); }
+        break;
+      }
+      case 'Fuzz': {
+        // x=drive, y=wet
+        if (paramIdx === 0) { applyEffectParam._state[key] = [pct, cy]; node.setParams?.(pct, cy); }
+        if (paramIdx === 1) { applyEffectParam._state[key] = [cx, pct]; node.setParams?.(cx, pct); }
+        break;
+      }
+      case 'Crush': {
+        if (paramIdx === 0) { applyEffectParam._state[key] = [pct, cy]; node.setParams?.(pct, cy); }
+        if (paramIdx === 1) { applyEffectParam._state[key] = [cx, pct]; node.setParams?.(cx, pct); }
+        break;
+      }
+      case 'Delay': {
+        if (paramIdx === 0) node.delayTime?.rampTo(pct * 1.5, 0.2);
+        if (paramIdx === 1) node.feedback?.rampTo(pct * 0.95, 0.1);
+        if (paramIdx === 2) node.wet?.rampTo(pct, 0.1);
+        break;
+      }
+      case 'Chorus':
+      case 'Grain': {
+        if (paramIdx === 0) node.frequency?.rampTo(pct * 8, 0.1);
+        if (paramIdx === 1) { node.depth = pct; }
+        if (paramIdx === 2) node.wet?.rampTo(pct, 0.1);
+        break;
+      }
+      case 'Filter': {
+        if (paramIdx === 0) {
+          const freq = Math.pow(10, pct * (Math.log10(18000) - Math.log10(80)) + Math.log10(80));
+          node.frequency?.rampTo(freq, 0.1);
+        }
+        if (paramIdx === 1) node.Q?.rampTo(pct * 18, 0.1);
+        break;
+      }
+      case 'Pitch': {
+        if (paramIdx === 0) node.pitch = Math.round(value);
+        if (paramIdx === 1) node.wet?.rampTo(pct, 0.1);
+        break;
+      }
+      case 'Modulate': {
+        if (paramIdx === 0) node.frequency?.rampTo(pct * 5, 0.2);
+        if (paramIdx === 1) node.depth?.rampTo(pct, 0.1);
+        break;
+      }
+      case 'Shimmer': {
+        if (paramIdx === 0) node.order = Math.round(2 + pct * 78);
+        if (paramIdx === 1) node.wet?.rampTo(pct, 0.1);
+        break;
+      }
+      case 'Warp': {
+        if (paramIdx === 0) node.frequency?.rampTo((pct - 0.5) * 600, 0.2);
+        if (paramIdx === 1) node.wet?.rampTo(pct, 0.1);
+        break;
+      }
+      case 'Wobble': {
+        if (paramIdx === 0) node.frequency?.rampTo(pct * 8, 0.1);
+        if (paramIdx === 1) node.depth?.rampTo(pct * 0.5, 0.1);
+        break;
+      }
+      case 'Pulse': {
+        if (paramIdx === 0) node.frequency?.rampTo(pct * 10, 0.1);
+        if (paramIdx === 1) node.depth?.rampTo(pct, 0.1);
+        break;
+      }
+      case 'Space': {
+        if (paramIdx === 0) node.delayTime?.rampTo(pct * 1.2, 0.2);
+        if (paramIdx === 1) node.feedback?.rampTo(pct * 0.9, 0.1);
+        if (paramIdx === 2) node.wet?.rampTo(pct, 0.1);
+        break;
+      }
+    }
+  } catch { /* ignore */ }
+}
+applyEffectParam._state = {} as Record<string, [number, number]>;
