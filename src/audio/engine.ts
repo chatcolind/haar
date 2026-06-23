@@ -10,6 +10,9 @@ interface ChainEffect {
 
 let mainSynth: Tone.Synth | null = null;
 let masterGain: Tone.Gain | null = null;
+let masterFilter: Tone.Filter | null = null;
+let dryGain: Tone.Gain | null = null;
+let wetGain: Tone.Gain | null = null;
 let chainEffects: ChainEffect[] = [];
 let triggerLoop: Tone.Loop | Tone.Sequence | null = null;
 let currentMode = 'FREE';
@@ -63,32 +66,53 @@ function duckAndRewire(fn: () => void): void {
 }
 
 function rewireChain(): void {
-  if (!mainSynth || !masterGain) return;
+  if (!mainSynth || !masterFilter) return;
   try { mainSynth.disconnect(); } catch {}
   chainEffects.forEach(e => { try { e.node.disconnect(); } catch {} });
+
   const active = chainEffects.filter(e => !e.muted);
+  const dest = wetGain ?? masterFilter;
+
+  // Dry path — synth always connects to dryGain
+  if (dryGain) mainSynth.connect(dryGain);
+
+  // Wet path — synth through effects chain to wetGain
   if (active.length === 0) {
-    mainSynth.connect(masterGain);
+    mainSynth.connect(dest);
     return;
   }
   mainSynth.connect(active[0].node as any);
   for (let i = 0; i < active.length - 1; i++) {
     (active[i].node as any).connect(active[i + 1].node as any);
   }
-  (active[active.length - 1].node as any).connect(masterGain);
+  (active[active.length - 1].node as any).connect(dest);
 }
 
 export function initEngine(note: string, shape: number): void {
   teardown();
   currentNote = note;
   const limiter = new Tone.Limiter(-1).toDestination();
-  const compressor = new Tone.Compressor({ threshold: -12, ratio: 3, attack: 0.01, release: 0.3 }).connect(limiter);
-  masterGain = new Tone.Gain(0.8).connect(compressor);
+  // Aggressive compression — auto-levels drone vs arp
+  const compressor = new Tone.Compressor({
+    threshold: -24,
+    ratio: 8,
+    attack: 0.003,
+    release: 0.5,
+    knee: 6,
+  }).connect(limiter);
+  masterGain = new Tone.Gain(1.2).connect(compressor);
+
+  // Master filter — ball X axis controls cutoff
+  masterFilter = new Tone.Filter({ frequency: 18000, type: 'lowpass', rolloff: -24 }).connect(masterGain);
+  // Wet/dry — ball Y axis
+  dryGain = new Tone.Gain(0).connect(masterFilter);
+  wetGain = new Tone.Gain(1).connect(masterFilter);
   mainSynth = new Tone.Synth({
     oscillator: { type: currentOscType as any },
     envelope: shapeToEnv(shape),
-    volume: -6,
+    volume: 0,
   });
+  mainSynth.volume.value = 20;
   mainSynth.set({ detune: (Math.random() - 0.5) * 4 });
   rewireChain();
 }
@@ -120,6 +144,11 @@ export function changeOscillator(type: string): void {
 function stopSequence(): void {
   try { triggerLoop?.stop(0); triggerLoop?.dispose(); } catch {}
   triggerLoop = null;
+  // Don't stop the global Transport here — bank engines may be using it
+}
+
+export function stopTransportIfIdle(): void {
+  // Call this only when you know no banks are running
   try { Tone.getTransport().stop(); Tone.getTransport().cancel(); } catch {}
 }
 
@@ -128,6 +157,8 @@ export function startFree(note: string, shape: number, bpm: number): void {
   currentMode = 'FREE';
   currentNote = note;
   if (!mainSynth) return;
+  // Restore volume for drone/free mode
+  mainSynth.volume.value = 20;
   Tone.getTransport().bpm.value = bpm;
   mainSynth.set({ envelope: shapeToEnv(shape) });
   const dur = noteDuration(shape);
@@ -207,6 +238,8 @@ export function startArp(config: {
   stopSequence();
   currentMode = 'ARP';
   if (!mainSynth) return;
+  // Pull arp volume down — many triggers per bar = much louder perceived than drone
+  mainSynth.volume.value = -40;
   Tone.getTransport().bpm.value = config.bpm;
   mainSynth.set({ envelope: shapeToEnv(config.shape) });
   arpNotes = buildNotes(config.rootNote, config.octave, config.scale, config.steps, config.pattern);
@@ -230,7 +263,6 @@ export function updateArpNotes(config: {
   mainSynth.set({ envelope: shapeToEnv(config.shape) });
   const dur = noteDuration(config.shape);
   try { triggerLoop?.stop(0); triggerLoop?.dispose(); } catch {}
-  try { Tone.getTransport().stop(); Tone.getTransport().cancel(); } catch {}
   let idx = 0;
   triggerLoop = new Tone.Sequence(time => {
     mainSynth?.triggerAttackRelease(arpNotes[idx % arpNotes.length], dur, time);
@@ -244,21 +276,26 @@ export function updateShape(shape: number, note: string, mode: string): void {
   if (!mainSynth) return;
   mainSynth.set({ envelope: shapeToEnv(shape) });
   if (mode === 'FREE') {
-    if (shape > 0.85) {
-      stopSequence();
-      mainSynth.triggerAttack(note);
-    } else if (!triggerLoop) {
-      mainSynth.triggerRelease();
-      const dur = noteDuration(shape);
-      setTimeout(() => {
-        if (!mainSynth) return;
-        try { Tone.getTransport().stop(); Tone.getTransport().cancel(); } catch {}
-        triggerLoop = new Tone.Loop(time => {
-          mainSynth?.triggerAttackRelease(currentNote, dur, time);
-        }, '4n');
-        (triggerLoop as Tone.Loop).start(0);
-        Tone.getTransport().start('+0.05');
-      }, 200);
+    if (shape > 0.4) {
+      // Moving into swell/drone — stop loop, hold note
+      if (triggerLoop) {
+        stopSequence();
+        mainSynth.triggerAttack(note);
+      }
+    } else {
+      // Moving into pluck/ping — start loop if not already running
+      if (!triggerLoop) {
+        mainSynth.triggerRelease();
+        const dur = noteDuration(shape);
+        setTimeout(() => {
+          if (!mainSynth) return;
+          triggerLoop = new Tone.Loop(time => {
+            mainSynth?.triggerAttackRelease(currentNote, dur, time);
+          }, '4n');
+          (triggerLoop as Tone.Loop).start(0);
+          Tone.getTransport().start('+0.05');
+        }, 200);
+      }
     }
   }
 }
@@ -326,4 +363,16 @@ export function disposeDrone(): void { teardown(); }
 
 export function setTransportBpm(bpm: number): void {
   Tone.getTransport().bpm.value = bpm;
+}
+
+// ── Ball master control ───────────────────────────────────────────────────────
+export function setBallPosition(x: number, y: number): void {
+  // X = filter cutoff (logarithmic 20Hz–18kHz)
+  if (masterFilter) {
+    const freq = Math.pow(10, x * (Math.log10(18000) - Math.log10(20)) + Math.log10(20));
+    masterFilter.frequency.rampTo(Math.min(18000, Math.max(20, freq)), 0.05);
+  }
+  // Y = wet/dry blend (0=dry, 1=fully wet)
+  if (dryGain) dryGain.gain.rampTo(1 - y, 0.05);
+  if (wetGain) wetGain.gain.rampTo(y, 0.05);
 }

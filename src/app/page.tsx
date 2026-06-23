@@ -9,23 +9,13 @@ import ChainModule from '@/components/ChainModule';
 import Banks from '@/components/Banks';
 import FooterBar from '@/components/FooterBar';
 import { useAudio } from '@/hooks/useAudio';
+import { useBankEngine } from '@/hooks/useBankEngine';
+import { Snapshot } from '@/audio/snapshot';
 
 const EFFECT_TYPES = [
   'Reverb','Tape','Delay','Chorus','Filter','Pitch','Modulate','Grain',
   'Fuzz','Crush','Shimmer','Warp','Wobble','Pulse','Space',
 ];
-
-const SCALES: Record<string, number[]> = {
-  'Ionian (Major)':[0,2,4,5,7,9,11],'Dorian':[0,2,3,5,7,9,10],
-  'Phrygian':[0,1,3,5,7,8,10],'Phrygian Dominant':[0,1,4,5,7,8,10],
-  'Lydian':[0,2,4,6,7,9,11],'Lydian Dominant':[0,2,4,6,7,9,10],
-  'Mixolydian':[0,2,4,5,7,9,10],'Aeolian (Minor)':[0,2,3,5,7,8,10],
-  'Locrian':[0,1,3,5,6,8,10],'Melodic Minor':[0,2,3,5,7,9,11],
-  'Harmonic Minor':[0,2,3,5,7,8,11],'Hungarian Minor':[0,2,3,6,7,8,11],
-  'Persian':[0,1,4,5,6,8,11],'Whole Tone':[0,2,4,6,8,10],
-  'Diminished':[0,2,3,5,6,8,9,11],'Pentatonic Minor':[0,3,5,7,10],
-  'Pentatonic Major':[0,2,4,7,9],'Blues':[0,3,5,6,7,10],
-};
 
 const SCALE_HINTS: Record<string, string> = {
   'Ionian (Major)':'Bright · resolved · uplifting','Dorian':'Jazzy · hopeful minor',
@@ -39,10 +29,10 @@ const SCALE_HINTS: Record<string, string> = {
   'Pentatonic Major':'Open · positive','Blues':'Expressive · soulful',
 };
 
-const SCALE_NAMES = Object.keys(SCALES);
-const PATTERNS = ['Up','Down','Up/Down','Random'];
-const STEP_RATES = ['1/4','1/8','1/16','1/32'];
-const RATE_TO_TONE: Record<string,string> = { '1/4':'4n', '1/8':'8n', '1/16':'16n', '1/32':'32n' };
+const SCALE_NAMES = Object.keys(SCALE_HINTS);
+const PATTERNS    = ['Up','Down','Up/Down','Random'];
+const STEP_RATES  = ['1/4','1/8','1/16','1/32'];
+const RATE_TO_TONE: Record<string,string> = { '1/4':'4n','1/8':'8n','1/16':'16n','1/32':'32n' };
 
 const EXTENDED_ACCENTS: Record<string,string> = {
   Fuzz:'#C03020',Crush:'#606060',Shimmer:'#80C0E0',
@@ -71,13 +61,10 @@ function useChain(initial: string[], audio: ReturnType<typeof useAudio>) {
   const [modules, setModules] = useState<EffectModule[]>(
     initial.map((name, i) => ({ id:i+1, name, volume:70, muted:false, dotX:0.5, dotY:0.5, level:70 }))
   );
-  const [activeId, setActiveId] = useState<number>(1);
+  const [activeId, setActiveId] = useState<number>(initial.length > 0 ? 1 : -1);
   const activeModule = modules.find(m => m.id === activeId) || modules[0];
 
-  // Sync chain to audio engine whenever modules change
-  useEffect(() => {
-    audio.syncChainModules(modules);
-  }, [modules]);
+  useEffect(() => { audio.syncChainModules(modules); }, [modules]);
 
   const addEffect = (name: string) => {
     const id = nextId++;
@@ -98,18 +85,24 @@ function useChain(initial: string[], audio: ReturnType<typeof useAudio>) {
     setModules(prev => prev.map(m => {
       if (m.id !== id) return m;
       const updated = { ...m, ...updates };
-      // If dot or level changed, update audio immediately
-      if (updates.dotX !== undefined || updates.dotY !== undefined || updates.level !== undefined) {
-        audio.onDotMove(id, updated.dotX, updated.dotY, updated.level);
+      if (updates.dotX !== undefined || updates.dotY !== undefined) {
+        audio.onDotMove(id, updated.dotX, updated.dotY);
       }
-      if (updates.muted !== undefined) {
-        audio.onMuteEffect(id, updated.muted);
-      }
+      if (updates.muted !== undefined) audio.onMuteEffect(id, updated.muted);
       return updated;
     }));
   };
 
-  return { modules, activeId, setActiveId, activeModule, addEffect, removeEffect, updateModule };
+  const loadFromSnapshot = (effects: Snapshot['effects']) => {
+    const newModules = effects.map((e, i) => ({
+      id: nextId++, name: e.name, volume: 70,
+      muted: e.muted, dotX: e.dotX, dotY: e.dotY, level: e.level,
+    }));
+    setModules(newModules);
+    if (newModules.length > 0) setActiveId(newModules[0].id);
+  };
+
+  return { modules, activeId, setActiveId, activeModule, addEffect, removeEffect, updateModule, loadFromSnapshot };
 }
 
 const BANK_PICKER_COLORS = ['#1B5CE8','#D46090','#E8B800','#20C060','#D63020','#9020C0'];
@@ -136,45 +129,53 @@ function BankPicker({ source, onSelect, onCancel, banks }: {
   );
 }
 
-function PlayButton({ isPlaying, onPlay, onStop }: { isPlaying:boolean; onPlay:()=>void; onStop:()=>void }) {
-  return (
-    <button onClick={isPlaying ? onStop : onPlay} style={{ width:'100%', padding:'16px', fontFamily:'Rajdhani, sans-serif', fontWeight:700, fontSize:'20px', letterSpacing:'4px', textTransform:'uppercase', cursor:'pointer', border:`2px solid ${isPlaying?'var(--pink)':'var(--blue)'}`, background:isPlaying?'var(--pink)':'var(--blue)', color:'white', clipPath:'polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%)', transition:'background 0.2s, border-color 0.2s', display:'flex', alignItems:'center', justifyContent:'center', gap:'10px' }}>
-      <span style={{ fontSize:'18px' }}>{isPlaying?'■':'▶'}</span>
-      {isPlaying?'STOP':'PLAY'}
-    </button>
-  );
-}
-
-function ToneControls({ audio, bpm = 110 }: { audio: ReturnType<typeof useAudio>; bpm?: number }) {
+function ToneControls({ audio, bpm, onSnapshotLoad }: {
+  audio: ReturnType<typeof useAudio>;
+  bpm: number;
+  onSnapshotLoad?: (cb: (snap: Snapshot) => void) => void;
+}) {
   const [scale, setScaleState]       = useState('Dorian');
   const [steps, setStepsState]       = useState(4);
   const [pattern, setPatternState]   = useState('Up');
   const [stepRate, setStepRateState] = useState('1/16');
 
-  const setScale   = (v: string) => { setScaleState(v);   audio.updateArpConfig({ scale: v, bpm }); };
-  const setSteps   = (v: number) => { setStepsState(v);   audio.updateArpConfig({ steps: v, bpm }); };
-  const setPattern = (v: string) => { setPatternState(v); audio.updateArpConfig({ pattern: v, bpm }); };
-  const setStepRate = (v: string) => { setStepRateState(v); audio.updateArpConfig({ stepRate: RATE_TO_TONE[v] ?? v, bpm }); };
+  const setScale    = (v: string) => { setScaleState(v);   audio.updateArpConfig({ scale:v, bpm }); };
+  const setSteps    = (v: number) => { setStepsState(v);   audio.updateArpConfig({ steps:v, bpm }); };
+  const setPattern  = (v: string) => { setPatternState(v); audio.updateArpConfig({ pattern:v, bpm }); };
+  const setStepRate = (v: string) => { setStepRateState(v); audio.updateArpConfig({ stepRate:RATE_TO_TONE[v]??v, bpm }); };
+
+  // Expose a way to load a snapshot into these controls
+  useEffect(() => {
+    if (onSnapshotLoad) {
+      onSnapshotLoad((snap: Snapshot) => {
+        setScaleState(snap.arpConfig.scale);
+        setStepsState(snap.arpConfig.steps);
+        setPatternState(snap.arpConfig.pattern);
+        const displayRate = Object.entries(RATE_TO_TONE).find(([,v]) => v === snap.stepRate)?.[0] ?? '1/16';
+        setStepRateState(displayRate);
+      });
+    }
+  }, [onSnapshotLoad]);
 
   const KEYS = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 
   const smBtn = (active: boolean, ac = 'var(--blue)', ab = 'var(--blue-dark)') => ({
-    fontFamily: 'Space Mono, monospace' as const, fontSize: '11px', padding: '4px 8px',
-    cursor: 'pointer' as const,
+    fontFamily:'Space Mono, monospace' as const, fontSize:'11px', padding:'4px 8px',
+    cursor:'pointer' as const,
     background: active ? ac : 'var(--cream-light)',
     border: `1px solid ${active ? ab : 'var(--border)'}`,
     color: active ? 'white' : 'var(--mid)',
   });
 
   const selectStyle = {
-    fontFamily: 'Rajdhani, sans-serif' as const, fontWeight: 500,
-    fontSize: '13px', padding: '6px 10px', flex: 1 as const,
-    background: 'var(--cream-light)', border: '1px solid var(--border)',
-    color: 'var(--dark)', cursor: 'pointer' as const,
+    fontFamily:'Rajdhani, sans-serif' as const, fontWeight:500,
+    fontSize:'13px', padding:'6px 10px', flex:1 as const,
+    background:'var(--cream-light)', border:'1px solid var(--border)',
+    color:'var(--dark)', cursor:'pointer' as const,
   };
 
   const rowLabel = (t: string) => (
-    <span style={{ fontFamily: 'Space Mono, monospace', fontSize: '11px', color: 'var(--mid)', letterSpacing: '1px', width: '48px', flexShrink: 0 }}>{t}</span>
+    <span style={{ fontFamily:'Space Mono, monospace', fontSize:'11px', color:'var(--mid)', letterSpacing:'1px', width:'48px', flexShrink:0 }}>{t}</span>
   );
 
   const shapeLabel = audio.shape < 0.25 ? 'PING' : audio.shape < 0.55 ? 'PLUCK' : audio.shape < 0.8 ? 'SWELL' : 'DRONE';
@@ -182,32 +183,29 @@ function ToneControls({ audio, bpm = 110 }: { audio: ReturnType<typeof useAudio>
 
   const handlePlay = () => {
     if (audio.isPlaying) { audio.stop(); return; }
-    audio.play({ scale, steps, pattern, stepRate: RATE_TO_TONE[stepRate] ?? stepRate, bpm });
+    audio.play({ scale, steps, pattern, stepRate: RATE_TO_TONE[stepRate]??stepRate, bpm });
   };
 
   const playBtnLabel = () => {
-    if (audio.isPlaying) return { icon: '■', label: 'STOP' };
-    if (audio.triggerMode === 'BEAT') return { icon: '▶', label: 'BEAT' };
-    if (audio.triggerMode === 'ARP')  return { icon: '▶', label: 'ARP' };
-    return { icon: '▶', label: 'PLAY' };
+    if (audio.isPlaying) return { icon:'■', label:'STOP' };
+    if (audio.triggerMode === 'ARP') return { icon:'▶', label:'ARP' };
+    return { icon:'▶', label:'PLAY' };
   };
   const { icon, label } = playBtnLabel();
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '220px' }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:'10px', width:'220px' }}>
 
       {/* Source selector */}
-      <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
+      <div style={{ display:'flex', gap:'3px', flexWrap:'wrap' }}>
         {[
-          { id: 'sine',     label: 'SINE' },
-          { id: 'triangle', label: 'TRI' },
-          { id: 'sawtooth', label: 'SAW' },
-          { id: 'square',   label: 'SQR' },
-          { id: 'fmsine',   label: 'FM' },
+          { id:'sine', label:'SINE' }, { id:'triangle', label:'TRI' },
+          { id:'sawtooth', label:'SAW' }, { id:'square', label:'SQR' },
+          { id:'fmsine', label:'FM' },
         ].map(({ id, label }) => (
           <button key={id} onClick={() => audio.changeOscillator(id)} style={{
-            fontFamily: 'Space Mono, monospace', fontSize: '10px',
-            padding: '4px 8px', cursor: 'pointer', letterSpacing: '1px',
+            fontFamily:'Space Mono, monospace', fontSize:'10px',
+            padding:'4px 8px', cursor:'pointer', letterSpacing:'1px',
             background: audio.oscillator === id ? 'var(--blue)' : 'var(--cream-light)',
             border: `1px solid ${audio.oscillator === id ? 'var(--blue-dark)' : 'var(--border)'}`,
             color: audio.oscillator === id ? 'white' : 'var(--mid)',
@@ -217,131 +215,114 @@ function ToneControls({ audio, bpm = 110 }: { audio: ReturnType<typeof useAudio>
       </div>
 
       {/* Shape dial */}
-      <div style={{ background: 'var(--cream-dark)', border: '1px solid var(--border)', borderLeft: `3px solid ${shapeColor}`, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px', transition: 'border-color 0.3s' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontFamily: 'Space Mono, monospace', fontSize: '10px', color: 'var(--light)', letterSpacing: '1px' }}>PING</span>
-          <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '14px', letterSpacing: '3px', color: shapeColor, transition: 'color 0.2s' }}>{shapeLabel}</span>
-          <span style={{ fontFamily: 'Space Mono, monospace', fontSize: '10px', color: 'var(--light)', letterSpacing: '1px' }}>DRONE</span>
+      <div style={{ background:'var(--cream-dark)', border:'1px solid var(--border)', borderLeft:`3px solid ${shapeColor}`, padding:'10px 12px', display:'flex', flexDirection:'column', gap:'6px', transition:'border-color 0.3s' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <span style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--light)', letterSpacing:'1px' }}>PING</span>
+          <span style={{ fontFamily:'Rajdhani, sans-serif', fontWeight:700, fontSize:'14px', letterSpacing:'3px', color:shapeColor, transition:'color 0.2s' }}>{shapeLabel}</span>
+          <span style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--light)', letterSpacing:'1px' }}>DRONE</span>
         </div>
         <div
-          style={{ height: '4px', background: 'var(--cream-light)', position: 'relative' as const, cursor: 'pointer', borderRadius: '2px' }}
-          onClick={e => { const r = e.currentTarget.getBoundingClientRect(); audio.changeShape(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))); }}
-          onMouseMove={e => { if (e.buttons !== 1) return; const r = e.currentTarget.getBoundingClientRect(); audio.changeShape(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))); }}
+          style={{ height:'4px', background:'var(--cream-light)', position:'relative' as const, cursor:'pointer', borderRadius:'2px' }}
+          onClick={e => { const r=e.currentTarget.getBoundingClientRect(); audio.changeShape(Math.min(1,Math.max(0,(e.clientX-r.left)/r.width))); }}
+          onMouseMove={e => { if(e.buttons!==1) return; const r=e.currentTarget.getBoundingClientRect(); audio.changeShape(Math.min(1,Math.max(0,(e.clientX-r.left)/r.width))); }}
         >
-          <div style={{ height: '100%', width: `${audio.shape * 100}%`, background: shapeColor, borderRadius: '2px', transition: 'background 0.2s' }} />
-          <div style={{ position: 'absolute' as const, top: '-6px', left: `${audio.shape * 100}%`, transform: 'translateX(-50%)', width: '14px', height: '14px', borderRadius: '50%', background: 'var(--cream-light)', border: `2px solid ${shapeColor}`, transition: 'border-color 0.2s' }} />
+          <div style={{ height:'100%', width:`${audio.shape*100}%`, background:shapeColor, borderRadius:'2px', transition:'background 0.2s' }}/>
+          <div style={{ position:'absolute' as const, top:'-6px', left:`${audio.shape*100}%`, transform:'translateX(-50%)', width:'14px', height:'14px', borderRadius:'50%', background:'var(--cream-light)', border:`2px solid ${shapeColor}`, transition:'border-color 0.2s' }}/>
         </div>
-        <div style={{ fontFamily: 'Space Mono, monospace', fontSize: '9px', color: 'var(--light)', letterSpacing: '1px', textAlign: 'center' as const }}>drag to morph · works live</div>
+        <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'1px', textAlign:'center' as const }}>drag to morph · works live</div>
       </div>
 
       {/* Mode toggle */}
-      <div style={{ display: 'flex', gap: '4px' }}>
+      <div style={{ display:'flex', gap:'4px' }}>
         <button onClick={() => audio.setTriggerMode('FREE')} style={{
-          flex: 1, fontFamily: 'Rajdhani, sans-serif', fontWeight: 700,
-          fontSize: '12px', letterSpacing: '2px', padding: '8px 4px',
-          cursor: 'pointer', textAlign: 'center' as const,
-          background: audio.triggerMode !== 'ARP' ? 'var(--blue)' : 'var(--cream-light)',
-          border: `1px solid ${audio.triggerMode !== 'ARP' ? 'var(--blue-dark)' : 'var(--border)'}`,
-          color: audio.triggerMode !== 'ARP' ? 'white' : 'var(--mid)',
-          clipPath: 'polygon(4px 0%, 100% 0%, calc(100% - 4px) 100%, 0% 100%)',
+          flex:1, fontFamily:'Rajdhani, sans-serif', fontWeight:700,
+          fontSize:'12px', letterSpacing:'2px', padding:'8px 4px',
+          cursor:'pointer', textAlign:'center' as const,
+          background: audio.triggerMode!=='ARP'?'var(--blue)':'var(--cream-light)',
+          border:`1px solid ${audio.triggerMode!=='ARP'?'var(--blue-dark)':'var(--border)'}`,
+          color: audio.triggerMode!=='ARP'?'white':'var(--mid)',
+          clipPath:'polygon(4px 0%, 100% 0%, calc(100% - 4px) 100%, 0% 100%)',
         }}>PLAY</button>
         <button onClick={() => audio.setTriggerMode('ARP')} style={{
-          flex: 1, fontFamily: 'Rajdhani, sans-serif', fontWeight: 700,
-          fontSize: '12px', letterSpacing: '2px', padding: '8px 4px',
-          cursor: 'pointer', textAlign: 'center' as const,
-          background: audio.triggerMode === 'ARP' ? 'var(--gold)' : 'var(--cream-light)',
-          border: `1px solid ${audio.triggerMode === 'ARP' ? '#c49a00' : 'var(--border)'}`,
-          color: audio.triggerMode === 'ARP' ? '#1A1400' : 'var(--mid)',
-          clipPath: 'polygon(4px 0%, 100% 0%, calc(100% - 4px) 100%, 0% 100%)',
+          flex:1, fontFamily:'Rajdhani, sans-serif', fontWeight:700,
+          fontSize:'12px', letterSpacing:'2px', padding:'8px 4px',
+          cursor:'pointer', textAlign:'center' as const,
+          background: audio.triggerMode==='ARP'?'var(--gold)':'var(--cream-light)',
+          border:`1px solid ${audio.triggerMode==='ARP'?'#c49a00':'var(--border)'}`,
+          color: audio.triggerMode==='ARP'?'#1A1400':'var(--mid)',
+          clipPath:'polygon(4px 0%, 100% 0%, calc(100% - 4px) 100%, 0% 100%)',
         }}>ARP</button>
       </div>
 
-      {/* Play / Stop */}
+      {/* Play button */}
       <button onClick={handlePlay} style={{
-        width: '100%', padding: '14px', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700,
-        fontSize: '18px', letterSpacing: '4px', textTransform: 'uppercase', cursor: 'pointer',
-        border: `2px solid ${audio.isPlaying ? 'var(--pink)' : 'var(--blue)'}`,
-        background: audio.isPlaying ? 'var(--pink)' : 'var(--blue)', color: 'white',
-        clipPath: 'polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%)',
-        transition: 'background 0.2s, border-color 0.2s',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+        width:'100%', padding:'14px', fontFamily:'Rajdhani, sans-serif', fontWeight:700,
+        fontSize:'18px', letterSpacing:'4px', textTransform:'uppercase', cursor:'pointer',
+        border:`2px solid ${audio.isPlaying?'var(--pink)':'var(--blue)'}`,
+        background:audio.isPlaying?'var(--pink)':'var(--blue)', color:'white',
+        clipPath:'polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%)',
+        transition:'background 0.2s, border-color 0.2s',
+        display:'flex', alignItems:'center', justifyContent:'center', gap:'10px',
       }}>
-        <span style={{ fontSize: '16px' }}>{icon}</span>{label}
+        <span style={{ fontSize:'16px' }}>{icon}</span>{label}
       </button>
 
       {/* Root note */}
-      <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
+      <div style={{ display:'flex', gap:'3px', flexWrap:'wrap' }}>
         {KEYS.map(k => (
           <button key={k} onClick={() => audio.changeNote(k, audio.octave)}
-            style={{ ...smBtn(audio.rootNote === k), minWidth: '28px', textAlign: 'center' as const, padding: '4px 5px' }}
+            style={{...smBtn(audio.rootNote===k), minWidth:'28px', textAlign:'center' as const, padding:'4px 5px'}}
           >{k}</button>
         ))}
       </div>
 
       {/* Octave */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
         {rowLabel('OCT')}
-        <div style={{ display: 'flex', gap: '4px' }}>
-          {[1, 2, 3, 4].map(o => (
+        <div style={{ display:'flex', gap:'4px' }}>
+          {[1,2,3,4].map(o => (
             <button key={o} onClick={() => audio.changeNote(audio.rootNote, o)}
-              style={{ ...smBtn(audio.octave === o), padding: '5px 12px' }}
+              style={{...smBtn(audio.octave===o), padding:'5px 12px'}}
             >{o}</button>
           ))}
         </div>
       </div>
 
-      {/* BEAT options */}
-      {audio.triggerMode === 'BEAT' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px 12px', background: 'var(--cream-dark)', border: '1px solid var(--border)', borderLeft: '3px solid var(--gold)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {rowLabel('RATE')}
-            <div style={{ display: 'flex', gap: '4px' }}>
-              {STEP_RATES.map(r => (
-                <button key={r} onClick={() => setStepRate(r)} style={{ ...smBtn(stepRate === r), padding: '4px 7px', fontSize: '11px' }}>{r}</button>
-              ))}
-            </div>
-          </div>
-          <div style={{ fontFamily: 'Space Mono, monospace', fontSize: '10px', color: 'var(--light)', letterSpacing: '1px' }}>
-            fires every {stepRate} at {bpm} bpm
-          </div>
-        </div>
-      )}
-
       {/* ARP options */}
       {audio.triggerMode === 'ARP' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', background: 'var(--cream-dark)', border: '1px solid var(--border)', borderLeft: '3px solid var(--gold)' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display:'flex', flexDirection:'column', gap:'10px', padding:'12px', background:'var(--cream-dark)', border:'1px solid var(--border)', borderLeft:'3px solid var(--gold)' }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
               {rowLabel('SCALE')}
-              <select value={scale} onChange={e => setScale(e.target.value)} style={selectStyle}>
-                {SCALE_NAMES.map(s => <option key={s} value={s}>{s}</option>)}
+              <select value={scale} onChange={e=>setScale(e.target.value)} style={selectStyle}>
+                {SCALE_NAMES.map(s=><option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-            <div style={{ fontFamily: 'Space Mono, monospace', fontSize: '11px', color: 'var(--mid)', paddingLeft: '56px' }}>{SCALE_HINTS[scale]}</div>
+            <div style={{ fontFamily:'Space Mono, monospace', fontSize:'11px', color:'var(--mid)', paddingLeft:'56px' }}>{SCALE_HINTS[scale]}</div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
             {rowLabel('STEPS')}
-            <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' as const }}>
-              {[2, 3, 4, 5, 6, 7, 8].map(s => (
-                <button key={s} onClick={() => setSteps(s)} style={{ ...smBtn(steps === s), padding: '4px 7px', fontSize: '11px' }}>{s}</button>
+            <div style={{ display:'flex', gap:'3px', flexWrap:'wrap' as const }}>
+              {[2,3,4,5,6,7,8].map(s => (
+                <button key={s} onClick={()=>setSteps(s)} style={{...smBtn(steps===s),padding:'4px 7px',fontSize:'11px'}}>{s}</button>
               ))}
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
             {rowLabel('PATT')}
-            <select value={pattern} onChange={e => setPattern(e.target.value)} style={selectStyle}>
-              {PATTERNS.map(p => <option key={p} value={p}>{p}</option>)}
+            <select value={pattern} onChange={e=>setPattern(e.target.value)} style={selectStyle}>
+              {PATTERNS.map(p=><option key={p} value={p}>{p}</option>)}
             </select>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
             {rowLabel('RATE')}
-            <div style={{ display: 'flex', gap: '4px' }}>
+            <div style={{ display:'flex', gap:'4px' }}>
               {STEP_RATES.map(r => (
-                <button key={r} onClick={() => setStepRate(r)} style={{ ...smBtn(stepRate === r), padding: '4px 7px', fontSize: '11px' }}>{r}</button>
+                <button key={r} onClick={()=>setStepRate(r)} style={{...smBtn(stepRate===r),padding:'4px 7px',fontSize:'11px'}}>{r}</button>
               ))}
             </div>
           </div>
-          <div style={{ fontFamily: 'Space Mono, monospace', fontSize: '10px', color: 'var(--light)', letterSpacing: '1px' }}>
+          <div style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--light)', letterSpacing:'1px' }}>
             {steps} steps · changes apply live
           </div>
         </div>
@@ -350,7 +331,9 @@ function ToneControls({ audio, bpm = 110 }: { audio: ReturnType<typeof useAudio>
   );
 }
 
-function FieldControls({ recRunning,recSecs,onRec,onStop }: { recRunning:boolean;recSecs:number;onRec:()=>void;onStop:()=>void }) {
+function FieldControls({ recRunning, recSecs, onRec, onStop }: {
+  recRunning:boolean; recSecs:number; onRec:()=>void; onStop:()=>void;
+}) {
   const fmtTime = (s:number) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
   return (
     <div style={{ width:'220px', display:'flex', flexDirection:'column', gap:'10px' }}>
@@ -377,49 +360,72 @@ function FieldControls({ recRunning,recSecs,onRec,onStop }: { recRunning:boolean
   );
 }
 
-function SignalSection({ inputLabel,isField=false,chain,banks,onStoreToBank,audio,bpm=110 }: {
+function SignalSection({ inputLabel, isField=false, chain, bankEngine, audio, bpm, editingBankId, onSnapshotLoad }: {
   inputLabel:string; isField?:boolean;
-  chain:ReturnType<typeof useChain>;
-  banks:{ id:number; name:string; state:string }[];
-  onStoreToBank:(bankId:number,source:'TONE'|'FIELD')=>void;
-  audio?: ReturnType<typeof useAudio>;
-  bpm?: number;
+  chain: ReturnType<typeof useChain>;
+  bankEngine: ReturnType<typeof useBankEngine>;
+  audio: ReturnType<typeof useAudio>;
+  bpm: number;
+  editingBankId: number | null;
+  onSnapshotLoad?: (cb: (snap: Snapshot) => void) => void;
 }) {
   const [showPicker, setShowPicker]   = useState(false);
   const [showEffects, setShowEffects] = useState(false);
   const [recRunning, setRecRunning]   = useState(false);
+  const [ballX, setBallX] = useState(0.5);
+  const [ballY, setBallY] = useState(1.0); // start fully wet
   const [recSecs, setRecSecs]         = useState(0);
-  const [recIntervalId, setRecIntervalId] = useState<NodeJS.Timeout|null>(null);
-  const source: 'TONE'|'FIELD' = isField ? 'FIELD' : 'TONE';
+  const recIntervalRef                = useRef<NodeJS.Timeout|null>(null);
+  const source: 'TONE'|'FIELD'        = isField ? 'FIELD' : 'TONE';
 
-  const startRec = () => { setRecRunning(true);setRecSecs(0);const id=setInterval(()=>setRecSecs(s=>s+1),1000);setRecIntervalId(id); };
-  const stopRec  = () => { setRecRunning(false);if(recIntervalId)clearInterval(recIntervalId); };
+  const startRec = () => {
+    setRecRunning(true); setRecSecs(0);
+    recIntervalRef.current = setInterval(()=>setRecSecs(s=>s+1),1000);
+  };
+  const stopRec = () => {
+    setRecRunning(false);
+    if (recIntervalRef.current) clearInterval(recIntervalRef.current);
+  };
 
   const activeModule = chain.activeModule;
+
+  // Take a snapshot of current state for storing to bank
+  const takeSnapshot = useCallback((): Snapshot => {
+    return {
+      source,
+      note: `${audio.rootNote}${audio.octave}`,
+      shape: audio.shape,
+      oscType: audio.oscillator,
+      triggerMode: audio.triggerMode === 'ARP' ? 'ARP' : 'FREE',
+      bpm,
+      stepRate: audio.getArpConfig?.()?.stepRate ?? '16n',
+      arpConfig: {
+        scale: audio.getArpConfig?.()?.scale ?? 'Dorian',
+        steps: audio.getArpConfig?.()?.steps ?? 4,
+        pattern: audio.getArpConfig?.()?.pattern ?? 'Up',
+      },
+      effects: chain.modules.map(m => ({
+        name: m.name,
+        dotX: m.dotX,
+        dotY: m.dotY,
+        level: m.level,
+        muted: m.muted,
+      })),
+    };
+  }, [source, audio, bpm, chain.modules]);
 
   return (
     <div style={{ display:'flex', gap:'24px', alignItems:'flex-start' }}>
       <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:'10px', flexShrink:0, width:'220px' }}>
         <SoundBall
-          activeEffect={activeModule?.name||'Reverb'}
-          dotX={activeModule?.dotX||0.5}
-          dotY={activeModule?.dotY||0.5}
-          onDotChange={(x,y) => { if (activeModule) audio?.onDotMove?.(activeModule.id, x, y); 
-            if (activeModule) {
-              chain.updateModule(activeModule.id, { dotX:x, dotY:y });
-            }
-          }}
-          onReset={() => {
-            if (activeModule) chain.updateModule(activeModule.id, { dotX:0.5, dotY:0.5 });
-          }}
-          level={activeModule?.level||70}
-          onLevelChange={v => {
-            if (activeModule) chain.updateModule(activeModule.id, { level:v });
-          }}
-          dimmed={chain.modules.length===0}
+          dotX={ballX}
+          dotY={ballY}
+          onDotChange={(x,y) => { setBallX(x); setBallY(y); audio.onBallMove(x,y); }}
+          onDotRelease={(x,y) => { setBallX(x); setBallY(y); audio.onBallMove(x,y); }}
+          onReset={() => { setBallX(0.5); setBallY(1); audio.onBallMove(0.5,1); }}
         />
-        {!isField && audio ? (
-          <ToneControls audio={audio} bpm={bpm} />
+        {!isField ? (
+          <ToneControls audio={audio} bpm={bpm} onSnapshotLoad={onSnapshotLoad} />
         ) : (
           <FieldControls recRunning={recRunning} recSecs={recSecs} onRec={startRec} onStop={stopRec} />
         )}
@@ -434,15 +440,12 @@ function SignalSection({ inputLabel,isField=false,chain,banks,onStoreToBank,audi
           <div key={mod.id}>
             <div style={{ textAlign:'center', fontFamily:'Space Mono, monospace', fontSize:'12px', color:'var(--pink)', padding:'4px 0', background:'var(--cream)', borderLeft:'1px solid var(--border)', borderRight:'1px solid var(--border)' }}>↓</div>
             <ChainModule
-              name={mod.name}
-              stage={`fx · stage ${idx+1}`}
+              name={mod.name} stage={`fx · stage ${idx+1}`}
               accentColor={ALL_ACCENTS[mod.name]||'var(--light)'}
-              isActive={mod.id===chain.activeId}
-              volume={mod.volume}
-              isMuted={mod.muted}
+              isActive={mod.id===chain.activeId} volume={mod.volume} isMuted={mod.muted}
               onActivate={() => chain.setActiveId(mod.id)}
-              onVolumeChange={v => chain.updateModule(mod.id, { volume:v })}
-              onMute={() => chain.updateModule(mod.id, { muted:!mod.muted })}
+              onVolumeChange={v => chain.updateModule(mod.id,{volume:v})}
+              onMute={() => chain.updateModule(mod.id,{muted:!mod.muted})}
               onRemove={() => chain.removeEffect(mod.id)}
             />
           </div>
@@ -467,39 +470,89 @@ function SignalSection({ inputLabel,isField=false,chain,banks,onStoreToBank,audi
           </div>
         )}
 
+        {/* Store to bank */}
         <div style={{ position:'relative' }}>
           <button onClick={()=>setShowPicker(p=>!p)} style={{ width:'100%', padding:'12px 16px', background:showPicker?'var(--blue)':'transparent', border:`1px solid var(--blue)`, borderTop:'none', cursor:'pointer', display:'flex', alignItems:'center', gap:'8px', fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'13px', letterSpacing:'2px', color:showPicker?'white':'var(--blue)', textTransform:'uppercase', transition:'background 0.15s, color 0.15s' }}>
             <span style={{ fontSize:'16px', lineHeight:1 }}>→</span> Store to bank
           </button>
           {showPicker&&(
-            <BankPicker source={source} banks={banks}
-              onSelect={(bankId)=>{onStoreToBank(bankId,source);setShowPicker(false);}}
-              onCancel={()=>setShowPicker(false)} />
+            <BankPicker
+              source={source}
+              banks={bankEngine.banks}
+              onSelect={(bankId) => {
+                bankEngine.storeToBank(bankId, takeSnapshot());
+                setShowPicker(false);
+                // Stop tone generator and clear chain — bank takes over
+                audio.stop();
+                chain.loadFromSnapshot([]);
+              }}
+              onCancel={() => setShowPicker(false)}
+            />
           )}
         </div>
+
+        {/* Editing indicator */}
+        {editingBankId !== null && (
+          <div style={{ marginTop:'6px', padding:'8px 12px', background:'rgba(212,96,144,0.1)', border:'1px solid var(--pink)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <span style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--pink)', letterSpacing:'1px' }}>
+              ● EDITING BANK {editingBankId}
+            </span>
+            <button
+              onClick={() => {
+                bankEngine.updateBankSound(editingBankId, takeSnapshot());
+                bankEngine.stopEditing();
+              }}
+              style={{ fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'11px', letterSpacing:'2px', padding:'4px 10px', cursor:'pointer', background:'var(--pink)', border:'none', color:'white', clipPath:'polygon(3px 0%, 100% 0%, calc(100% - 3px) 100%, 0% 100%)' }}
+            >SAVE TO BANK</button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 export default function Home() {
+  const audio       = useAudio();
+  const bankEngine  = useBankEngine();
   const [bpm, setBpm] = useState(110);
-  const audio      = useAudio();
+
   const toneChain  = useChain([], audio);
   const fieldChain = useChain([], audio);
 
-  const [bankList, setBankList] = useState([
-    { id:1, name:'Bank 1', state:'EMPTY' },
-    { id:2, name:'Bank 2', state:'EMPTY' },
-    { id:3, name:'Bank 3', state:'EMPTY' },
-  ]);
+  // Snapshot loader ref — allows ToneControls to receive a snapshot
+  const snapshotLoaderRef = useRef<((snap: Snapshot) => void) | null>(null);
 
-  const storeFnRef = useRef<((source:'TONE'|'FIELD',bankId:number)=>void)|null>(null);
+  const handleSnapshotLoad = useCallback((cb: (snap: Snapshot) => void) => {
+    snapshotLoaderRef.current = cb;
+  }, []);
 
-  const handleStoreToBank = (bankId: number, source: 'TONE'|'FIELD') => {
-    if (storeFnRef.current) storeFnRef.current(source, bankId);
-    setBankList(prev => prev.map(b => b.id===bankId ? { ...b, state:'LIVE' } : b));
-  };
+  // When edit is pressed on a bank — load snapshot into tone controls
+  const handleEditBank = useCallback((bankId: number) => {
+    const snapshot = bankEngine.getEditSnapshot(bankId);
+    if (!snapshot) return;
+
+    bankEngine.startEditing(bankId);
+
+    // Load effects into chain
+    toneChain.loadFromSnapshot(snapshot.effects);
+
+    // Load tone controls state
+    if (snapshotLoaderRef.current) snapshotLoaderRef.current(snapshot);
+
+    // Load audio state
+    const noteParts = snapshot.note.match(/([A-G]#?)(\d+)/);
+    if (noteParts) audio.changeNote(noteParts[1], parseInt(noteParts[2]));
+    audio.changeShape(snapshot.shape);
+    audio.changeOscillator(snapshot.oscType);
+    audio.setTriggerMode(snapshot.triggerMode === 'ARP' ? 'ARP' : 'FREE');
+    audio.updateArpConfig({
+      scale: snapshot.arpConfig.scale,
+      steps: snapshot.arpConfig.steps,
+      pattern: snapshot.arpConfig.pattern,
+      stepRate: snapshot.stepRate,
+      bpm: snapshot.bpm,
+    });
+  }, [bankEngine, toneChain, audio]);
 
   return (
     <div style={{ background:'var(--cream)', minHeight:'100vh', display:'flex', flexDirection:'column' }}>
@@ -513,18 +566,47 @@ export default function Home() {
               <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:'var(--blue)' }}/>
               Tone — Input 1
             </div>
-            <SignalSection inputLabel="Input 1 · Tone" chain={toneChain} banks={bankList} onStoreToBank={handleStoreToBank} audio={audio} bpm={bpm} />
+            <SignalSection
+              inputLabel="Input 1 · Tone"
+              chain={toneChain}
+              bankEngine={bankEngine}
+              audio={audio}
+              bpm={bpm}
+              editingBankId={bankEngine.editingBankId}
+              onSnapshotLoad={handleSnapshotLoad}
+            />
           </div>
           <div style={{ paddingLeft:'28px' }}>
             <div style={{ fontFamily:'Space Mono, monospace', fontSize:'11px', color:'var(--pink)', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'14px', display:'flex', alignItems:'center', gap:'8px' }}>
               <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:'var(--red)' }}/>
               Field — Input 2
             </div>
-            <SignalSection inputLabel="Input 2 · Field / Mic" isField chain={fieldChain} banks={bankList} onStoreToBank={handleStoreToBank} />
+            <SignalSection
+              inputLabel="Input 2 · Field / Mic"
+              isField
+              chain={fieldChain}
+              bankEngine={bankEngine}
+              audio={audio}
+              bpm={bpm}
+              editingBankId={bankEngine.editingBankId}
+            />
           </div>
         </div>
         <SectionLabel left="Live Mix" right="Banks" />
-        <Banks storeFnRef={storeFnRef} onBankListChange={setBankList} />
+        <Banks
+          banks={bankEngine.banks}
+          onMasterStop={() => bankEngine.banks.forEach(b => { if(b.state==='LIVE') bankEngine.muteBank(b.id); })}
+          onMasterPlay={() => bankEngine.banks.forEach(b => { if(b.state==='MUTED') bankEngine.unmuteBank(b.id); })}
+          onSetFader={bankEngine.setFader}
+          onSetPan={bankEngine.setPan}
+          onMute={bankEngine.muteBank}
+          onUnmute={bankEngine.unmuteBank}
+          onFade={bankEngine.fadeBank}
+          onClear={bankEngine.clearBank}
+          onRename={bankEngine.renameBank}
+          onEdit={handleEditBank}
+          onAddBank={bankEngine.addBank}
+        />
       </div>
       <FooterBar />
     </div>

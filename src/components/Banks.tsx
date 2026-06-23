@@ -1,44 +1,55 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, MutableRefObject } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { BankState } from '@/hooks/useBankEngine';
 
-interface Bank {
-  id: number;
-  name: string;
-  source: 'TONE' | 'FIELD' | null;
-  state: 'EMPTY' | 'LIVE' | 'MUTED' | 'FADING';
-  fader: number;
-  pan: number;
-}
-
-const initialBanks: Bank[] = [
-  { id:1, name:'Bank 1', source:null, state:'EMPTY', fader:80, pan:50 },
-  { id:2, name:'Bank 2', source:null, state:'EMPTY', fader:80, pan:50 },
-  { id:3, name:'Bank 3', source:null, state:'EMPTY', fader:80, pan:50 },
-];
-
-const STATE_COLOR: Record<string,string> = { LIVE:'var(--blue)', MUTED:'var(--light)', FADING:'var(--pink)', EMPTY:'var(--cream-dark)' };
 const SOURCE_COLOR: Record<string,string> = { TONE:'var(--blue)', FIELD:'var(--red)' };
+const STATE_COLOR:  Record<string,string> = { LIVE:'var(--blue)', MUTED:'var(--light)', FADING:'var(--pink)', EMPTY:'var(--cream-dark)' };
 
-function WaveformDisplay({ active,color,speed=1,complexity=0.8 }: { active:boolean;color:string;speed?:number;complexity?:number }) {
-  const canvasRef=useRef<HTMLCanvasElement>(null); const rafRef=useRef<number>(0);
-  useEffect(()=>{
-    const canvas=canvasRef.current; if(!canvas) return;
-    const ctx=canvas.getContext('2d'); if(!ctx) return;
-    const draw=()=>{
-      const W=canvas.width,H=canvas.height; ctx.clearRect(0,0,W,H);
-      if(!active){ctx.strokeStyle='#C8C0B0';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();ctx.setLineDash([]);return;}
+function WaveformDisplay({ active, color }: { active:boolean; color:string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef    = useRef<number>(0);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const draw = () => {
+      const W=canvas.width, H=canvas.height;
+      ctx.clearRect(0,0,W,H);
+      if (!active) {
+        ctx.strokeStyle='#C8C0B0'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+        ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
+        ctx.setLineDash([]); return;
+      }
       const t=Date.now()/1000;
       ctx.beginPath();
-      for(let x=0;x<=W;x++){const nx=x/W;let y=H/2;y+=Math.sin(nx*10*complexity+t*speed*2.5)*(H*0.28);y+=Math.sin(nx*6*complexity+t*speed*1.6)*(H*0.14);y+=Math.sin(nx*18*complexity+t*speed*4.2)*(H*0.06);if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}
-      ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fillStyle=color+'22';ctx.fill();
-      ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=1.5;
-      for(let x=0;x<=W;x++){const nx=x/W;let y=H/2;y+=Math.sin(nx*10*complexity+t*speed*2.5)*(H*0.28);y+=Math.sin(nx*6*complexity+t*speed*1.6)*(H*0.14);y+=Math.sin(nx*18*complexity+t*speed*4.2)*(H*0.06);if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}
-      ctx.stroke(); rafRef.current=requestAnimationFrame(draw);
+      for(let x=0;x<=W;x++){
+        const nx=x/W;
+        let y=H/2;
+        y+=Math.sin(nx*10+t*2.5)*(H*0.28);
+        y+=Math.sin(nx*6+t*1.6)*(H*0.14);
+        y+=Math.sin(nx*18+t*4.2)*(H*0.06);
+        if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath();
+      ctx.fillStyle=color+'22'; ctx.fill();
+      ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=1.5;
+      for(let x=0;x<=W;x++){
+        const nx=x/W;
+        let y=H/2;
+        y+=Math.sin(nx*10+t*2.5)*(H*0.28);
+        y+=Math.sin(nx*6+t*1.6)*(H*0.14);
+        y+=Math.sin(nx*18+t*4.2)*(H*0.06);
+        if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+      rafRef.current=requestAnimationFrame(draw);
     };
-    draw(); return ()=>cancelAnimationFrame(rafRef.current);
-  },[active,color,speed,complexity]);
-  return <canvas ref={canvasRef} width={80} height={24} style={{ display:'block',width:'80px',height:'24px',flexShrink:0 }}/>;
+    draw();
+    return () => cancelAnimationFrame(rafRef.current);
+  },[active,color]);
+  return <canvas ref={canvasRef} width={80} height={24} style={{ display:'block', width:'80px', height:'24px', flexShrink:0 }}/>;
 }
 
 const NUM_BANDS=24;
@@ -60,61 +71,54 @@ function SpectrumAnalyser({ activeCount }: { activeCount:number }) {
     };
     draw(); return ()=>cancelAnimationFrame(rafRef.current);
   },[activeCount]);
-  return <canvas ref={canvasRef} width={320} height={50} style={{ display:'block',width:'100%',height:'50px',flex:1 }}/>;
+  return <canvas ref={canvasRef} width={320} height={50} style={{ display:'block', width:'100%', height:'50px', flex:1 }}/>;
 }
 
-function PanControl({ value,onChange,color }: { value:number;onChange:(v:number)=>void;color:string }) {
+function PanControl({ value, onChange, color }: { value:number; onChange:(v:number)=>void; color:string }) {
   const dragging=useRef(false);
   const set=(e:React.MouseEvent<HTMLDivElement>)=>{const r=e.currentTarget.getBoundingClientRect();onChange(Math.min(100,Math.max(0,Math.round(((e.clientX-r.left)/r.width)*100))));};
   const panLabel=()=>{const d=value-50;if(Math.abs(d)<4)return 'C';return d<0?`L${Math.abs(d)}`:`R${d}`;};
   return (
-    <div style={{ display:'flex',alignItems:'center',gap:'5px' }}>
-      <span style={{ fontFamily:'Space Mono, monospace',fontSize:'9px',color:'var(--light)',letterSpacing:'1px',width:'22px' }}>PAN</span>
+    <div style={{ display:'flex', alignItems:'center', gap:'5px' }}>
+      <span style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'1px', width:'22px' }}>PAN</span>
       <div onMouseDown={e=>{dragging.current=true;set(e);}} onMouseMove={e=>{if(dragging.current)set(e);}} onMouseUp={()=>{dragging.current=false;}} onMouseLeave={()=>{dragging.current=false;}}
-        style={{ flex:1,height:'3px',background:'var(--cream-dark)',position:'relative',cursor:'pointer',borderRadius:'2px' }}>
-        <div style={{ position:'absolute',top:'-3px',left:'50%',transform:'translateX(-50%)',width:'1px',height:'9px',background:'var(--border)' }}/>
-        <div style={{ position:'absolute',top:0,left:value<50?`${value}%`:'50%',width:`${Math.abs(value-50)}%`,height:'100%',background:color+'66',borderRadius:'2px' }}/>
-        <div style={{ position:'absolute',top:'-5px',left:`${value}%`,transform:'translateX(-50%)',width:'11px',height:'11px',borderRadius:'50%',background:'var(--cream-light)',border:`1.5px solid ${color}` }}/>
+        style={{ flex:1, height:'3px', background:'var(--cream-dark)', position:'relative', cursor:'pointer', borderRadius:'2px' }}>
+        <div style={{ position:'absolute', top:'-3px', left:'50%', transform:'translateX(-50%)', width:'1px', height:'9px', background:'var(--border)' }}/>
+        <div style={{ position:'absolute', top:0, left:value<50?`${value}%`:'50%', width:`${Math.abs(value-50)}%`, height:'100%', background:color+'66', borderRadius:'2px' }}/>
+        <div style={{ position:'absolute', top:'-5px', left:`${value}%`, transform:'translateX(-50%)', width:'11px', height:'11px', borderRadius:'50%', background:'var(--cream-light)', border:`1.5px solid ${color}` }}/>
       </div>
-      <span style={{ fontFamily:'Space Mono, monospace',fontSize:'9px',color:'var(--light)',minWidth:'22px',textAlign:'right' }}>{panLabel()}</span>
+      <span style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', minWidth:'22px', textAlign:'right' }}>{panLabel()}</span>
     </div>
   );
 }
 
 interface BanksProps {
-  storeFnRef: MutableRefObject<((source:'TONE'|'FIELD',bankId:number)=>void)|null>;
-  onBankListChange: (banks:{id:number;name:string;state:string}[]) => void;
+  banks: BankState[];
+  onMasterStop: () => void;
+  onMasterPlay: () => void;
+  onSetFader: (id:number, v:number) => void;
+  onSetPan:   (id:number, v:number) => void;
+  onMute:     (id:number) => void;
+  onUnmute:   (id:number) => void;
+  onFade:     (id:number) => void;
+  onClear:    (id:number) => void;
+  onRename:   (id:number, name:string) => void;
+  onEdit:     (id:number) => void;
+  onAddBank:  () => void;
 }
 
-export default function Banks({ storeFnRef, onBankListChange }: BanksProps) {
-  const [banks, setBanks] = useState<Bank[]>(initialBanks);
+export default function Banks({
+  banks, onMasterStop, onMasterPlay, onSetFader, onSetPan, onMute, onUnmute, onFade, onClear, onRename, onEdit, onAddBank,
+}: BanksProps) {
   const [masterFader, setMasterFader] = useState(80);
   const [editingName, setEditingName] = useState<number|null>(null);
   const [confirmClear, setConfirmClear] = useState<number|null>(null);
   const [selectedBank, setSelectedBank] = useState<number|null>(null);
   const masterDragging = useRef(false);
-  const activeCount = banks.filter(b=>b.state==='LIVE').length;
+  const faderDragging  = useRef(false);
+  const activeCount = banks.filter(b=>b.state==='LIVE'||b.state==='FADING').length;
 
-  const updateBank = useCallback((id:number, updates:Partial<Bank>) =>
-    setBanks(prev=>prev.map(b=>b.id===id?{...b,...updates}:b)), []);
-
-  // Wire the store function ref so page.tsx can call it
-  useEffect(()=>{
-    storeFnRef.current = (source:'TONE'|'FIELD', bankId:number) => {
-      setBanks(prev=>{
-        const next = prev.map(b=>b.id===bankId?{...b,state:'LIVE' as const,source,fader:80,pan:50}:b);
-        onBankListChange(next.map(b=>({id:b.id,name:b.name,state:b.state})));
-        return next;
-      });
-    };
-  },[storeFnRef, onBankListChange]);
-
-  // Sync bank list up whenever banks change
-  useEffect(()=>{
-    onBankListChange(banks.map(b=>({id:b.id,name:b.name,state:b.state})));
-  },[banks, onBankListChange]);
-
-  // Keyboard volume
+  // Keyboard volume control
   useEffect(()=>{
     const handler=(e:KeyboardEvent)=>{
       if(selectedBank===null) return;
@@ -122,30 +126,18 @@ export default function Banks({ storeFnRef, onBankListChange }: BanksProps) {
       const target=document.activeElement;
       if(target&&(target.tagName==='INPUT'||target.tagName==='BUTTON')) return;
       e.preventDefault();
-      setBanks(prev=>prev.map(b=>{
-        if(b.id!==selectedBank) return b;
-        const delta=(e.key==='ArrowRight'||e.key==='ArrowUp')?(e.shiftKey?5:1):-(e.shiftKey?5:1);
-        return {...b,fader:Math.min(100,Math.max(0,b.fader+delta))};
-      }));
+      const bank=banks.find(b=>b.id===selectedBank);
+      if(!bank) return;
+      const delta=(e.key==='ArrowRight'||e.key==='ArrowUp')?(e.shiftKey?5:1):-(e.shiftKey?5:1);
+      onSetFader(selectedBank, Math.min(100,Math.max(0,bank.fader+delta)));
     };
     window.addEventListener('keydown',handler);
     return ()=>window.removeEventListener('keydown',handler);
-  },[selectedBank]);
-
-  const addBank=()=>{
-    if(banks.length>=6) return;
-    const id=Math.max(...banks.map(b=>b.id))+1;
-    setBanks(prev=>[...prev,{id,name:`Bank ${id}`,source:null,state:'EMPTY',fader:80,pan:50}]);
-  };
-
-  const fadeOut=(id:number)=>{
-    updateBank(id,{state:'FADING'});
-    setTimeout(()=>updateBank(id,{state:'EMPTY',source:null,fader:80,pan:50}),6000);
-  };
+  },[selectedBank,banks,onSetFader]);
 
   const handleFaderDrag=(e:React.MouseEvent<HTMLDivElement>,id:number)=>{
     const r=e.currentTarget.getBoundingClientRect();
-    updateBank(id,{fader:Math.min(100,Math.max(0,Math.round(((e.clientX-r.left)/r.width)*100)))});
+    onSetFader(id,Math.min(100,Math.max(0,Math.round(((e.clientX-r.left)/r.width)*100))));
   };
 
   const handleMasterDrag=(e:React.MouseEvent<HTMLDivElement>)=>{
@@ -153,12 +145,13 @@ export default function Banks({ storeFnRef, onBankListChange }: BanksProps) {
     setMasterFader(Math.min(100,Math.max(0,Math.round(((e.clientX-r.left)/r.width)*100))));
   };
 
-  const btn=(v:'default'|'muted'|'fade'|'clear'|'edit'|'confirm')=>{
+  const btn=(v:'default'|'muted'|'fade'|'clear'|'edit'|'confirm'|'save')=>{
     const base={fontFamily:'Rajdhani, sans-serif' as const,fontWeight:600 as const,fontSize:'11px',letterSpacing:'1px',textTransform:'uppercase' as const,padding:'4px 10px',cursor:'pointer' as const,flexShrink:0,border:'1px solid var(--border)',background:'var(--cream-light)',color:'var(--dark)',clipPath:'polygon(4px 0%, 100% 0%, calc(100% - 4px) 100%, 0% 100%)'};
-    if(v==='muted') return {...base,background:'var(--red)',borderColor:'var(--red-dark)',color:'white'};
-    if(v==='fade')  return {...base,borderColor:'var(--pink)',color:'var(--pink)'};
-    if(v==='clear') return {...base,color:'var(--light)',fontSize:'10px' as const};
-    if(v==='edit')  return {...base,borderColor:'var(--blue)',color:'var(--blue)'};
+    if(v==='muted')   return {...base,background:'var(--red)',borderColor:'var(--red-dark)',color:'white'};
+    if(v==='fade')    return {...base,borderColor:'var(--pink)',color:'var(--pink)'};
+    if(v==='clear')   return {...base,color:'var(--light)',fontSize:'10px' as const};
+    if(v==='edit')    return {...base,borderColor:'var(--blue)',color:'var(--blue)'};
+    if(v==='save')    return {...base,background:'var(--pink)',borderColor:'var(--pink)',color:'white'};
     if(v==='confirm') return {...base,background:'var(--red)',borderColor:'var(--red-dark)',color:'white',fontSize:'10px' as const};
     return base;
   };
@@ -166,79 +159,89 @@ export default function Banks({ storeFnRef, onBankListChange }: BanksProps) {
   return (
     <div style={{ padding:'0 24px' }}>
 
-      {/* Master */}
-      <div style={{ background:'var(--cream-dark)',border:'1px solid var(--border)',borderLeft:'4px solid var(--gold)',marginBottom:'2px',padding:'10px 16px',display:'flex',flexDirection:'column',gap:'8px' }}>
-        <div style={{ display:'flex',alignItems:'center',gap:'16px' }}>
-          <div style={{ flexShrink:0,minWidth:'80px' }}>
-            <div style={{ fontFamily:'Rajdhani, sans-serif',fontWeight:600,fontSize:'14px',letterSpacing:'3px',color:'var(--dark)',textTransform:'uppercase' }}>Master</div>
-            <div style={{ fontFamily:'Space Mono, monospace',fontSize:'10px',color:'var(--light)',letterSpacing:'1px',marginTop:'2px' }}>{activeCount===0?'no banks active':`${activeCount} bank${activeCount>1?'s':''} live`}</div>
+      {/* Master strip */}
+      <div style={{ background:'var(--cream-dark)', border:'1px solid var(--border)', borderLeft:'4px solid var(--gold)', marginBottom:'2px', padding:'10px 16px', display:'flex', flexDirection:'column', gap:'8px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'16px' }}>
+          <div style={{ flexShrink:0, minWidth:'80px' }}>
+            <div style={{ fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'14px', letterSpacing:'3px', color:'var(--dark)', textTransform:'uppercase' }}>Master</div>
+            <div style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--light)', letterSpacing:'1px', marginTop:'2px' }}>{activeCount===0?'no banks active':`${activeCount} bank${activeCount>1?'s':''} live`}</div>
+            <div style={{ display:'flex', gap:'4px', marginTop:'6px' }}>
+              <button onClick={onMasterStop} style={{ fontFamily:'Rajdhani, sans-serif', fontWeight:700, fontSize:'10px', letterSpacing:'1px', padding:'3px 8px', cursor:'pointer', background:'var(--pink)', border:'none', color:'white', clipPath:'polygon(3px 0%, 100% 0%, calc(100% - 3px) 100%, 0% 100%)' }}>■ STOP</button>
+              <button onClick={onMasterPlay} style={{ fontFamily:'Rajdhani, sans-serif', fontWeight:700, fontSize:'10px', letterSpacing:'1px', padding:'3px 8px', cursor:'pointer', background:'var(--blue)', border:'none', color:'white', clipPath:'polygon(3px 0%, 100% 0%, calc(100% - 3px) 100%, 0% 100%)' }}>▶ PLAY</button>
+            </div>
           </div>
           <SpectrumAnalyser activeCount={activeCount}/>
-          <span style={{ fontFamily:'Rajdhani, sans-serif',fontWeight:600,fontSize:'14px',color:'var(--dark)',minWidth:'52px',textAlign:'right',letterSpacing:'1px',flexShrink:0 }}>{activeCount===0?'−∞ dB':activeCount===1?'−8 dB':'−4 dB'}</span>
+          <span style={{ fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'14px', color:'var(--dark)', minWidth:'52px', textAlign:'right', letterSpacing:'1px', flexShrink:0 }}>{activeCount===0?'−∞ dB':activeCount===1?'−8 dB':'−4 dB'}</span>
         </div>
-        <div style={{ display:'flex',alignItems:'center',gap:'10px' }}>
-          <span style={{ fontFamily:'Space Mono, monospace',fontSize:'10px',color:'var(--light)',letterSpacing:'1px',width:'36px' }}>LEVEL</span>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+          <span style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--light)', letterSpacing:'1px', width:'36px' }}>LEVEL</span>
           <div onMouseDown={e=>{masterDragging.current=true;handleMasterDrag(e);}} onMouseMove={e=>{if(masterDragging.current)handleMasterDrag(e);}} onMouseUp={()=>{masterDragging.current=false;}} onMouseLeave={()=>{masterDragging.current=false;}}
-            style={{ flex:1,height:'3px',background:'var(--cream-light)',position:'relative',cursor:'pointer',borderRadius:'2px' }}>
-            <div style={{ position:'absolute',left:0,top:0,height:'100%',width:`${masterFader}%`,background:'var(--gold)',borderRadius:'2px' }}/>
-            <div style={{ position:'absolute',top:'-6px',left:`${masterFader}%`,transform:'translateX(-50%)',width:'14px',height:'14px',borderRadius:'50%',background:'var(--cream-light)',border:'2px solid var(--gold)' }}/>
+            style={{ flex:1, height:'3px', background:'var(--cream-light)', position:'relative', cursor:'pointer', borderRadius:'2px' }}>
+            <div style={{ position:'absolute', left:0, top:0, height:'100%', width:`${masterFader}%`, background:'var(--gold)', borderRadius:'2px' }}/>
+            <div style={{ position:'absolute', top:'-6px', left:`${masterFader}%`, transform:'translateX(-50%)', width:'14px', height:'14px', borderRadius:'50%', background:'var(--cream-light)', border:'2px solid var(--gold)' }}/>
           </div>
-          <span style={{ fontFamily:'Space Mono, monospace',fontSize:'11px',color:'var(--light)',minWidth:'22px' }}>{masterFader}</span>
+          <span style={{ fontFamily:'Space Mono, monospace', fontSize:'11px', color:'var(--light)', minWidth:'22px' }}>{masterFader}</span>
         </div>
       </div>
 
-      {/* Banks */}
+      {/* Bank strips */}
       {banks.map(bank=>{
-        const isLive=bank.state==='LIVE',isMuted=bank.state==='MUTED',isEmpty=bank.state==='EMPTY',isFading=bank.state==='FADING';
+        const isLive=bank.state==='LIVE', isMuted=bank.state==='MUTED';
+        const isEmpty=bank.state==='EMPTY', isFading=bank.state==='FADING';
         const srcColor=bank.source?SOURCE_COLOR[bank.source]:'var(--light)';
         const stateColor=STATE_COLOR[bank.state];
         const isSelected=selectedBank===bank.id;
+
         return (
-          <div key={bank.id} onClick={()=>!isEmpty&&setSelectedBank(isSelected?null:bank.id)}
-            style={{ display:'flex',alignItems:'center',gap:'10px',padding:'8px 16px',background:isSelected?'rgba(27,92,232,0.04)':isLive||isMuted||isFading?'var(--cream-light)':'var(--cream)',border:'1px solid var(--border)',borderTop:'none',borderLeft:`4px solid ${isSelected?'var(--pink)':stateColor}`,opacity:isMuted?0.45:isFading?0.7:1,transition:'opacity 0.3s,border-color 0.2s',cursor:isEmpty?'default':'pointer' }}>
+          <div key={bank.id}
+            onClick={()=>!isEmpty&&setSelectedBank(isSelected?null:bank.id)}
+            style={{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 16px', background:isSelected?'rgba(27,92,232,0.04)':isLive||isMuted||isFading?'var(--cream-light)':'var(--cream)', border:'1px solid var(--border)', borderTop:'none', borderLeft:`4px solid ${isSelected?'var(--pink)':stateColor}`, opacity:isMuted?0.45:isFading?0.7:1, transition:'opacity 0.3s,border-color 0.2s', cursor:isEmpty?'default':'pointer' }}>
 
-            <div style={{ width:'7px',height:'7px',borderRadius:'50%',background:isSelected?'var(--pink)':stateColor,flexShrink:0,transition:'background 0.2s' }}/>
+            <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:isSelected?'var(--pink)':stateColor, flexShrink:0, transition:'background 0.2s' }}/>
 
-            <div style={{ flexShrink:0,width:'80px' }}>
+            <div style={{ flexShrink:0, width:'80px' }}>
               {editingName===bank.id?(
                 <input autoFocus defaultValue={bank.name}
-                  onBlur={e=>{updateBank(bank.id,{name:e.target.value});setEditingName(null);}}
-                  onKeyDown={e=>{if(e.key==='Enter'){updateBank(bank.id,{name:(e.target as HTMLInputElement).value});setEditingName(null);}if(e.key==='Escape')setEditingName(null);e.stopPropagation();}}
+                  onBlur={e=>{onRename(bank.id,e.target.value);setEditingName(null);}}
+                  onKeyDown={e=>{if(e.key==='Enter'){onRename(bank.id,(e.target as HTMLInputElement).value);setEditingName(null);}if(e.key==='Escape')setEditingName(null);e.stopPropagation();}}
                   onClick={e=>e.stopPropagation()}
-                  style={{ fontFamily:'Rajdhani, sans-serif',fontWeight:600,fontSize:'13px',letterSpacing:'2px',background:'transparent',border:'none',borderBottom:'1px solid var(--pink)',color:'var(--dark)',outline:'none',width:'76px' }}/>
+                  style={{ fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'13px', letterSpacing:'2px', background:'transparent', border:'none', borderBottom:'1px solid var(--pink)', color:'var(--dark)', outline:'none', width:'76px' }}/>
               ):(
-                <div onClick={e=>{e.stopPropagation();setEditingName(bank.id);}} style={{ fontFamily:'Rajdhani, sans-serif',fontWeight:600,fontSize:'13px',letterSpacing:'2px',color:isEmpty?'var(--light)':'var(--dark)',cursor:'text' }}>{bank.name}</div>
+                <div onClick={e=>{e.stopPropagation();setEditingName(bank.id);}} style={{ fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'13px', letterSpacing:'2px', color:isEmpty?'var(--light)':'var(--dark)', cursor:'text' }}>{bank.name}</div>
               )}
             </div>
 
-            <div style={{ fontFamily:'Space Mono, monospace',fontSize:'10px',letterSpacing:'1px',padding:'2px 7px',flexShrink:0,background:bank.source?srcColor+'18':'transparent',border:`1px solid ${bank.source?srcColor+'44':'var(--cream-dark)'}`,color:bank.source?srcColor:'var(--light)' }}>{bank.source??'EMPTY'}</div>
+            <div style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', letterSpacing:'1px', padding:'2px 7px', flexShrink:0, background:bank.source?srcColor+'18':'transparent', border:`1px solid ${bank.source?srcColor+'44':'var(--cream-dark)'}`, color:bank.source?srcColor:'var(--light)' }}>{bank.source??'EMPTY'}</div>
 
-            <WaveformDisplay active={isLive||isFading} color={bank.source==='TONE'?'#1B5CE8':bank.source==='FIELD'?'#D63020':'#C0B8A8'} speed={bank.source==='FIELD'?1.3:0.8} complexity={bank.source==='FIELD'?1.1:0.7}/>
+            <WaveformDisplay active={isLive||isFading} color={bank.source==='TONE'?'#1B5CE8':bank.source==='FIELD'?'#D63020':'#C0B8A8'}/>
 
             {!isEmpty?(
-              <div style={{ flex:1,display:'flex',flexDirection:'column',gap:'5px',minWidth:'140px' }}>
-                <div style={{ display:'flex',alignItems:'center',gap:'8px' }}>
-                  <div onMouseDown={e=>{e.stopPropagation();handleFaderDrag(e,bank.id);}} onMouseMove={e=>{if(e.buttons===1){e.stopPropagation();handleFaderDrag(e,bank.id);}}}
-                    style={{ flex:1,height:'3px',background:'var(--cream-dark)',position:'relative',cursor:'pointer',borderRadius:'2px' }}>
-                    <div style={{ position:'absolute',left:0,top:0,height:'100%',width:`${bank.fader}%`,background:srcColor,borderRadius:'2px' }}/>
-                    <div style={{ position:'absolute',top:'-6px',left:`${bank.fader}%`,transform:'translateX(-50%)',width:'14px',height:'14px',borderRadius:'50%',background:'var(--cream-light)',border:`2px solid ${srcColor}` }}/>
+              <div style={{ flex:1, display:'flex', flexDirection:'column', gap:'5px', minWidth:'140px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                  <div
+                    onMouseDown={e=>{e.stopPropagation();faderDragging.current=true;handleFaderDrag(e,bank.id);}}
+                    onMouseMove={e=>{if(e.buttons===1&&faderDragging.current){e.stopPropagation();handleFaderDrag(e,bank.id);}}}
+                    onMouseUp={()=>{faderDragging.current=false;}}
+                    style={{ flex:1, height:'3px', background:'var(--cream-dark)', position:'relative', cursor:'pointer', borderRadius:'2px' }}>
+                    <div style={{ position:'absolute', left:0, top:0, height:'100%', width:`${bank.fader}%`, background:srcColor, borderRadius:'2px' }}/>
+                    <div style={{ position:'absolute', top:'-6px', left:`${bank.fader}%`, transform:'translateX(-50%)', width:'14px', height:'14px', borderRadius:'50%', background:'var(--cream-light)', border:`2px solid ${srcColor}` }}/>
                   </div>
-                  <span style={{ fontFamily:'Space Mono, monospace',fontSize:'11px',color:'var(--mid)',minWidth:'24px',textAlign:'right' }}>{bank.fader}</span>
+                  <span style={{ fontFamily:'Space Mono, monospace', fontSize:'11px', color:'var(--mid)', minWidth:'24px', textAlign:'right' }}>{bank.fader}</span>
                 </div>
-                <PanControl value={bank.pan} onChange={v=>updateBank(bank.id,{pan:v})} color={srcColor}/>
-                {isSelected&&<div style={{ fontFamily:'Space Mono, monospace',fontSize:'9px',color:'var(--pink)',letterSpacing:'1px' }}>← → volume · shift = ×5</div>}
+                <PanControl value={bank.pan} onChange={v=>onSetPan(bank.id,v)} color={srcColor}/>
+                {isSelected&&<div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--pink)', letterSpacing:'1px' }}>← → volume · shift = ×5</div>}
               </div>
             ):<div style={{ flex:1 }}/>}
 
-            <div style={{ display:'flex',gap:'5px',alignItems:'center',flexShrink:0 }} onClick={e=>e.stopPropagation()}>
+            <div style={{ display:'flex', gap:'5px', alignItems:'center', flexShrink:0 }} onClick={e=>e.stopPropagation()}>
               {(isLive||isMuted)&&(
                 <>
-                  <button onClick={()=>updateBank(bank.id,{state:isMuted?'LIVE':'MUTED'})} style={btn(isMuted?'muted':'default')}>{isMuted?'UNMUTE':'MUTE'}</button>
-                  <button onClick={()=>{}} style={btn('edit')}>EDIT</button>
-                  <button onClick={()=>fadeOut(bank.id)} style={btn('fade')}>FADE</button>
+                  <button onClick={()=>isMuted?onUnmute(bank.id):onMute(bank.id)} style={btn(isMuted?'muted':'default')}>{isMuted?'UNMUTE':'MUTE'}</button>
+                  <button onClick={()=>onEdit(bank.id)} style={btn('edit')}>EDIT</button>
+                  <button onClick={()=>onFade(bank.id)} style={btn('fade')}>FADE</button>
                   {confirmClear===bank.id?(
                     <>
-                      <button onClick={()=>{updateBank(bank.id,{state:'EMPTY',source:null,fader:80,pan:50});setConfirmClear(null);setSelectedBank(null);}} style={btn('confirm')}>CONFIRM</button>
+                      <button onClick={()=>{onClear(bank.id);setConfirmClear(null);setSelectedBank(null);}} style={btn('confirm')}>CONFIRM</button>
                       <button onClick={()=>setConfirmClear(null)} style={btn('clear')}>CANCEL</button>
                     </>
                   ):(
@@ -246,7 +249,7 @@ export default function Banks({ storeFnRef, onBankListChange }: BanksProps) {
                   )}
                 </>
               )}
-              {isFading&&<span style={{ fontFamily:'Space Mono, monospace',fontSize:'10px',color:'var(--pink)',letterSpacing:'1px' }}>fading...</span>}
+              {isFading&&<span style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--pink)', letterSpacing:'1px' }}>fading...</span>}
             </div>
           </div>
         );
@@ -254,14 +257,14 @@ export default function Banks({ storeFnRef, onBankListChange }: BanksProps) {
 
       {banks.length<6&&(
         <div style={{ marginTop:'6px' }}>
-          <button onClick={addBank} style={{ fontFamily:'Rajdhani, sans-serif',fontWeight:500,fontSize:'12px',letterSpacing:'2px',textTransform:'uppercase',padding:'7px 16px',background:'transparent',border:'1px dashed var(--border)',color:'var(--light)',cursor:'pointer',display:'flex',alignItems:'center',gap:'6px' }}>
-            <span style={{ fontSize:'16px',lineHeight:1 }}>+</span> Add Bank
+          <button onClick={onAddBank} style={{ fontFamily:'Rajdhani, sans-serif', fontWeight:500, fontSize:'12px', letterSpacing:'2px', textTransform:'uppercase', padding:'7px 16px', background:'transparent', border:'1px dashed var(--border)', color:'var(--light)', cursor:'pointer', display:'flex', alignItems:'center', gap:'6px' }}>
+            <span style={{ fontSize:'16px', lineHeight:1 }}>+</span> Add Bank
           </button>
         </div>
       )}
 
       {selectedBank!==null&&(
-        <div style={{ marginTop:'6px',fontFamily:'Space Mono, monospace',fontSize:'9px',color:'var(--light)',letterSpacing:'1px' }}>
+        <div style={{ marginTop:'6px', fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'1px' }}>
           Bank {selectedBank} selected · ← → fine · shift+← → coarse · click again to deselect
         </div>
       )}

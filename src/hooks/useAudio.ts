@@ -5,7 +5,7 @@ import {
   startAudio, initEngine, teardown,
   startFree, stopFreeNote,
   startBeat, startArp, updateArpNotes,
-  updateShape, changeLiveNote, changeOscillator, setTransportBpm,
+  updateShape, changeLiveNote, changeOscillator, setTransportBpm, setBallPosition,
   disposeDrone, muteEffect, removeEffect, syncChain,
   updateEffectDotLive, updateEffectDotRelease,
 } from '@/audio/engine';
@@ -152,6 +152,8 @@ export function useAudio() {
 
   return {
     isPlaying, rootNote, octave, shape, triggerMode, oscillator: oscType,
+    getArpConfig: () => arpConfigRef.current,
+    onBallMove: (x: number, y: number) => { if (isPlaying) setBallPosition(x, y); },
     changeOscillator: (type: string) => { setOscType(type); changeOscillator(type); },
     setBpm: (bpm: number) => { arpConfigRef.current.bpm = bpm; setTransportBpm(bpm); },
     play, stop,
