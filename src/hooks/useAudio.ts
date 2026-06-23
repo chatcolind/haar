@@ -5,7 +5,7 @@ import {
   startAudio, initEngine, teardown,
   startFree, stopFreeNote,
   startBeat, startArp, updateArpNotes,
-  updateShape, changeLiveNote, changeOscillator, setTransportBpm, setBallPosition, applyEffectParam,
+  updateShape, changeLiveNote, changeOscillator, setTransportBpm, setBallPosition, applyEffectParam, setUnison, setNoiseMode,
   disposeDrone, muteEffect, removeEffect, syncChain,
   updateEffectDotLive, updateEffectDotRelease,
 } from '@/audio/engine';
@@ -14,10 +14,10 @@ export type TriggerMode = 'FREE' | 'BEAT' | 'ARP';
 
 export function useAudio() {
   const [isPlaying, setIsPlaying]     = useState(false);
-  const [oscType, setOscType]           = useState('sine');
-  const [rootNote, setRootNote]       = useState('D');
-  const [octave, setOctave]           = useState(2);
-  const [shape, setShape]             = useState(0.85);
+  const [oscType, setOscType]           = useState('triangle');
+  const [rootNote, setRootNote]       = useState('A');
+  const [octave, setOctave]           = useState(4); // A4 — bright and uplifting
+  const [shape, setShape]             = useState(0.6);
   const [triggerMode, setTriggerModeState] = useState<TriggerMode>('FREE');
 
   const firstGesture  = useRef(false);
@@ -25,7 +25,7 @@ export function useAudio() {
   const modeRef       = useRef<TriggerMode>('FREE');
   const noteRef       = useRef('D2');
   const shapeRef      = useRef(0.85);
-  const arpConfigRef  = useRef({ scale:'Dorian', steps:4, pattern:'Up', stepRate:'16n', bpm:110 });
+  const arpConfigRef  = useRef({ scale:'Lydian', steps:4, pattern:'Up', stepRate:'16n', bpm:110 });
 
   const getNote = (n: string, o: number) => `${n}${o}`;
 
@@ -155,6 +155,8 @@ export function useAudio() {
     getArpConfig: () => arpConfigRef.current,
     onBallMove: (x: number, y: number) => { if (isPlaying) setBallPosition(x, y); },
     onEffectParamChange: (id: number, name: string, paramIdx: number, value: number) => { applyEffectParam(id, name, paramIdx, value); },
+    setUnison: (voices: number, detune: number) => { setUnison(voices, detune); },
+    setNoise: (enabled: boolean, type?: 'white'|'pink'|'brown') => { setNoiseMode(enabled, type ?? 'pink'); },
     changeOscillator: (type: string) => { setOscType(type); changeOscillator(type); },
     setBpm: (bpm: number) => { arpConfigRef.current.bpm = bpm; setTransportBpm(bpm); },
     play, stop,

@@ -134,7 +134,9 @@ function ToneControls({ audio, bpm, onSnapshotLoad }: {
   bpm: number;
   onSnapshotLoad?: (cb: (snap: Snapshot) => void) => void;
 }) {
-  const [scale, setScaleState]       = useState('Dorian');
+  const [unisonVoices, setUnisonVoices] = useState(1);
+  const [unisonDetune, setUnisonDetune] = useState(20);
+  const [scale, setScaleState]       = useState('Lydian');
   const [steps, setStepsState]       = useState(4);
   const [pattern, setPatternState]   = useState('Up');
   const [stepRate, setStepRateState] = useState('1/16');
@@ -199,19 +201,69 @@ function ToneControls({ audio, bpm, onSnapshotLoad }: {
       {/* Source selector */}
       <div style={{ display:'flex', gap:'3px', flexWrap:'wrap' }}>
         {[
-          { id:'sine', label:'SINE' }, { id:'triangle', label:'TRI' },
-          { id:'sawtooth', label:'SAW' }, { id:'square', label:'SQR' },
-          { id:'fmsine', label:'FM' },
-        ].map(({ id, label }) => (
-          <button key={id} onClick={() => audio.changeOscillator(id)} style={{
+          { id:'sine', label:'SINE', noise:false }, { id:'triangle', label:'TRI', noise:false },
+          { id:'sawtooth', label:'SAW', noise:false }, { id:'square', label:'SQR', noise:false },
+          { id:'fmsine', label:'FM', noise:false }, { id:'pink', label:'NOISE', noise:true },
+        ].map(({ id, label: btnLabel, noise }) => (
+          <button key={id} onClick={() => {
+            if (noise) {
+              const isActive = audio.oscillator === id;
+              if (isActive) { audio.setNoise?.(false); audio.changeOscillator('triangle'); }
+              else { audio.changeOscillator(id); audio.setNoise?.(true, 'pink'); }
+            } else {
+              audio.setNoise?.(false);
+              audio.changeOscillator(id);
+            }
+          }} style={{
             fontFamily:'Space Mono, monospace', fontSize:'10px',
             padding:'4px 8px', cursor:'pointer', letterSpacing:'1px',
-            background: audio.oscillator === id ? 'var(--blue)' : 'var(--cream-light)',
-            border: `1px solid ${audio.oscillator === id ? 'var(--blue-dark)' : 'var(--border)'}`,
-            color: audio.oscillator === id ? 'white' : 'var(--mid)',
+            background: audio.oscillator === id ? (noise ? 'var(--gold)' : 'var(--blue)') : 'var(--cream-light)',
+            border: `1px solid ${audio.oscillator === id ? (noise ? '#c49a00' : 'var(--blue-dark)') : 'var(--border)'}`,
+            color: audio.oscillator === id ? (noise ? '#1A1400' : 'white') : 'var(--mid)',
             flex: 1,
-          }}>{label}</button>
+          }}>{btnLabel}</button>
         ))}
+      </div>
+
+      {/* Unison + Detune */}
+      <div style={{ background:'var(--cream-dark)', border:'1px solid var(--border)', borderLeft:'3px solid var(--gold)', padding:'10px 12px', display:'flex', flexDirection:'column', gap:'8px' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <span style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--light)', letterSpacing:'1px' }}>UNISON</span>
+          <div style={{ display:'flex', gap:'3px' }}>
+            {[1,2,3,4].map(v => (
+              <button key={v} onClick={() => { setUnisonVoices(v); audio.setUnison(v, unisonDetune); }} style={{
+                fontFamily:'Space Mono, monospace', fontSize:'10px', padding:'3px 8px', cursor:'pointer',
+                background: unisonVoices===v ? 'var(--gold)' : 'var(--cream-light)',
+                border: `1px solid ${unisonVoices===v ? '#c49a00' : 'var(--border)'}`,
+                color: unisonVoices===v ? '#1A1400' : 'var(--mid)',
+              }}>{v}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+          <span style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--light)', letterSpacing:'1px', width:'44px' }}>DETUNE</span>
+          <div
+            style={{ flex:1, height:'4px', background:'var(--cream-light)', position:'relative' as const, cursor:'pointer', borderRadius:'2px', opacity: unisonVoices===1 ? 0.3 : 1 }}
+            onClick={e => {
+              if (unisonVoices === 1) return;
+              const r = e.currentTarget.getBoundingClientRect();
+              const v = Math.round(Math.min(1, Math.max(0, (e.clientX-r.left)/r.width)) * 100);
+              setUnisonDetune(v);
+              audio.setUnison(unisonVoices, v);
+            }}
+            onMouseMove={e => {
+              if (e.buttons !== 1 || unisonVoices === 1) return;
+              const r = e.currentTarget.getBoundingClientRect();
+              const v = Math.round(Math.min(1, Math.max(0, (e.clientX-r.left)/r.width)) * 100);
+              setUnisonDetune(v);
+              audio.setUnison(unisonVoices, v);
+            }}
+          >
+            <div style={{ height:'100%', width:`${unisonDetune}%`, background:'var(--gold)', borderRadius:'2px' }}/>
+            <div style={{ position:'absolute' as const, top:'-6px', left:`${unisonDetune}%`, transform:'translateX(-50%)', width:'14px', height:'14px', borderRadius:'50%', background:'var(--cream-light)', border:'2px solid var(--gold)' }}/>
+          </div>
+          <span style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--gold)', minWidth:'28px', textAlign:'right' as const }}>{unisonDetune}¢</span>
+        </div>
       </div>
 
       {/* Shape dial */}
@@ -372,8 +424,8 @@ function SignalSection({ inputLabel, isField=false, chain, bankEngine, audio, bp
   const [showPicker, setShowPicker]   = useState(false);
   const [showEffects, setShowEffects] = useState(false);
   const [recRunning, setRecRunning]   = useState(false);
-  const [ballX, setBallX] = useState(0.5);
-  const [ballY, setBallY] = useState(1.0); // start fully wet
+  const [ballX, setBallX] = useState(1.0); // start fully open/bright
+  const [ballY, setBallY] = useState(0.8); // start mostly wet
   const [recSecs, setRecSecs]         = useState(0);
   const recIntervalRef                = useRef<NodeJS.Timeout|null>(null);
   const source: 'TONE'|'FIELD'        = isField ? 'FIELD' : 'TONE';
@@ -422,7 +474,7 @@ function SignalSection({ inputLabel, isField=false, chain, bankEngine, audio, bp
           dotY={ballY}
           onDotChange={(x,y) => { setBallX(x); setBallY(y); audio.onBallMove(x,y); }}
           onDotRelease={(x,y) => { setBallX(x); setBallY(y); audio.onBallMove(x,y); }}
-          onReset={() => { setBallX(0.5); setBallY(1); audio.onBallMove(0.5,1); }}
+          onReset={() => { setBallX(1.0); setBallY(0.8); audio.onBallMove(1.0,0.8); }}
         />
         {!isField ? (
           <ToneControls audio={audio} bpm={bpm} onSnapshotLoad={onSnapshotLoad} />

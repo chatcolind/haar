@@ -9,6 +9,9 @@ interface ChainEffect {
 }
 
 let mainSynth: Tone.Synth | null = null;
+let unisonSynths: Tone.Synth[] = [];
+let unisonVoices = 2;
+let unisonDetune = 20; // 20 UI = 10 cents actual
 let masterGain: Tone.Gain | null = null;
 let masterFilter: Tone.Filter | null = null;
 let dryGain: Tone.Gain | null = null;
@@ -18,7 +21,11 @@ let triggerLoop: Tone.Loop | Tone.Sequence | null = null;
 let currentMode = 'FREE';
 let currentNote = 'D2';
 let arpNotes: string[] = [];
-let currentOscType = 'sine';
+let currentOscType = 'triangle';
+let currentShape = 0.6;
+let noiseNode: Tone.Noise | null = null;
+let noiseGain: Tone.Gain | null = null;
+let isNoiseMode = false;
 
 function shapeToEnv(shape: number) {
   if (shape < 0.15) {
@@ -66,26 +73,7 @@ function duckAndRewire(fn: () => void): void {
 }
 
 function rewireChain(): void {
-  if (!mainSynth || !masterFilter) return;
-  try { mainSynth.disconnect(); } catch {}
-  chainEffects.forEach(e => { try { e.node.disconnect(); } catch {} });
-
-  const active = chainEffects.filter(e => !e.muted);
-  const dest = wetGain ?? masterFilter;
-
-  // Dry path — synth always connects to dryGain
-  if (dryGain) mainSynth.connect(dryGain);
-
-  // Wet path — synth through effects chain to wetGain
-  if (active.length === 0) {
-    mainSynth.connect(dest);
-    return;
-  }
-  mainSynth.connect(active[0].node as any);
-  for (let i = 0; i < active.length - 1; i++) {
-    (active[i].node as any).connect(active[i + 1].node as any);
-  }
-  (active[active.length - 1].node as any).connect(dest);
+  rewireChainUnison();
 }
 
 export function initEngine(note: string, shape: number): void {
@@ -104,41 +92,36 @@ export function initEngine(note: string, shape: number): void {
 
   // Master filter — ball X axis controls cutoff
   masterFilter = new Tone.Filter({ frequency: 18000, type: 'lowpass', rolloff: -24 }).connect(masterGain);
-  // Wet/dry — ball Y axis
-  dryGain = new Tone.Gain(0).connect(masterFilter);
-  wetGain = new Tone.Gain(1).connect(masterFilter);
-  mainSynth = new Tone.Synth({
-    oscillator: { type: currentOscType as any },
-    envelope: shapeToEnv(shape),
-    volume: 0,
-  });
-  mainSynth.volume.value = 20;
-  mainSynth.set({ detune: (Math.random() - 0.5) * 4 });
+  currentShape = shape;
+  createUnisonVoices(shape);
   rewireChain();
 }
 
 export function teardown(): void {
   stopSequence();
+  stopNoiseNode();
+  isNoiseMode = false;
   if (masterGain) {
     masterGain.gain.rampTo(0, 0.08);
-    const g = masterGain;
-    const s = mainSynth;
-    const fx = [...chainEffects];
+    const g = masterGain, synths = [...unisonSynths], fx = [...chainEffects];
     setTimeout(() => {
-      try { s?.dispose(); } catch {}
+      synths.forEach(s => { try { s.dispose(); } catch {} });
       fx.forEach(e => { try { (e.node as any).dispose(); } catch {} });
       try { g?.dispose(); } catch {}
     }, 200);
     masterGain = null;
     mainSynth = null;
+    unisonSynths = [];
     chainEffects = [];
   }
 }
 
+const VALID_OSC = ['sine','triangle','sawtooth','square','fmsine','fmtriangle','amsine'];
 export function changeOscillator(type: string): void {
+  // Noise types ('pink','white','brown') are handled by the noise node, not the synth
+  if (!VALID_OSC.includes(type)) return;
   currentOscType = type;
-  if (!mainSynth) return;
-  try { mainSynth.set({ oscillator: { type: type as any } }); } catch {}
+  unisonSynths.forEach(s => { try { s.set({ oscillator: { type: type as any } }); } catch {} });
 }
 
 function stopSequence(): void {
@@ -163,10 +146,10 @@ export function startFree(note: string, shape: number, bpm: number): void {
   mainSynth.set({ envelope: shapeToEnv(shape) });
   const dur = noteDuration(shape);
   if (shape > 0.85) {
-    mainSynth.triggerAttack(note);
+    triggerUnisonAttack(note);
   } else {
     triggerLoop = new Tone.Loop(time => {
-      mainSynth?.triggerAttackRelease(currentNote, dur, time);
+      triggerUnisonAttackRelease(currentNote, dur, time);
     }, '4n');
     (triggerLoop as Tone.Loop).start(0);
     Tone.getTransport().start('+0.05');
@@ -257,40 +240,42 @@ export function updateArpNotes(config: {
   rootNote: string; octave: number; scale: string; steps: number;
   pattern: string; stepRate: string; bpm: number; shape: number;
 }): void {
-  if (!mainSynth) return;
+  if (unisonSynths.length === 0) return;
   arpNotes = buildNotes(config.rootNote, config.octave, config.scale, config.steps, config.pattern);
   Tone.getTransport().bpm.value = config.bpm;
-  mainSynth.set({ envelope: shapeToEnv(config.shape) });
-  const dur = noteDuration(config.shape);
+  const updEnv = shapeToEnv(config.shape);
+  unisonSynths.forEach(s => s.set({ envelope: updEnv }));
+  const updDur = noteDuration(config.shape);
   try { triggerLoop?.stop(0); triggerLoop?.dispose(); } catch {}
-  let idx = 0;
+  let updIdx = 0;
   triggerLoop = new Tone.Sequence(time => {
-    mainSynth?.triggerAttackRelease(arpNotes[idx % arpNotes.length], dur, time);
-    idx++;
+    triggerUnisonAttackRelease(arpNotes[updIdx % arpNotes.length], updDur, time);
+    updIdx++;
   }, arpNotes, config.stepRate as Tone.Unit.Time);
   (triggerLoop as Tone.Sequence).start(0);
-  Tone.getTransport().start('+0.05');
+  if (Tone.getTransport().state !== 'started') Tone.getTransport().start('+0.05');
 }
 
 export function updateShape(shape: number, note: string, mode: string): void {
   if (!mainSynth) return;
+  currentShape = shape;
   mainSynth.set({ envelope: shapeToEnv(shape) });
   if (mode === 'FREE') {
     if (shape > 0.4) {
       // Moving into swell/drone — stop loop, hold note
       if (triggerLoop) {
         stopSequence();
-        mainSynth.triggerAttack(note);
+        triggerUnisonAttack(note);
       }
     } else {
       // Moving into pluck/ping — start loop if not already running
       if (!triggerLoop) {
-        mainSynth.triggerRelease();
+        triggerUnisonRelease();
         const dur = noteDuration(shape);
         setTimeout(() => {
           if (!mainSynth) return;
           triggerLoop = new Tone.Loop(time => {
-            mainSynth?.triggerAttackRelease(currentNote, dur, time);
+            triggerUnisonAttackRelease(currentNote, dur, time);
           }, '4n');
           (triggerLoop as Tone.Loop).start(0);
           Tone.getTransport().start('+0.05');
@@ -302,10 +287,10 @@ export function updateShape(shape: number, note: string, mode: string): void {
 
 export function changeLiveNote(note: string, mode: string): void {
   currentNote = note;
-  if (!mainSynth) return;
+  if (unisonSynths.length === 0) return;
   if (mode === 'FREE') {
-    mainSynth.triggerRelease();
-    setTimeout(() => mainSynth?.triggerAttack(note), 500);
+    triggerUnisonRelease();
+    setTimeout(() => triggerUnisonAttack(note), 500);
   }
 }
 
@@ -490,3 +475,160 @@ export function applyEffectParam(id: number, name: string, paramIdx: number, val
   } catch { /* ignore */ }
 }
 applyEffectParam._state = {} as Record<string, [number, number]>;
+
+// ── Unison voice management ───────────────────────────────────────────────────
+// Always create MAX_VOICES. Unused voices are silenced with gainNode, not disposed.
+const MAX_VOICES = 4;
+let voiceGains: Tone.Gain[] = [];  // one gain per voice — controls active/silent
+
+function disposeUnisonVoices(): void {
+  unisonSynths.forEach(s => { try { s.dispose(); } catch {} });
+  voiceGains.forEach(g => { try { g.dispose(); } catch {} });
+  unisonSynths = [];
+  voiceGains = [];
+  mainSynth = null;
+}
+
+function createUnisonVoices(shape: number): void {
+  disposeUnisonVoices();
+  const env = shapeToEnv(shape);
+
+  for (let i = 0; i < MAX_VOICES; i++) {
+    const gainNode = new Tone.Gain(i === 0 ? 1 : 0); // only voice 0 active by default
+    voiceGains.push(gainNode);
+
+    const synth = new Tone.Synth({
+      oscillator: { type: currentOscType as any },
+      envelope: env,
+      volume: 0,
+    });
+    synth.set({ detune: (Math.random() - 0.5) * 2 });
+    synth.connect(gainNode);
+    unisonSynths.push(synth);
+  }
+
+  mainSynth = unisonSynths[0];
+  // voiceGains will be connected in rewireChainUnison
+}
+
+// Apply detune spread across active voices
+function applyUnisonDetune(): void {
+  const voices = unisonVoices;
+  // Map UI 0-100 to 0-50 cents spread for musical range
+  const spread = unisonDetune * 0.5;
+  for (let i = 0; i < MAX_VOICES; i++) {
+    const detuneCents = voices <= 1 ? 0
+      : ((i / (voices - 1)) - 0.5) * spread;
+    unisonSynths[i]?.set({ detune: detuneCents + (Math.random() - 0.5) * 1.5 });
+  }
+}
+
+// Apply volume compensation for stacking voices
+function applyUnisonVolume(): void {
+  const voices = unisonVoices;
+  const vol = voices === 1 ? 0 : -3 * Math.log2(voices);
+  unisonSynths.forEach(s => { try { s.volume.value = vol; } catch {} });
+}
+
+export function setUnison(voices: number, detune: number): void {
+  unisonVoices = voices;
+  unisonDetune = detune;
+  if (voiceGains.length === 0) return;
+  // Seamless — just fade gains in/out, no disposal, no gap
+  for (let i = 0; i < MAX_VOICES; i++) {
+    const targetGain = i < voices ? 1 : 0;
+    try { voiceGains[i]?.gain.rampTo(targetGain, 0.08); } catch {}
+  }
+  applyUnisonDetune();
+  applyUnisonVolume();
+}
+
+
+function rewireChainUnison(): void {
+  if (!masterFilter) return;
+
+  // Disconnect all synths
+  unisonSynths.forEach(s => { try { s.disconnect(); } catch {} });
+  chainEffects.forEach(e => { try { e.node.disconnect(); } catch {} });
+
+  const active = chainEffects.filter(e => !e.muted);
+  const dest = wetGain ?? masterFilter;
+  const dryDest = dryGain ?? masterFilter;
+
+  unisonSynths.forEach(s => {
+    if (dryGain) s.connect(dryGain);
+    if (active.length === 0) {
+      s.connect(dest);
+    } else {
+      s.connect(active[0].node as any);
+    }
+  });
+
+  if (active.length > 0) {
+    for (let i = 0; i < active.length - 1; i++) {
+      (active[i].node as any).connect(active[i + 1].node as any);
+    }
+    (active[active.length - 1].node as any).connect(dest);
+  }
+}
+
+function triggerUnisonAttack(note: string): void {
+  // Trigger all voices — gain nodes control which are heard
+  unisonSynths.forEach(s => { try { s.triggerAttack(note); } catch {} });
+}
+
+function triggerUnisonRelease(): void {
+  unisonSynths.forEach(s => { try { s.triggerRelease(); } catch {} });
+}
+
+function triggerUnisonAttackRelease(note: string, dur: string, time?: number): void {
+  unisonSynths.forEach(s => {
+    try {
+      if (time !== undefined) s.triggerAttackRelease(note, dur, time);
+      else s.triggerAttackRelease(note, dur);
+    } catch {}
+  });
+}
+
+// ── Noise oscillator ──────────────────────────────────────────────────────────
+function startNoiseNode(): void {
+  stopNoiseNode();
+  if (!masterFilter) return;
+  noiseGain = new Tone.Gain(0.8);
+  noiseNode = new Tone.Noise({ type: 'pink', volume: -6 });
+  // Connect noise through same chain as synth voices
+  if (dryGain) noiseGain.connect(dryGain);
+  const active = chainEffects.filter(e => !e.muted);
+  if (active.length === 0) {
+    const dest = wetGain ?? masterFilter;
+    noiseGain.connect(dest);
+  } else {
+    noiseGain.connect(active[0].node as any);
+  }
+  noiseNode.connect(noiseGain);
+  noiseNode.start();
+}
+
+function stopNoiseNode(): void {
+  try { noiseNode?.stop(); noiseNode?.dispose(); noiseNode = null; } catch {}
+  try { noiseGain?.dispose(); noiseGain = null; } catch {}
+}
+
+export function setNoiseMode(enabled: boolean, noiseType: 'white' | 'pink' | 'brown' = 'pink'): void {
+  isNoiseMode = enabled;
+  if (enabled) {
+    // Silence synth voices, start noise
+    voiceGains.forEach(g => { try { g.gain.rampTo(0, 0.1); } catch {} });
+    if (noiseNode) {
+      noiseNode.type = noiseType;
+    } else {
+      startNoiseNode();
+    }
+  } else {
+    // Stop noise, restore synth voices
+    stopNoiseNode();
+    for (let i = 0; i < unisonVoices; i++) {
+      try { voiceGains[i]?.gain.rampTo(1, 0.1); } catch {}
+    }
+  }
+}
