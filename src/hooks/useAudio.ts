@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   startAudio, initEngine, teardown,
-  startFree, stopFreeNote,
+  startFree,
   startBeat, startArp, updateArpNotes,
   updateShape, changeLiveNote, changeOscillator, setTransportBpm, setBallPosition, applyEffectParam, setUnison, setNoiseMode,
   disposeDrone, muteEffect, removeEffect, syncChain,
@@ -156,7 +156,7 @@ export function useAudio() {
     onBallMove: (x: number, y: number) => { if (isPlaying) setBallPosition(x, y); },
     onEffectParamChange: (id: number, name: string, paramIdx: number, value: number) => { applyEffectParam(id, name, paramIdx, value); },
     setUnison: (voices: number, detune: number) => { setUnison(voices, detune); },
-    setNoise: (enabled: boolean, type?: 'white'|'pink'|'brown') => { setNoiseMode(enabled, type ?? 'pink'); },
+    setNoise: (enabled: boolean, _type?: 'white'|'pink'|'brown') => { setNoiseMode(enabled); },
     changeOscillator: (type: string) => { setOscType(type); changeOscillator(type); },
     setBpm: (bpm: number) => { arpConfigRef.current.bpm = bpm; setTransportBpm(bpm); },
     play, stop,
