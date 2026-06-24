@@ -691,6 +691,12 @@ function MicrocosmPanel({ audio }: { audio: ReturnType<typeof useAudio> }) {
         </div>
       </div>
 
+      {/* FOUNDATION TEST */}
+      <div style={{ display:'flex', gap:'6px', marginBottom:'6px' }}>
+        <button onClick={() => audio.microFoundationTest?.()} style={{ flex:1, fontFamily:'Space Mono, monospace', fontSize:'10px', padding:'8px', cursor:'pointer', background:'var(--gold)', border:'none' }}>▶ FOUNDATION TEST</button>
+        <button onClick={() => audio.microFoundationStop?.()} style={{ flex:1, fontFamily:'Space Mono, monospace', fontSize:'10px', padding:'8px', cursor:'pointer', background:'var(--red)', color:'white', border:'none' }}>■ STOP</button>
+      </div>
+
       {/* Pulse + Hold triggers */}
       <div style={{ display:'flex', gap:'6px' }}>
         <button onClick={() => audio.microcosmPulse?.()} style={{

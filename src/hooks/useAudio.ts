@@ -10,6 +10,7 @@ import {
   setPatchLayer, getPatchLayers, loadPatchLayers,
   startGranular, granularFreeze, granularRate, granularDetune, granularGrainSize, granularReverse, stopGranular,
   microcosmSetSource, microcosmPulse, microcosmHold, microcosmXY, microcosmDensity, microcosmSpread, microcosmReverb, microcosmStop,
+  microFoundationTest, microFoundationStop,
   updateEffectDotLive, updateEffectDotRelease,
 } from '@/audio/engine';
 
@@ -178,6 +179,8 @@ export function useAudio() {
     microcosmSpread: (s: number) => microcosmSpread(s),
     microcosmReverb: (w: number) => microcosmReverb(w),
     microcosmStop: () => microcosmStop(),
+    microFoundationTest: () => microFoundationTest(),
+    microFoundationStop: () => microFoundationStop(),
     getArpConfig: () => arpConfigRef.current,
     onBallMove: (x: number, y: number) => { if (isPlaying) setBallPosition(x, y); },
     onEffectParamChange: (id: number, name: string, paramIdx: number, value: number) => { applyEffectParam(id, name, paramIdx, value); },

@@ -5,6 +5,7 @@ import { Patch, LayerConfig } from './patch';
 import { SampleVoice } from './sampleVoice';
 import { GranularEngine, renderToneBuffer } from './granular';
 import { GrainScatter, renderPulseSource } from './grainScatter';
+import { Microcosm as MicrocosmCore } from './microcosm';
 
 interface ChainEffect {
   id: number;
@@ -586,4 +587,53 @@ export function microcosmReverb(w: number): void { scatter?.setReverb(w); }
 
 export function microcosmStop(): void {
   scatter?.stopHold();
+}
+
+// ── MICROCOSM FOUNDATION TEST (fully native) ──────────────────────────────
+let microcosmCore: MicrocosmCore | null = null;
+let microTestOsc: OscillatorNode | null = null;
+let microTestLoop: number | null = null;
+
+export async function microFoundationTest(): Promise<void> {
+  if (!microcosmCore) {
+    microcosmCore = new MicrocosmCore();   // owns its own native context
+    await microcosmCore.load();
+    microcosmCore.connectOut(microcosmCore.destination);
+  }
+  const ctx = microcosmCore.context;
+
+  // Native test oscillator IN THE MICROCOSM'S OWN CONTEXT
+  if (!microTestOsc) {
+    microTestOsc = ctx.createOscillator();
+    microTestOsc.type = 'triangle';
+    microTestOsc.frequency.value = 220;
+    const g = ctx.createGain();
+    g.gain.value = 0.5;
+    microTestOsc.connect(g);
+    g.connect(microcosmCore.nativeIn);
+    microTestOsc.start();
+  }
+
+  const sr = microcosmCore.sampleRate;
+  if (microTestLoop === null) {
+    // MOSAIC-style: overlapping grains at normal + octave-up (2x), scattered.
+    // Octave-up is where the brightness comes from.
+    const rates = [1, 1, 2, 2, 1.5];  // root, root, octave, octave, fifth
+    microTestLoop = window.setInterval(() => {
+      if (!microcosmCore) return;
+      const rate = rates[Math.floor(Math.random() * rates.length)];
+      const lenSamp = Math.floor(sr * (0.15 + Math.random() * 0.25));
+      const startSamp = Math.floor(Math.random() * sr * 2);
+      microcosmCore.spawnGrain({ startSamp, rate, lenSamp, gain: 0.35, pan: Math.random() * 2 - 1 });
+    }, 90);
+  }
+  console.log('[micro] MOSAIC-style test running — octave-stacked grains');
+}
+
+export function microFoundationStop(): void {
+  if (microTestLoop !== null) { clearInterval(microTestLoop); microTestLoop = null; }
+  try { microTestOsc?.stop(); microTestOsc?.disconnect(); } catch {}
+  microTestOsc = null;
+  microcosmCore?.clearGrains();
+  console.log('[micro] foundation test stopped');
 }
