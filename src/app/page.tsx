@@ -610,6 +610,91 @@ function SignalSection({ inputLabel, isField=false, chain, bankEngine, audio, bp
   );
 }
 
+function MicrocosmPanel({ audio }: { audio: ReturnType<typeof useAudio> }) {
+  const [source, setSource] = useState<'synth'|'livein'|'sample'>('synth');
+  const [running, setRunning] = useState(false);
+
+  const sources: Array<{ id:'synth'|'livein'|'sample'; label:string }> = [
+    { id:'synth',  label:'SYNTH' },
+    { id:'livein', label:'LIVE IN' },
+    { id:'sample', label:'SAMPLE' },
+  ];
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+      {/* Source switch */}
+      <div>
+        <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>SOURCE</div>
+        <div style={{ display:'flex', gap:'3px' }}>
+          {sources.map(s => (
+            <button key={s.id} onClick={() => setSource(s.id)} style={{
+              flex:1, fontFamily:'Space Mono, monospace', fontSize:'10px', padding:'6px 4px', cursor:'pointer', letterSpacing:'1px',
+              background: source===s.id ? 'var(--gold)' : 'var(--cream-light)',
+              border: `1px solid ${source===s.id ? '#c49a00' : 'var(--border)'}`,
+              color: source===s.id ? '#1A1400' : 'var(--mid)',
+            }}>{s.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Transform start/stop */}
+      <button onClick={() => {
+        if (running) { audio.stopGranular?.(); setRunning(false); }
+        else { audio.startGranular?.('sine', 220); setRunning(true); }
+      }} style={{
+        fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'14px', letterSpacing:'2px',
+        padding:'10px', cursor:'pointer',
+        background: running ? 'var(--red)' : 'var(--gold)',
+        color: running ? 'white' : '#1A1400', border:'none',
+      }}>{running ? '■ STOP TRANSFORM' : '▶ TRANSFORM'}</button>
+
+      {/* Transform controls (granular for now — Microcosm engines next) */}
+      <div style={{ display:'flex', flexDirection:'column', gap:'8px', padding:'10px', background:'var(--cream-light)', border:'1px solid var(--border)' }}>
+        <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>FREEZE
+          <input type="range" min="0" max="100" defaultValue="0" onChange={e => audio.granularFreeze?.(+e.target.value/100)} style={{ width:'100%' }} />
+        </label>
+        <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>PITCH
+          <input type="range" min="-2400" max="2400" defaultValue="0" onChange={e => audio.granularDetune?.(+e.target.value)} style={{ width:'100%' }} />
+        </label>
+        <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>GRAIN SIZE
+          <input type="range" min="1" max="50" defaultValue="20" onChange={e => audio.granularGrainSize?.(+e.target.value/100)} style={{ width:'100%' }} />
+        </label>
+        <button onClick={() => audio.granularReverse?.(true)} style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', padding:'5px', cursor:'pointer', background:'var(--gold)', border:'none' }}>REVERSE</button>
+      </div>
+
+      {/* Capture (stub) */}
+      <button disabled style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', padding:'8px', cursor:'not-allowed', background:'var(--cream-dark)', border:'1px dashed var(--border)', color:'var(--light)', letterSpacing:'1px' }}>◉ CAPTURE → INSTRUMENT (soon)</button>
+    </div>
+  );
+}
+
+function FieldPanel({ audio, bpm }: { audio: ReturnType<typeof useAudio>; bpm: number }) {
+  const [bars, setBars] = useState(8);
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+      <div>
+        <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>LOOP LENGTH</div>
+        <div style={{ display:'flex', gap:'3px' }}>
+          {[4,8,16].map(b => (
+            <button key={b} onClick={() => setBars(b)} style={{
+              flex:1, fontFamily:'Space Mono, monospace', fontSize:'10px', padding:'6px 4px', cursor:'pointer',
+              background: bars===b ? 'var(--red)' : 'var(--cream-light)',
+              border: `1px solid ${bars===b ? 'var(--red-dark)' : 'var(--border)'}`,
+              color: bars===b ? 'white' : 'var(--mid)',
+            }}>{b} BAR</button>
+          ))}
+        </div>
+      </div>
+      <button disabled style={{ fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'14px', letterSpacing:'2px', padding:'10px', cursor:'not-allowed', background:'var(--cream-dark)', border:'1px dashed var(--border)', color:'var(--light)' }}>● ARM &amp; RECORD (soon)</button>
+      <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'1px', lineHeight:1.6 }}>
+        Records {bars} bars from Live In at {bpm} BPM, tempo-locked, into a seamless loop. Becomes a sample you can play, transform, or store.
+      </div>
+      <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginTop:'8px' }}>LIBRARY</div>
+      <div style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', color:'var(--light)', padding:'12px', background:'var(--cream-light)', border:'1px dashed var(--border)', textAlign:'center' }}>empty</div>
+    </div>
+  );
+}
+
 export default function Home() {
   const audio       = useAudio();
   const bankEngine  = useBankEngine();
@@ -707,15 +792,17 @@ export default function Home() {
       <Header />
       <ClockBar onBpmChange={(b) => { setBpm(b); audio.setBpm(b); }} />
       <div style={{ flex:1, paddingBottom:'24px' }}>
-        <SectionLabel left="Signal Build" right="Tone · Field" />
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0', padding:'0 24px' }}>
-          <div style={{ borderRight:'1px solid var(--border)', paddingRight:'28px' }}>
-            <div style={{ fontFamily:'Space Mono, monospace', fontSize:'11px', color:'var(--pink)', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'14px', display:'flex', alignItems:'center', gap:'8px' }}>
+        <SectionLabel left="Signal Build" right="Instrument · Microcosm · Field" />
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0', padding:'0 24px' }}>
+
+          {/* LEFT — INSTRUMENT (the synths) */}
+          <div style={{ borderRight:'1px solid var(--border)', paddingRight:'24px' }}>
+            <div style={{ fontFamily:'Space Mono, monospace', fontSize:'11px', color:'var(--blue)', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'14px', display:'flex', alignItems:'center', gap:'8px' }}>
               <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:'var(--blue)' }}/>
-              Tone — Input 1
+              Instrument
             </div>
             <SignalSection
-              inputLabel="Input 1 · Tone"
+              inputLabel="Instrument"
               chain={toneChain}
               bankEngine={bankEngine}
               audio={audio}
@@ -726,20 +813,23 @@ export default function Home() {
               onLoadPreset={handleLoadPreset}
             />
           </div>
-          <div style={{ paddingLeft:'28px' }}>
-            <div style={{ fontFamily:'Space Mono, monospace', fontSize:'11px', color:'var(--pink)', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'14px', display:'flex', alignItems:'center', gap:'8px' }}>
-              <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:'var(--red)' }}/>
-              Field — Input 2
+
+          {/* MIDDLE — MICROCOSM (transformation engine) */}
+          <div style={{ borderRight:'1px solid var(--border)', padding:'0 24px' }}>
+            <div style={{ fontFamily:'Space Mono, monospace', fontSize:'11px', color:'var(--gold)', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'14px', display:'flex', alignItems:'center', gap:'8px' }}>
+              <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:'var(--gold)' }}/>
+              Microcosm
             </div>
-            <SignalSection
-              inputLabel="Input 2 · Field / Mic"
-              isField
-              chain={fieldChain}
-              bankEngine={bankEngine}
-              audio={audio}
-              bpm={bpm}
-              editingBankId={bankEngine.editingBankId}
-            />
+            <MicrocosmPanel audio={audio} />
+          </div>
+
+          {/* RIGHT — FIELD (recorder / sampler) */}
+          <div style={{ paddingLeft:'24px' }}>
+            <div style={{ fontFamily:'Space Mono, monospace', fontSize:'11px', color:'var(--red)', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'14px', display:'flex', alignItems:'center', gap:'8px' }}>
+              <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:'var(--red)' }}/>
+              Field Recorder
+            </div>
+            <FieldPanel audio={audio} bpm={bpm} />
           </div>
         </div>
         <SectionLabel left="Live Mix" right="Banks" />
