@@ -645,6 +645,7 @@ function MicrocosmPad({ audio }: { audio: ReturnType<typeof useAudio> }) {
 function MicrocosmPanel({ audio }: { audio: ReturnType<typeof useAudio> }) {
   const [source, setSource] = useState<'synth'|'livein'|'sample'>('synth');
   const [running, setRunning] = useState(false);
+  const [activeEngines, setActiveEngines] = useState<string[]>([]);
   const [held, setHeld] = useState(false);
   const [note, setNote] = useState('A3');
   const NOTE_FREQ: Record<string, number> = {
@@ -665,6 +666,29 @@ function MicrocosmPanel({ audio }: { audio: ReturnType<typeof useAudio> }) {
     <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
       {/* Source switch */}
       <div>
+        <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>ENGINES</div>
+        <div style={{ display:'flex', flexDirection:'column', gap:'5px', marginBottom:'12px' }}>
+          {(['mosaic','haze','tunnel','strum'] as const).map(eng => {
+            const on = activeEngines.includes(eng);
+            return (
+              <div key={eng} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                <button onClick={() => {
+                  const next = on ? activeEngines.filter(e => e !== eng) : [...activeEngines, eng];
+                  setActiveEngines(next);
+                  audio.microcosmEngineActive?.(eng, !on);
+                }} style={{
+                  width:'72px', fontFamily:'Space Mono, monospace', fontSize:'9px', padding:'7px 2px', cursor:'pointer', textTransform:'uppercase' as const, letterSpacing:'1px',
+                  background: on ? 'var(--gold)' : 'var(--cream-light)',
+                  border: `1px solid ${on ? '#c49a00' : 'var(--border)'}`,
+                  color: on ? '#1A1400' : 'var(--mid)',
+                }}>{eng}</button>
+                <input type="range" min="0" max="100" defaultValue="80" disabled={!on}
+                  onChange={e => audio.microcosmEngineLevel?.(eng, +e.target.value/100)}
+                  style={{ flex:1, opacity: on ? 1 : 0.3 }} />
+              </div>
+            );
+          })}
+        </div>
         <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>SOURCE</div>
         <div style={{ display:'flex', gap:'3px' }}>
           {sources.map(s => (

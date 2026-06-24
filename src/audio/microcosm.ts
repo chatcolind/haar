@@ -29,6 +29,14 @@ export class Microcosm {
   private activity = 0.5;     // 0..1 density
   private grainSpread = 0.5;  // X: 0 = small/tight, 1 = large/diffuse
   private pitchSpread = 0.5;  // Y: 0 = unison, 1 = full octave-stack
+  // Engine rack — each independently on/off with its own fader level
+  private rack: Record<string, { active: boolean; level: number }> = {
+    mosaic: { active: false, level: 0.8 },
+    haze:   { active: false, level: 0.8 },
+    tunnel: { active: false, level: 0.8 },
+    strum:  { active: false, level: 0.8 },
+  };
+  private engineTickAccum: Record<string, number> = { mosaic: 0, haze: 0, tunnel: 0, strum: 0 };
   // pitch sets revealed progressively by pitchSpread
   private pitchTiers = [
     [1],                    // unison
@@ -113,33 +121,107 @@ export class Microcosm {
   // ── MOSAIC ENGINE ──────────────────────────────────────────────────────
   // Continuously spawns overlapping grains from the live ring buffer at
   // octave-stacked speeds. Activity controls density + number of voices.
-  startMosaic(): void {
+  setEngineActive(id: string, on: boolean): void {
+    if (this.rack[id]) this.rack[id].active = on;
+  }
+  setEngineLevel(id: string, level: number): void {
+    if (this.rack[id]) this.rack[id].level = Math.max(0, Math.min(1, level));
+  }
+  anyEngineActive(): boolean {
+    return Object.values(this.rack).some(e => e.active);
+  }
+
+  // Single master clock (10ms). Each active engine accumulates toward its own
+  // interval and fires when due — so all selected engines run simultaneously,
+  // each scaled by its own fader level.
+  startEngine(): void {
     if (this.mosaicTimer !== null) return;
+    const STEP = 10;
     const tick = () => {
-      // number of grains this tick scales with activity (1..4)
-      const voices = 1 + Math.round(this.activity * 3);
-      // Pitch set widens with pitchSpread (Y)
-      const tier = this.pitchTiers[Math.min(3, Math.floor(this.pitchSpread * 4))];
-      // Grain size grows with grainSpread (X): small/tight → large/diffuse
-      const baseLen = 0.04 + this.grainSpread * 0.36;   // 40ms..400ms
-      // Time spread also widens with grainSpread
-      const spreadRange = 0.1 + this.grainSpread * 1.9;  // 0.1s..2s
-      for (let v = 0; v < voices; v++) {
-        const rate = tier[Math.floor(Math.random() * tier.length)];
-        const lenSamp = Math.floor(this._sr * (baseLen * (0.7 + Math.random() * 0.6)));
-        const behind = Math.floor(this._sr * (0.15 + Math.random() * spreadRange));
-        const gain = 0.35 / Math.sqrt(voices) * 1.6;
-        this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
+      for (const id of Object.keys(this.rack)) {
+        const e = this.rack[id];
+        if (!e.active) continue;
+        this.engineTickAccum[id] -= STEP;
+        if (this.engineTickAccum[id] <= 0) {
+          let next = 100;
+          if (id === 'mosaic') next = this.tickMosaic(e.level);
+          else if (id === 'haze') next = this.tickHaze(e.level);
+          else if (id === 'tunnel') next = this.tickTunnel(e.level);
+          else if (id === 'strum') next = this.tickStrum(e.level);
+          this.engineTickAccum[id] = next;
+        }
       }
-      // interval shortens with activity (90ms..40ms) = busier
-      const interval = 90 - this.activity * 50;
-      this.mosaicTimer = window.setTimeout(tick, interval);
+      this.mosaicTimer = window.setTimeout(tick, STEP);
     };
     tick();
   }
-  stopMosaic(): void {
+  stopEngine(): void {
     if (this.mosaicTimer !== null) { clearTimeout(this.mosaicTimer); this.mosaicTimer = null; }
     this.clearGrains();
+  }
+
+  // ── MOSAIC: bright, octave-stacked overlapping loops ──
+  private tickMosaic(lvl: number = 1): number {
+    const voices = 1 + Math.round(this.activity * 3);
+    const tier = this.pitchTiers[Math.min(3, Math.floor(this.pitchSpread * 4))];
+    const baseLen = 0.04 + this.grainSpread * 0.36;
+    const spreadRange = 0.1 + this.grainSpread * 1.9;
+    for (let v = 0; v < voices; v++) {
+      const rate = tier[Math.floor(Math.random() * tier.length)];
+      const lenSamp = Math.floor(this._sr * (baseLen * (0.7 + Math.random() * 0.6)));
+      const behind = Math.floor(this._sr * (0.15 + Math.random() * spreadRange));
+      const gain = 0.35 / Math.sqrt(voices) * 1.6 * lvl;
+      this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
+    }
+    return 90 - this.activity * 50;
+  }
+
+  // ── HAZE: slow, long, diffuse wash — no octave jumps, dense overlapping ──
+  private tickHaze(lvl: number = 1): number {
+    const voices = 2 + Math.round(this.activity * 3);
+    // Long grains (0.4s..1.2s), slight detune only — smeared, no rhythm
+    const baseLen = 0.4 + this.grainSpread * 0.8;
+    for (let v = 0; v < voices; v++) {
+      // tiny random detune around unison (±pitchSpread semitones), no octaves
+      const cents = (Math.random() * 2 - 1) * this.pitchSpread * 100;
+      const rate = Math.pow(2, cents / 1200);
+      const lenSamp = Math.floor(this._sr * (baseLen * (0.8 + Math.random() * 0.4)));
+      const behind = Math.floor(this._sr * (0.3 + Math.random() * 2.5));
+      const gain = 0.28 / Math.sqrt(voices) * 1.6 * lvl;
+      this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
+    }
+    // slow, steady replenishment
+    return 160 - this.activity * 70;
+  }
+
+  // ── TUNNEL: deep sustained drone — long grains, octave-DOWN emphasis ──
+  private tickTunnel(lvl: number = 1): number {
+    const voices = 2 + Math.round(this.activity * 2);
+    const downTiers = [[0.5], [0.5, 1], [0.5, 0.25, 1]];
+    const tier = downTiers[Math.min(2, Math.floor(this.pitchSpread * 3))];
+    const baseLen = 0.6 + this.grainSpread * 1.0;
+    for (let v = 0; v < voices; v++) {
+      const rate = tier[Math.floor(Math.random() * tier.length)];
+      const lenSamp = Math.floor(this._sr * (baseLen * (0.8 + Math.random() * 0.4)));
+      const behind = Math.floor(this._sr * (0.5 + Math.random() * 2.0));
+      const gain = 0.3 / Math.sqrt(voices) * 1.6 * lvl;
+      this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
+    }
+    return 180 - this.activity * 80;
+  }
+
+  // ── STRUM: rhythmic, sequenced bursts — tight grains fired in quick runs ──
+  private strumStep = 0;
+  private tickStrum(lvl: number = 1): number {
+    // fire a quick ascending run of short grains
+    const tier = this.pitchTiers[Math.min(3, Math.floor(this.pitchSpread * 4))];
+    const rate = tier[this.strumStep % tier.length];
+    this.strumStep++;
+    const lenSamp = Math.floor(this._sr * (0.06 + this.grainSpread * 0.1));
+    const behind = Math.floor(this._sr * (0.15 + Math.random() * 0.6));
+    this.spawnGrain({ startSamp: behind, rate, lenSamp, gain: 0.4 * lvl, pan: Math.random() * 2 - 1 });
+    // rhythmic spacing — faster with activity
+    return 70 - this.activity * 40;
   }
   setActivity(a: number): void { this.activity = Math.max(0, Math.min(1, a)); }
   setGrainSpread(x: number): void { this.grainSpread = Math.max(0, Math.min(1, x)); }

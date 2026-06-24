@@ -616,12 +616,14 @@ async function ensureMicrocosmCore(): Promise<void> {
 
 export async function microcosmStart(): Promise<void> {
   await ensureMicrocosmCore();
-  microcosmCore?.startMosaic();
+  microcosmCore?.startEngine();
   console.log('[micro] mosaic engine started');
 }
 export function microcosmStopEngine(): void {
-  microcosmCore?.stopMosaic();
+  microcosmCore?.stopEngine();
 }
+export function microcosmEngineActive(id: string, on: boolean): void { microcosmCore?.setEngineActive(id, on); }
+export function microcosmEngineLevel(id: string, level: number): void { microcosmCore?.setEngineLevel(id, level); }
 export function microcosmActivity(a: number): void { microcosmCore?.setActivity(a); }
 export function microcosmGrainSpread(x: number): void { microcosmCore?.setGrainSpread(x); }
 export function microcosmPitchSpread(y: number): void { microcosmCore?.setPitchSpread(y); }

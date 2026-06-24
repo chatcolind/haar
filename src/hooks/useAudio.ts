@@ -10,7 +10,7 @@ import {
   setPatchLayer, getPatchLayers, loadPatchLayers,
   startGranular, granularFreeze, granularRate, granularDetune, granularGrainSize, granularReverse, stopGranular,
   microcosmSetSource, microcosmPulse, microcosmHold, microcosmXY, microcosmDensity, microcosmSpread, microcosmReverb, microcosmStop,
-  microcosmStart, microcosmStopEngine, microcosmActivity, microcosmSetFilter, microcosmSetSpace, microcosmFreeze, microcosmSourceFreq, microcosmGrainSpread, microcosmPitchSpread,
+  microcosmStart, microcosmStopEngine, microcosmEngineActive, microcosmEngineLevel, microcosmActivity, microcosmSetFilter, microcosmSetSpace, microcosmFreeze, microcosmSourceFreq, microcosmGrainSpread, microcosmPitchSpread,
   updateEffectDotLive, updateEffectDotRelease,
 } from '@/audio/engine';
 
@@ -180,6 +180,8 @@ export function useAudio() {
     microcosmReverb: (w: number) => microcosmReverb(w),
     microcosmStop: () => microcosmStop(),
     microcosmStart: () => microcosmStart(),
+    microcosmEngineActive: (id: string, on: boolean) => microcosmEngineActive(id, on),
+    microcosmEngineLevel: (id: string, level: number) => microcosmEngineLevel(id, level),
     microcosmStopEngine: () => microcosmStopEngine(),
     microcosmActivity: (a: number) => microcosmActivity(a),
     microcosmGrainSpread: (x: number) => microcosmGrainSpread(x),
