@@ -216,7 +216,7 @@ export class SmoothCrush extends Tone.ToneAudioNode {
 // ── Standard effect factory ───────────────────────────────────────────────────
 export function createEffectNode(name: EffectName): Tone.ToneAudioNode {
   switch (name) {
-    case 'Reverb':   return new SmoothReverb();
+    case 'Reverb':   return new Tone.Freeverb({ roomSize: 0.8, dampening: 3000, wet: 0.5 });
     case 'Tape':     return new SmoothTape();
     case 'Fuzz':     return new SmoothFuzz();
     case 'Crush':    return new SmoothCrush();

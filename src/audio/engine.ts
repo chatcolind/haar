@@ -454,9 +454,10 @@ export function applyEffectParam(id: number, name: string, paramIdx: number, val
 
     switch (name) {
       case 'Reverb':
-        if (paramIdx === 0) { const nx = (value - 0.5) / 19.5; applyEffectParam._state[key] = [nx, cy]; node.setParams?.(nx, cy); }
-        if (paramIdx === 1 && node._delays) node._delays.forEach((d: any) => { d.delayTime.rampTo(value/1000, 0.1); });
-        if (paramIdx === 2) { applyEffectParam._state[key] = [cx, pct]; node.setParams?.(cx, pct); }
+        // Tone.Freeverb: 0=roomSize(decay), 1=dampening, 2=wet
+        if (paramIdx === 0) { try { node.roomSize.rampTo(Math.min(0.95, 0.5 + (value/20)*0.45), 0.1); } catch {} }
+        if (paramIdx === 1) { try { node.dampening = 1000 + (value/200)*8000; } catch {} }
+        if (paramIdx === 2) node.wet?.rampTo(pct, 0.1);
         break;
       case 'Tape':
         if (paramIdx === 0) { applyEffectParam._state[key] = [pct, cy]; node.setParams?.(pct, cy); }
