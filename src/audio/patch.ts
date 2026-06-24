@@ -23,6 +23,8 @@ export class Patch {
   private layerGains: Tone.Gain[] = [];
   private configs: LayerConfig[] = [];
   private output: Tone.Gain;
+  private currentNote: string = 'A3';
+  private sounding = false;
 
   constructor(output: Tone.Gain) {
     this.output = output;
@@ -79,14 +81,18 @@ export class Patch {
 
   // ── Triggers — fire all enabled layers together ──
   triggerAttack(note: string, time?: number): void {
+    this.currentNote = note;
+    this.sounding = true;
     this.voices.forEach((v, i) => {
       if (this.configs[i].enabled) { try { v.triggerAttack(note, time); } catch {} }
     });
   }
   triggerRelease(time?: number): void {
+    this.sounding = false;
     this.voices.forEach(v => { try { v.triggerRelease(time); } catch {} });
   }
   triggerAttackRelease(note: string, dur: string, time?: number): void {
+    this.currentNote = note;
     this.voices.forEach((v, i) => {
       if (this.configs[i].enabled) { try { v.triggerAttackRelease(note, dur, time); } catch {} }
     });
@@ -104,11 +110,28 @@ export class Patch {
     this.voices.forEach(v => v.setDrive(amount));
   }
 
+  setMovement(amount: number): void {
+    this.voices.forEach(v => v.setMovement(amount));
+  }
+
   // Load a full set of layer configs (for presets)
   loadLayers(layers: LayerConfig[]): void {
     for (let i = 0; i < MAX_LAYERS; i++) {
       this.configs[i] = layers[i] ? { ...layers[i] } : defaultLayer();
       this.applyLayer(i);
+    }
+    // If currently sounding (drone), re-trigger ALL enabled voices together
+    // so every layer's envelope opens in sync at the correct frequency.
+    if (this.sounding) {
+      // Release everything first
+      this.voices.forEach(v => { try { v.triggerRelease(); } catch {} });
+      // Re-attack all enabled layers in unison after a short gap
+      const note = this.currentNote;
+      setTimeout(() => {
+        this.voices.forEach((v, i) => {
+          if (this.configs[i].enabled) { try { v.triggerAttack(note); } catch {} }
+        });
+      }, 60);
     }
   }
 

@@ -203,6 +203,23 @@ function ToneControls({ audio, bpm, onSnapshotLoad, onPresetLoad, onLoadPreset }
 
       {/* Presets */}
       <div style={{ background:'var(--cream-dark)', border:'1px solid var(--border)', borderLeft:'3px solid var(--pink)', padding:'8px 10px' }}>
+        <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>GRANULAR TEST</div>
+        <div style={{ display:'flex', flexDirection:'column', gap:'4px', marginBottom:'10px', padding:'8px', background:'var(--cream-light)', border:'1px solid var(--border)' }}>
+          <button onClick={() => audio.startGranular?.('sine', 220)} style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', padding:'5px', cursor:'pointer', background:'var(--blue)', color:'white', border:'none' }}>▶ TRANSFORM SINE (press main PLAY first)</button>
+          <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)' }}>FREEZE
+            <input type="range" min="0" max="100" defaultValue="0" onChange={e => audio.granularFreeze?.(+e.target.value/100)} style={{ width:'100%' }} />
+          </label>
+          <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)' }}>PITCH (cents)
+            <input type="range" min="-2400" max="2400" defaultValue="0" onChange={e => audio.granularDetune?.(+e.target.value)} style={{ width:'100%' }} />
+          </label>
+          <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)' }}>GRAIN SIZE
+            <input type="range" min="1" max="50" defaultValue="20" onChange={e => audio.granularGrainSize?.(+e.target.value/100)} style={{ width:'100%' }} />
+          </label>
+          <div style={{ display:'flex', gap:'4px' }}>
+            <button onClick={() => audio.granularReverse?.(true)} style={{ flex:1, fontFamily:'Space Mono, monospace', fontSize:'9px', padding:'4px', cursor:'pointer', background:'var(--gold)', border:'none' }}>REVERSE</button>
+            <button onClick={() => audio.stopGranular?.()} style={{ flex:1, fontFamily:'Space Mono, monospace', fontSize:'9px', padding:'4px', cursor:'pointer', background:'var(--red)', color:'white', border:'none' }}>STOP</button>
+          </div>
+        </div>
         <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>PRESETS — TAP TO PLAY</div>
         <div style={{ display:'flex', flexDirection:'column', gap:'3px' }}>
           {PRESETS.map((p, i) => (
@@ -618,22 +635,14 @@ export default function Home() {
   const [toneBallY, setToneBallY] = useState(0.8);
 
   const handleLoadPreset = useCallback((p: Preset) => {
-    // 1. Stop anything currently playing
+    console.log('[preset] clicked:', p.name, 'layers:', p.layers?.length, p.layers?.map(l => l.enabled));
     audio.stop();
-
-    // 2. Load the effects chain
     toneChain.loadFromSnapshot(p.effects.map(e => ({
       name: e.name, dotX: 0.5, dotY: 0.5, level: 70, muted: false,
     })));
-
-    // 3. Set ToneControls local state (unison, scale, steps, pattern, rate)
     if (presetLoaderRef.current) presetLoaderRef.current(p);
-
-    // 4. Set audio engine state
     audio.changeNote(p.rootNote, p.octave);
     audio.changeShape(p.shape);
-    audio.setNoise(false);
-    audio.changeOscillator(p.oscType);
     audio.setTriggerMode(p.triggerMode);
     audio.updateArpConfig({
       scale: p.scale, steps: p.steps, pattern: p.pattern,
@@ -641,23 +650,18 @@ export default function Home() {
     });
     setBpm(p.bpm);
     audio.setBpm(p.bpm);
-
-    // 5. Set ball
     setToneBallX(p.ballX);
     setToneBallY(p.ballY);
-
-    // 6. Start playing, then apply unison, ball, effect params, noise once audio is live
     setTimeout(() => {
+      // Pass layers into play() — patch is configured before the first trigger
       audio.play({
         scale: p.scale, steps: p.steps, pattern: p.pattern,
         stepRate: p.stepRate, bpm: p.bpm,
+        layers: p.layers,
       });
-
+      // Apply ball + effect params once audio is live
       setTimeout(() => {
-        audio.setUnison(p.unisonVoices, p.unisonDetune);
         audio.onBallMove(p.ballX, p.ballY);
-        if (p.noise) audio.setNoise(true, 'pink');
-        // Apply each effect's parameters
         p.effects.forEach((eff, idx) => {
           const mod = toneChain.modules[idx];
           if (mod) {
@@ -666,7 +670,7 @@ export default function Home() {
             });
           }
         });
-      }, 250);
+      }, 150);
     }, 150);
   }, [audio, toneChain]);
 

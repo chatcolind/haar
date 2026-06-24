@@ -7,6 +7,8 @@ import {
   startBeat, startArp, updateArpNotes,
   updateShape, changeLiveNote, changeOscillator, setTransportBpm, setBallPosition, applyEffectParam, setUnison, setNoiseMode,
   disposeDrone, muteEffect, removeEffect, syncChain,
+  setPatchLayer, getPatchLayers, loadPatchLayers,
+  startGranular, granularFreeze, granularRate, granularDetune, granularGrainSize, granularReverse, stopGranular,
   updateEffectDotLive, updateEffectDotRelease,
 } from '@/audio/engine';
 
@@ -33,6 +35,7 @@ export function useAudio() {
   const play = useCallback(async (config?: {
     scale?: string; steps?: number; pattern?: string;
     stepRate?: string; bpm?: number;
+    layers?: any[];
   }) => {
     if (!firstGesture.current) {
       await startAudio();
@@ -42,6 +45,10 @@ export function useAudio() {
 
     const note = getNote(rootNote, octave);
     initEngine(note, shape);
+
+    if (config?.layers) {
+      loadPatchLayers(config.layers);
+    }
 
     if (modeRef.current === 'FREE') {
       startFree(note, shapeRef.current, arpConfigRef.current.bpm);
@@ -152,6 +159,16 @@ export function useAudio() {
 
   return {
     isPlaying, rootNote, octave, shape, triggerMode, oscillator: oscType,
+    setPatchLayer: (i: number, cfg: any) => setPatchLayer(i, cfg),
+    getPatchLayers: () => getPatchLayers(),
+    loadPatchLayers: (layers: any[]) => loadPatchLayers(layers),
+    startGranular: (waveform: string, freq: number) => startGranular(waveform, freq),
+    granularFreeze: (a: number) => granularFreeze(a),
+    granularRate: (r: number) => granularRate(r),
+    granularDetune: (c: number) => granularDetune(c),
+    granularGrainSize: (s: number) => granularGrainSize(s),
+    granularReverse: (rev: boolean) => granularReverse(rev),
+    stopGranular: () => stopGranular(),
     getArpConfig: () => arpConfigRef.current,
     onBallMove: (x: number, y: number) => { if (isPlaying) setBallPosition(x, y); },
     onEffectParamChange: (id: number, name: string, paramIdx: number, value: number) => { applyEffectParam(id, name, paramIdx, value); },

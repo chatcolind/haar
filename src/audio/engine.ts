@@ -2,6 +2,8 @@ import * as Tone from 'tone';
 import { EffectName, createEffectNode, applyDotLive, applyDotRelease } from './effects';
 import { Voice } from './voice';
 import { Patch, LayerConfig } from './patch';
+import { SampleVoice } from './sampleVoice';
+import { GranularEngine, renderToneBuffer } from './granular';
 
 interface ChainEffect {
   id: number;
@@ -155,8 +157,13 @@ export function setPatchLayer(index: number, config: Partial<LayerConfig>): void
 export function getPatchLayers(): LayerConfig[] {
   return patch?.getLayers() ?? [];
 }
+export function setMovement(amount: number): void {
+  patch?.setMovement(amount);
+}
 export function loadPatchLayers(layers: LayerConfig[]): void {
+  console.log('[engine] loadPatchLayers called, patch exists:', !!patch, 'layers:', layers.map(l => l.enabled));
   patch?.loadLayers(layers);
+  console.log('[engine] after load, patch layers:', patch?.getLayers().map(l => l.enabled));
 }
 
 // Unison is replaced by multi-layer patch — keep a no-op for API compatibility
@@ -491,3 +498,28 @@ export function applyEffectParam(id: number, name: string, paramIdx: number, val
   } catch { /* ignore */ }
 }
 applyEffectParam._state = {} as Record<string, [number, number]>;
+
+
+
+// ── GRANULAR TRANSFORMATION PROOF ─────────────────────────────────────────────
+let granular: GranularEngine | null = null;
+
+export async function startGranular(waveform: string, freq: number): Promise<void> {
+  if (!masterFilter) { console.log('[gran] press play first'); return; }
+  if (granular) { try { granular.dispose(); } catch {} }
+  granular = new GranularEngine();
+  granular.output.connect(wetGain ?? masterFilter);
+  console.log('[gran] rendering source tone...');
+  const buf = await renderToneBuffer(waveform, freq, 2);
+  console.log('[gran] rendered, starting granular cloud');
+  granular.setBuffer(buf);
+  granular.setLoop(true);
+  granular.start();
+}
+
+export function granularFreeze(amount: number): void { granular?.freeze(amount); }
+export function granularRate(r: number): void { granular?.setRate(r); }
+export function granularDetune(c: number): void { granular?.setDetune(c); }
+export function granularGrainSize(s: number): void { granular?.setGrainSize(s); }
+export function granularReverse(rev: boolean): void { granular?.setReverse(rev); }
+export function stopGranular(): void { try { granular?.stop(); } catch {} }

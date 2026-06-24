@@ -93,6 +93,40 @@ export class Voice {
     this.osc1.start();
     this.osc2.start();
     this.noise.start();
+
+    // ── Movement LFOs — each at its own slow, non-harmonic rate ──
+    // Randomised per-voice so layers drift against each other (organic, never repeating)
+    const r = () => 0.7 + Math.random() * 0.6; // 0.7-1.3 multiplier for rate variation
+
+    // Filter breathing — slow sine modulating filter base frequency
+    this.lfoFilter = new Tone.LFO({
+      frequency: 0.08 * r(),  // ~once every 12s
+      min: -800, max: 800,    // Hz offset, scaled by movementGain
+      type: 'sine',
+    });
+    this.movementGain = new Tone.Gain(this.movementAmount);
+    this.lfoFilter.connect(this.movementGain);
+    this.movementGain.connect(this.filter.frequency);
+    this.lfoFilter.start();
+
+    // Pitch drift — very slow, subtle detune wander (tape warble)
+    this.lfoPitch = new Tone.LFO({
+      frequency: 0.05 * r(),  // ~once every 20s
+      min: -6, max: 6,        // cents
+      type: 'sine',
+    });
+    this.lfoPitch.connect(this.osc1.detune);
+    this.lfoPitch.connect(this.osc2.detune);
+    this.lfoPitch.start();
+
+    // Level swell — slow gain undulation
+    this.lfoLevel = new Tone.LFO({
+      frequency: 0.06 * r(),  // ~once every 16s
+      min: 0.7, max: 1.0,
+      type: 'sine',
+    });
+    this.lfoLevel.connect(this.mixBus.gain);
+    this.lfoLevel.start();
   }
 
   // Connect voice output to a destination
@@ -198,8 +232,9 @@ export class Voice {
   setDetune(cents: number): void {
     this.detuneCents = cents;
     const detuneMult = Math.pow(2, cents / 1200);
-    this.osc1.frequency.value = this.baseFreq * detuneMult;
-    this.osc2.frequency.value = (this.baseFreq / 2) * detuneMult;
+    const octMult = Math.pow(2, this.octaveOffset);
+    this.osc1.frequency.value = this.baseFreq * octMult * detuneMult;
+    this.osc2.frequency.value = (this.baseFreq * octMult / 2) * detuneMult;
   }
 
   setVolume(db: number): void {
@@ -221,14 +256,27 @@ export class Voice {
     this.octaveOffset = oct;
   }
 
+  setMovement(amount: number): void {
+    // 0 = static, 1 = heavy drift
+    this.movementAmount = amount;
+    this.movementGain.gain.rampTo(amount, 0.2);
+    // Pitch and level depth scale too
+    this.lfoPitch.min = -6 * amount;
+    this.lfoPitch.max = 6 * amount;
+    this.lfoLevel.min = 1 - 0.3 * amount;
+    this.lfoLevel.max = 1.0;
+  }
+
   dispose(): void {
     if (this._disposed) return;
     this._disposed = true;
     try { this.osc1.stop(); this.osc1.dispose(); } catch {}
     try { this.osc2.stop(); this.osc2.dispose(); } catch {}
     try { this.noise.stop(); this.noise.dispose(); } catch {}
+    try { this.lfoFilter.stop(); this.lfoPitch.stop(); this.lfoLevel.stop(); } catch {}
     [this.osc1Gain, this.osc2Gain, this.noiseGain, this.mixBus,
-     this.drive, this.filter, this.ampEnv, this.filterEnv, this.panner]
+     this.drive, this.filter, this.ampEnv, this.filterEnv, this.panner,
+     this.lfoFilter, this.lfoPitch, this.lfoLevel, this.movementGain]
       .forEach(n => { try { (n as any).dispose(); } catch {} });
   }
 }
