@@ -1,6 +1,7 @@
 import * as Tone from 'tone';
 import { EffectName, createEffectNode, applyDotLive, applyDotRelease } from './effects';
 import { Voice } from './voice';
+import { Patch, LayerConfig } from './patch';
 
 interface ChainEffect {
   id: number;
@@ -9,11 +10,8 @@ interface ChainEffect {
   muted: boolean;
 }
 
-const MAX_VOICES = 4;
-let voices: Voice[] = [];
-let voiceGains: Tone.Gain[] = [];     // gate gain per voice for unison switching
-let unisonVoices = 2;
-let unisonDetune = 20;                 // UI 0-100
+let patch: Patch | null = null;
+let patchBus: Tone.Gain | null = null;  // patch layers sum here, then into chain
 
 let masterGain: Tone.Gain | null = null;
 let masterFilter: Tone.Filter | null = null;
@@ -78,11 +76,11 @@ export function teardown(): void {
   engineReady = false;
   if (masterGain) {
     masterGain.gain.rampTo(0, 0.08);
-    const g = masterGain, vs = [...voices], vg = [...voiceGains], fx = [...chainEffects];
+    const g = masterGain, p = patch, pb = patchBus, fx = [...chainEffects];
     const mf = masterFilter, dg = dryGain, wg = wetGain;
     setTimeout(() => {
-      vs.forEach(v => { try { v.dispose(); } catch {} });
-      vg.forEach(x => { try { x.dispose(); } catch {} });
+      try { p?.dispose(); } catch {}
+      try { pb?.disconnect(); pb?.dispose(); } catch {}
       fx.forEach(e => { try { (e.node as any).dispose(); } catch {} });
       try { mf?.dispose(); } catch {}
       try { dg?.dispose(); } catch {}
@@ -90,71 +88,36 @@ export function teardown(): void {
       try { g?.dispose(); } catch {}
     }, 250);
     masterGain = null; masterFilter = null; dryGain = null; wetGain = null;
-    voices = []; voiceGains = []; chainEffects = [];
+    patch = null; patchBus = null; chainEffects = [];
   }
 }
 
 // ── Voice pool ────────────────────────────────────────────────────────────────
 function createVoices(shape: number): void {
-  voices.forEach(v => { try { v.dispose(); } catch {} });
-  voiceGains.forEach(g => { try { g.dispose(); } catch {} });
-  voices = [];
-  voiceGains = [];
+  if (patch) { try { patch.dispose(); } catch {} }
+  if (patchBus) { try { patchBus.disconnect(); } catch {} }
 
-  const env = shapeToEnv(shape);
-
-  for (let i = 0; i < MAX_VOICES; i++) {
-    const gate = new Tone.Gain(i === 0 ? 1 : 0); // voice 0 active by default
-    voiceGains.push(gate);
-
-    const voice = new Voice({
-      waveform: currentOscType,
-      subLevel: 0.45,
-      noiseLevel: 0,
-      drive: 0.15,
-      filterEnvAmount: 0.6,
-    });
-    voice.setAmpEnvelope(env);
-    voice.connect(gate);
-    voices.push(voice);
-  }
-  applyUnisonDetune();
-}
-
-function applyUnisonDetune(): void {
-  const spread = unisonDetune * 0.5; // UI 0-100 → 0-50 cents
-  for (let i = 0; i < MAX_VOICES; i++) {
-    const detuneCents = unisonVoices <= 1 ? 0 : ((i / (unisonVoices - 1)) - 0.5) * spread;
-    voices[i]?.setDetune(detuneCents + (Math.random() - 0.5) * 1.5);
-  }
-}
-
-export function setUnison(voiceCount: number, detune: number): void {
-  unisonVoices = voiceCount;
-  unisonDetune = detune;
-  if (voiceGains.length === 0) return;
-  for (let i = 0; i < MAX_VOICES; i++) {
-    try { voiceGains[i]?.gain.rampTo(i < voiceCount ? 1 : 0, 0.08); } catch {}
-  }
-  applyUnisonDetune();
+  patchBus = new Tone.Gain(1);
+  patch = new Patch(patchBus);
+  patch.setAmpEnvelope(shapeToEnv(shape));
+  // Default layer 0 uses current osc type
+  patch.setLayer(0, { enabled: true, waveform: currentOscType });
 }
 
 // ── Chain wiring ──────────────────────────────────────────────────────────────
 function rewireChain(): void {
-  if (!masterFilter) return;
-  voiceGains.forEach(g => { try { g.disconnect(); } catch {} });
+  if (!masterFilter || !patchBus) return;
+  try { patchBus.disconnect(); } catch {}
   chainEffects.forEach(e => { try { e.node.disconnect(); } catch {} });
 
   const active = chainEffects.filter(e => !e.muted);
   const dest = wetGain ?? masterFilter;
 
-  voiceGains.forEach(g => {
-    if (dryGain) g.connect(dryGain);
-    if (active.length === 0) g.connect(dest);
-    else g.connect(active[0].node as any);
-  });
-
-  if (active.length > 0) {
+  if (dryGain) patchBus.connect(dryGain);
+  if (active.length === 0) {
+    patchBus.connect(dest);
+  } else {
+    patchBus.connect(active[0].node as any);
     for (let i = 0; i < active.length - 1; i++) {
       (active[i].node as any).connect(active[i + 1].node as any);
     }
@@ -162,27 +125,43 @@ function rewireChain(): void {
   }
 }
 
-// ── Voice triggers (all voices, gates control audibility) ─────────────────────
+// ── Triggers — patch fires all enabled layers together ────────────────────────
 function attackAll(note: string): void {
-  voices.forEach(v => { try { v.triggerAttack(note); } catch {} });
+  patch?.triggerAttack(note);
 }
 function releaseAll(): void {
-  voices.forEach(v => { try { v.triggerRelease(); } catch {} });
+  patch?.triggerRelease();
 }
 function attackReleaseAll(note: string, dur: string, time?: number): void {
-  voices.forEach(v => { try { v.triggerAttackRelease(note, dur, time); } catch {} });
+  patch?.triggerAttackRelease(note, dur, time);
 }
 
 function setAllEnv(shape: number): void {
-  const env = shapeToEnv(shape);
-  voices.forEach(v => v.setAmpEnvelope(env));
+  patch?.setAmpEnvelope(shapeToEnv(shape));
 }
 
 export function changeOscillator(type: string): void {
   const VALID = ['sine','triangle','sawtooth','square','fmsine'];
   if (!VALID.includes(type)) return;
   currentOscType = type;
-  voices.forEach(v => v.setWaveform(type));
+  // Changes layer 0 (the primary layer) waveform
+  patch?.setLayer(0, { waveform: type });
+}
+
+// ── Layer control (multi-layer patch) ─────────────────────────────────────────
+export function setPatchLayer(index: number, config: Partial<LayerConfig>): void {
+  patch?.setLayer(index, config);
+}
+export function getPatchLayers(): LayerConfig[] {
+  return patch?.getLayers() ?? [];
+}
+export function loadPatchLayers(layers: LayerConfig[]): void {
+  patch?.loadLayers(layers);
+}
+
+// Unison is replaced by multi-layer patch — keep a no-op for API compatibility
+export function setUnison(_voiceCount: number, _detune: number): void {
+  // deprecated — layering provides width now
 }
 
 // ── Sequence helpers ──────────────────────────────────────────────────────────
@@ -336,27 +315,22 @@ export function changeLiveNote(note: string, mode: string): void {
 }
 
 // ── Layer controls (sub / noise / drive / filter env) ─────────────────────────
-export function setSubLevel(level: number): void {
-  voices.forEach(v => v.setSubLevel(level));
+export function setSubLevel(_level: number): void {
+  // Sub is now per-layer config in the Patch; kept for API compatibility
 }
-export function setNoiseLayer(level: number): void {
-  voices.forEach(v => v.setNoiseLevel(level));
+export function setNoiseLayer(_level: number): void {
+  // Noise is now a layer waveform in the Patch
 }
 export function setDrive(amount: number): void {
-  voices.forEach(v => v.setDrive(amount));
+  patch?.setDrive(amount);
 }
 export function setFilterEnvAmount(amount: number): void {
-  voices.forEach(v => v.setFilterEnvAmount(amount));
+  patch?.setFilterEnvAmount(amount);
 }
 
 // ── Noise mode (full noise source, silences pitched voices) ───────────────────
-export function setNoiseMode(enabled: boolean): void {
-  if (enabled) {
-    voices.forEach(v => v.setNoiseLevel(1));
-    voices.forEach((v, i) => { if (i < unisonVoices) v.setSubLevel(0); });
-  } else {
-    voices.forEach(v => { v.setNoiseLevel(0); v.setSubLevel(0.45); });
-  }
+export function setNoiseMode(_enabled: boolean): void {
+  // Noise is now configured as a layer waveform in the Patch
 }
 
 // ── Effects management ────────────────────────────────────────────────────────

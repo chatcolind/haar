@@ -27,6 +27,7 @@ export class Voice {
 
   // Envelopes
   private ampEnv: Tone.AmplitudeEnvelope;
+  private panner: Tone.Panner;
   private filterEnv: Tone.FrequencyEnvelope;
 
   // State
@@ -36,6 +37,7 @@ export class Voice {
   private filterEnvAmountVal = 0.6;
   private baseFreq = 220;
   private detuneCents = 0;
+  private octaveOffset = 0;
   private _disposed = false;
 
   constructor(config: VoiceConfig = {}) {
@@ -47,6 +49,7 @@ export class Voice {
     this.ampEnv = new Tone.AmplitudeEnvelope({
       attack: 0.5, decay: 0.3, sustain: 0.8, release: 3,
     });
+    this.panner = new Tone.Panner(0);
 
     // ── Filter with its own envelope ──
     this.filter = new Tone.Filter({ frequency: 800, type: 'lowpass', rolloff: -24, Q: 1 });
@@ -85,6 +88,7 @@ export class Voice {
     // AmplitudeEnvelope IS the VCA — audio flows through it
     this.filter.connect(this.ampEnv);
 
+    this.ampEnv.connect(this.panner);
     // Start oscillators immediately — they run continuously, VCA controls audibility
     this.osc1.start();
     this.osc2.start();
@@ -93,22 +97,22 @@ export class Voice {
 
   // Connect voice output to a destination
   connect(dest: Tone.InputNode): this {
-    this.ampEnv.connect(dest);
+    this.panner.connect(dest);
     return this;
   }
 
   disconnect(): void {
-    try { this.ampEnv.disconnect(); } catch {}
+    try { this.panner.disconnect(); } catch {}
   }
 
   private setFrequency(note: string | number): void {
     const freq = typeof note === 'number' ? note : Tone.Frequency(note).toFrequency();
     this.baseFreq = freq;
     const detuneMult = Math.pow(2, this.detuneCents / 1200);
-    this.osc1.frequency.value = freq * detuneMult;
-    this.osc2.frequency.value = (freq / 2) * detuneMult; // sub stays -1 oct
-    // Filter base tracks the note
-    this.filterEnv.baseFrequency = Math.max(120, freq * 0.8);
+    const octMult = Math.pow(2, this.octaveOffset);
+    this.osc1.frequency.value = freq * octMult * detuneMult;
+    this.osc2.frequency.value = (freq * octMult / 2) * detuneMult; // sub -1 oct from layer pitch
+    this.filterEnv.baseFrequency = Math.max(120, freq * octMult * 0.8);
   }
 
   triggerAttack(note: string | number, time?: number): void {
@@ -203,6 +207,20 @@ export class Voice {
     this.mixBus.gain.rampTo(Tone.dbToGain(db), 0.05);
   }
 
+  setPan(pan: number): void {
+    // pan -1 (left) to +1 (right)
+    this.panner.pan.rampTo(Math.max(-1, Math.min(1, pan)), 0.05);
+  }
+
+  setBaseCutoff(hz: number): void {
+    // Sets the filter envelope base frequency — where the filter sits
+    this.filterEnv.baseFrequency = Math.max(80, Math.min(18000, hz));
+  }
+
+  setOctaveOffset(oct: number): void {
+    this.octaveOffset = oct;
+  }
+
   dispose(): void {
     if (this._disposed) return;
     this._disposed = true;
@@ -210,7 +228,7 @@ export class Voice {
     try { this.osc2.stop(); this.osc2.dispose(); } catch {}
     try { this.noise.stop(); this.noise.dispose(); } catch {}
     [this.osc1Gain, this.osc2Gain, this.noiseGain, this.mixBus,
-     this.drive, this.filter, this.ampEnv, this.filterEnv]
+     this.drive, this.filter, this.ampEnv, this.filterEnv, this.panner]
       .forEach(n => { try { (n as any).dispose(); } catch {} });
   }
 }
