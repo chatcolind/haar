@@ -24,6 +24,18 @@ export class Microcosm {
   private reverbDry: GainNode;
   private ready = false;
   private _sr = 44100;
+  // Mosaic engine driver
+  private mosaicTimer: number | null = null;
+  private activity = 0.5;     // 0..1 density
+  private grainSpread = 0.5;  // X: 0 = small/tight, 1 = large/diffuse
+  private pitchSpread = 0.5;  // Y: 0 = unison, 1 = full octave-stack
+  // pitch sets revealed progressively by pitchSpread
+  private pitchTiers = [
+    [1],                    // unison
+    [1, 1, 2],              // + octave up
+    [1, 2, 1.5],            // + fifth
+    [1, 2, 1.5, 0.5],       // + octave down (full bright stack)
+  ];
 
   constructor() {
     // Own dedicated native AudioContext — no Tone wrapping, no bridge seam.
@@ -98,7 +110,43 @@ export class Microcosm {
     } catch {}
   }
 
+  // ── MOSAIC ENGINE ──────────────────────────────────────────────────────
+  // Continuously spawns overlapping grains from the live ring buffer at
+  // octave-stacked speeds. Activity controls density + number of voices.
+  startMosaic(): void {
+    if (this.mosaicTimer !== null) return;
+    const tick = () => {
+      // number of grains this tick scales with activity (1..4)
+      const voices = 1 + Math.round(this.activity * 3);
+      // Pitch set widens with pitchSpread (Y)
+      const tier = this.pitchTiers[Math.min(3, Math.floor(this.pitchSpread * 4))];
+      // Grain size grows with grainSpread (X): small/tight → large/diffuse
+      const baseLen = 0.04 + this.grainSpread * 0.36;   // 40ms..400ms
+      // Time spread also widens with grainSpread
+      const spreadRange = 0.1 + this.grainSpread * 1.9;  // 0.1s..2s
+      for (let v = 0; v < voices; v++) {
+        const rate = tier[Math.floor(Math.random() * tier.length)];
+        const lenSamp = Math.floor(this._sr * (baseLen * (0.7 + Math.random() * 0.6)));
+        const behind = Math.floor(this._sr * (0.15 + Math.random() * spreadRange));
+        const gain = 0.35 / Math.sqrt(voices) * 1.6;
+        this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
+      }
+      // interval shortens with activity (90ms..40ms) = busier
+      const interval = 90 - this.activity * 50;
+      this.mosaicTimer = window.setTimeout(tick, interval);
+    };
+    tick();
+  }
+  stopMosaic(): void {
+    if (this.mosaicTimer !== null) { clearTimeout(this.mosaicTimer); this.mosaicTimer = null; }
+    this.clearGrains();
+  }
+  setActivity(a: number): void { this.activity = Math.max(0, Math.min(1, a)); }
+  setGrainSpread(x: number): void { this.grainSpread = Math.max(0, Math.min(1, x)); }
+  setPitchSpread(y: number): void { this.pitchSpread = Math.max(0, Math.min(1, y)); }
+
   dispose(): void {
+    this.stopMosaic();
     try { this.node?.disconnect(); } catch {}
     [this.nativeIn, this.nativeOut, this.filter, this.reverb, this.reverbWet, this.reverbDry]
       .forEach(n => { try { n.disconnect(); } catch {} });

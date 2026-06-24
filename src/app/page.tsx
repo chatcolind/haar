@@ -598,8 +598,9 @@ function MicrocosmPad({ audio }: { audio: ReturnType<typeof useAudio> }) {
   const [dragging, setDragging] = useState(false);
 
   const apply = (x: number, y: number) => {
-    // X = space (ping-pong feedback + wet), Y = shimmer height
-    audio.microcosmXY?.(x, y);
+    // X = grain size/spread (tight→diffuse), Y = pitch spread (unison→octave stack)
+    audio.microcosmGrainSpread?.(x);
+    audio.microcosmPitchSpread?.(y);
   };
 
   const handle = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -613,7 +614,7 @@ function MicrocosmPad({ audio }: { audio: ReturnType<typeof useAudio> }) {
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'1px', marginBottom:'4px' }}>
-        <span>DRY</span><span>SHIMMER ↕</span><span>SPACE</span>
+        <span>TIGHT</span><span>PITCH ↕</span><span>DIFFUSE</span>
       </div>
       <div
         onMouseDown={e => { setDragging(true); handle(e); }}
@@ -644,13 +645,14 @@ function MicrocosmPad({ audio }: { audio: ReturnType<typeof useAudio> }) {
 function MicrocosmPanel({ audio }: { audio: ReturnType<typeof useAudio> }) {
   const [source, setSource] = useState<'synth'|'livein'|'sample'>('synth');
   const [running, setRunning] = useState(false);
+  const [held, setHeld] = useState(false);
   const [note, setNote] = useState('A3');
   const NOTE_FREQ: Record<string, number> = {
     'C3':130.81,'D3':146.83,'E3':164.81,'F3':174.61,'G3':196.0,'A3':220.0,'B3':246.94,'C4':261.63,
   };
   const setSourceNote = (n: string) => {
     setNote(n);
-    audio.microcosmSetSource?.('sine', NOTE_FREQ[n] ?? 220);
+    audio.microcosmSourceFreq?.(NOTE_FREQ[n] ?? 220);
   };
 
   const sources: Array<{ id:'synth'|'livein'|'sample'; label:string }> = [
@@ -691,21 +693,14 @@ function MicrocosmPanel({ audio }: { audio: ReturnType<typeof useAudio> }) {
         </div>
       </div>
 
-      {/* FOUNDATION TEST */}
-      <div style={{ display:'flex', gap:'6px', marginBottom:'6px' }}>
-        <button onClick={() => audio.microFoundationTest?.()} style={{ flex:1, fontFamily:'Space Mono, monospace', fontSize:'10px', padding:'8px', cursor:'pointer', background:'var(--gold)', border:'none' }}>▶ FOUNDATION TEST</button>
-        <button onClick={() => audio.microFoundationStop?.()} style={{ flex:1, fontFamily:'Space Mono, monospace', fontSize:'10px', padding:'8px', cursor:'pointer', background:'var(--red)', color:'white', border:'none' }}>■ STOP</button>
-      </div>
-
       {/* Pulse + Hold triggers */}
       <div style={{ display:'flex', gap:'6px' }}>
-        <button onClick={() => audio.microcosmPulse?.()} style={{
+        <button onClick={() => { if (running) { audio.microcosmStopEngine?.(); setRunning(false); } else { audio.microcosmStart?.(); setRunning(true); } }} style={{
           flex:1, fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'14px', letterSpacing:'2px',
           padding:'12px', cursor:'pointer', background:'var(--gold)', color:'#1A1400', border:'none',
         }}>◉ PULSE</button>
         <button onClick={() => {
-          if (running) { audio.microcosmHold?.(false); setRunning(false); }
-          else { audio.microcosmHold?.(true); setRunning(true); }
+          const next = !held; setHeld(next); audio.microcosmFreeze?.(next);
         }} style={{
           flex:1, fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'14px', letterSpacing:'2px',
           padding:'12px', cursor:'pointer',
@@ -720,13 +715,13 @@ function MicrocosmPanel({ audio }: { audio: ReturnType<typeof useAudio> }) {
       {/* Density + Spread */}
       <div style={{ display:'flex', flexDirection:'column', gap:'8px', padding:'10px', background:'var(--cream-light)', border:'1px solid var(--border)' }}>
         <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>DENSITY
-          <input type="range" min="2" max="40" defaultValue="14" onChange={e => audio.microcosmDensity?.(+e.target.value)} style={{ width:'100%' }} />
+          <input type="range" min="2" max="40" defaultValue="14" onChange={e => audio.microcosmActivity?.(+e.target.value/40)} style={{ width:'100%' }} />
         </label>
         <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>SPREAD
-          <input type="range" min="1" max="50" defaultValue="14" onChange={e => audio.microcosmSpread?.(+e.target.value/10)} style={{ width:'100%' }} />
+          <input type="range" min="1" max="50" defaultValue="14" onChange={e => audio.microcosmSetFilter?.(200 + (+e.target.value/50)*15000)} style={{ width:'100%' }} />
         </label>
         <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>REVERB
-          <input type="range" min="0" max="100" defaultValue="70" onChange={e => audio.microcosmReverb?.(+e.target.value/100)} style={{ width:'100%' }} />
+          <input type="range" min="0" max="100" defaultValue="70" onChange={e => audio.microcosmSetSpace?.(+e.target.value/100)} style={{ width:'100%' }} />
         </label>
       </div>
 

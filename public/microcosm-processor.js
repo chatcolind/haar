@@ -22,17 +22,22 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (e) => {
       const m = e.data;
       if (m.type === 'grain') {
-        // spawn a grain reader
+        // startSamp is interpreted as "samples behind the current write head".
+        // This keeps reads in recent, safe audio and never crosses the write
+        // head (which would cause a discontinuity = pop).
+        const behind = m.startSamp;
+        let pos = this.writePos - behind;
+        while (pos < 0) pos += this.size;
         this.grains.push({
-          // position in ring (samples), playback rate, length (samples), gain, pan
-          pos: m.startSamp,
+          pos,
           rate: m.rate,
           remaining: m.lenSamp,
           total: m.lenSamp,
           gain: m.gain,
           panL: Math.cos((m.pan + 1) * 0.25 * Math.PI),
           panR: Math.sin((m.pan + 1) * 0.25 * Math.PI),
-          age: 0,
+          // safety margin: how many samples of headroom before the write head
+          maxRead: behind,
         });
       } else if (m.type === 'freeze') {
         this.frozen = m.value;
@@ -69,8 +74,9 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
       const gr = this.grains[g];
       for (let i = 0; i < n; i++) {
         if (gr.remaining <= 0) break;
-        // raised-cosine amplitude window over the grain's life
-        const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * (gr.total - gr.remaining) / gr.total);
+        // raised-cosine (Hann) window — guaranteed zero at both ends, click-free
+        const phase = (gr.total - gr.remaining) / gr.total; // 0..1
+        const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * phase);
         // linear interpolation read
         const p = gr.pos;
         const i0 = Math.floor(p) % this.size;
