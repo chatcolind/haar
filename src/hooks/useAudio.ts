@@ -9,6 +9,7 @@ import {
   disposeDrone, muteEffect, removeEffect, syncChain,
   setPatchLayer, getPatchLayers, loadPatchLayers,
   startGranular, granularFreeze, granularRate, granularDetune, granularGrainSize, granularReverse, stopGranular,
+  microcosmSetSource, microcosmPulse, microcosmHold, microcosmXY, microcosmDensity, microcosmSpread, microcosmReverb, microcosmStop,
   updateEffectDotLive, updateEffectDotRelease,
 } from '@/audio/engine';
 
@@ -169,6 +170,14 @@ export function useAudio() {
     granularGrainSize: (s: number) => granularGrainSize(s),
     granularReverse: (rev: boolean) => granularReverse(rev),
     stopGranular: () => stopGranular(),
+    microcosmSetSource: (w: string, f: number) => microcosmSetSource(w, f),
+    microcosmPulse: () => microcosmPulse(),
+    microcosmHold: (on: boolean) => microcosmHold(on),
+    microcosmXY: (x: number, y: number) => microcosmXY(x, y),
+    microcosmDensity: (n: number) => microcosmDensity(n),
+    microcosmSpread: (s: number) => microcosmSpread(s),
+    microcosmReverb: (w: number) => microcosmReverb(w),
+    microcosmStop: () => microcosmStop(),
     getArpConfig: () => arpConfigRef.current,
     onBallMove: (x: number, y: number) => { if (isPlaying) setBallPosition(x, y); },
     onEffectParamChange: (id: number, name: string, paramIdx: number, value: number) => { applyEffectParam(id, name, paramIdx, value); },

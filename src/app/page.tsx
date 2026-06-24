@@ -203,24 +203,7 @@ function ToneControls({ audio, bpm, onSnapshotLoad, onPresetLoad, onLoadPreset }
 
       {/* Presets */}
       <div style={{ background:'var(--cream-dark)', border:'1px solid var(--border)', borderLeft:'3px solid var(--pink)', padding:'8px 10px' }}>
-        <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>GRANULAR TEST</div>
-        <div style={{ display:'flex', flexDirection:'column', gap:'4px', marginBottom:'10px', padding:'8px', background:'var(--cream-light)', border:'1px solid var(--border)' }}>
-          <button onClick={() => audio.startGranular?.('sine', 220)} style={{ fontFamily:'Space Mono, monospace', fontSize:'10px', padding:'5px', cursor:'pointer', background:'var(--blue)', color:'white', border:'none' }}>▶ TRANSFORM SINE (press main PLAY first)</button>
-          <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)' }}>FREEZE
-            <input type="range" min="0" max="100" defaultValue="0" onChange={e => audio.granularFreeze?.(+e.target.value/100)} style={{ width:'100%' }} />
-          </label>
-          <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)' }}>PITCH (cents)
-            <input type="range" min="-2400" max="2400" defaultValue="0" onChange={e => audio.granularDetune?.(+e.target.value)} style={{ width:'100%' }} />
-          </label>
-          <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)' }}>GRAIN SIZE
-            <input type="range" min="1" max="50" defaultValue="20" onChange={e => audio.granularGrainSize?.(+e.target.value/100)} style={{ width:'100%' }} />
-          </label>
-          <div style={{ display:'flex', gap:'4px' }}>
-            <button onClick={() => audio.granularReverse?.(true)} style={{ flex:1, fontFamily:'Space Mono, monospace', fontSize:'9px', padding:'4px', cursor:'pointer', background:'var(--gold)', border:'none' }}>REVERSE</button>
-            <button onClick={() => audio.stopGranular?.()} style={{ flex:1, fontFamily:'Space Mono, monospace', fontSize:'9px', padding:'4px', cursor:'pointer', background:'var(--red)', color:'white', border:'none' }}>STOP</button>
-          </div>
-        </div>
-        <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>PRESETS — TAP TO PLAY</div>
+<div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>PRESETS — TAP TO PLAY</div>
         <div style={{ display:'flex', flexDirection:'column', gap:'3px' }}>
           {PRESETS.map((p, i) => (
             <button key={p.name} onClick={() => onLoadPreset?.(p)} style={{
@@ -610,9 +593,65 @@ function SignalSection({ inputLabel, isField=false, chain, bankEngine, audio, bp
   );
 }
 
+function MicrocosmPad({ audio }: { audio: ReturnType<typeof useAudio> }) {
+  const [pos, setPos] = useState({ x: 0.0, y: 0.5 });
+  const [dragging, setDragging] = useState(false);
+
+  const apply = (x: number, y: number) => {
+    // X = space (ping-pong feedback + wet), Y = shimmer height
+    audio.microcosmXY?.(x, y);
+  };
+
+  const handle = (e: React.MouseEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    const y = Math.min(1, Math.max(0, 1 - (e.clientY - r.top) / r.height));
+    setPos({ x, y });
+    apply(x, y);
+  };
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'1px', marginBottom:'4px' }}>
+        <span>DRY</span><span>SHIMMER ↕</span><span>SPACE</span>
+      </div>
+      <div
+        onMouseDown={e => { setDragging(true); handle(e); }}
+        onMouseMove={e => { if (dragging) handle(e); }}
+        onMouseUp={() => setDragging(false)}
+        onMouseLeave={() => setDragging(false)}
+        style={{
+          position:'relative', width:'100%', aspectRatio:'1', cursor:'crosshair',
+          background:'linear-gradient(135deg, var(--cream-light), var(--cream-dark))',
+          border:'1px solid var(--gold)', borderRadius:'4px', overflow:'hidden',
+        }}
+      >
+        {/* crosshair lines */}
+        <div style={{ position:'absolute', left:`${pos.x*100}%`, top:0, bottom:0, width:'1px', background:'rgba(232,184,0,0.3)' }} />
+        <div style={{ position:'absolute', top:`${(1-pos.y)*100}%`, left:0, right:0, height:'1px', background:'rgba(232,184,0,0.3)' }} />
+        {/* handle */}
+        <div style={{
+          position:'absolute', left:`${pos.x*100}%`, top:`${(1-pos.y)*100}%`,
+          transform:'translate(-50%,-50%)', width:'22px', height:'22px', borderRadius:'50%',
+          background:'var(--gold)', border:'2px solid #1A1400',
+          boxShadow:'0 0 12px rgba(232,184,0,0.6)',
+        }} />
+      </div>
+    </div>
+  );
+}
+
 function MicrocosmPanel({ audio }: { audio: ReturnType<typeof useAudio> }) {
   const [source, setSource] = useState<'synth'|'livein'|'sample'>('synth');
   const [running, setRunning] = useState(false);
+  const [note, setNote] = useState('A3');
+  const NOTE_FREQ: Record<string, number> = {
+    'C3':130.81,'D3':146.83,'E3':164.81,'F3':174.61,'G3':196.0,'A3':220.0,'B3':246.94,'C4':261.63,
+  };
+  const setSourceNote = (n: string) => {
+    setNote(n);
+    audio.microcosmSetSource?.('sine', NOTE_FREQ[n] ?? 220);
+  };
 
   const sources: Array<{ id:'synth'|'livein'|'sample'; label:string }> = [
     { id:'synth',  label:'SYNTH' },
@@ -637,29 +676,52 @@ function MicrocosmPanel({ audio }: { audio: ReturnType<typeof useAudio> }) {
         </div>
       </div>
 
-      {/* Transform start/stop */}
-      <button onClick={() => {
-        if (running) { audio.stopGranular?.(); setRunning(false); }
-        else { audio.startGranular?.('sine', 220); setRunning(true); }
-      }} style={{
-        fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'14px', letterSpacing:'2px',
-        padding:'10px', cursor:'pointer',
-        background: running ? 'var(--red)' : 'var(--gold)',
-        color: running ? 'white' : '#1A1400', border:'none',
-      }}>{running ? '■ STOP TRANSFORM' : '▶ TRANSFORM'}</button>
+      {/* Root note (pulse pitch) */}
+      <div>
+        <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>KEY</div>
+        <div style={{ display:'flex', gap:'2px' }}>
+          {['C3','D3','E3','F3','G3','A3','B3','C4'].map(n => (
+            <button key={n} onClick={() => setSourceNote(n)} style={{
+              flex:1, fontFamily:'Space Mono, monospace', fontSize:'9px', padding:'5px 2px', cursor:'pointer',
+              background: note===n ? 'var(--gold)' : 'var(--cream-light)',
+              border: `1px solid ${note===n ? '#c49a00' : 'var(--border)'}`,
+              color: note===n ? '#1A1400' : 'var(--mid)',
+            }}>{n}</button>
+          ))}
+        </div>
+      </div>
 
-      {/* Transform controls (granular for now — Microcosm engines next) */}
+      {/* Pulse + Hold triggers */}
+      <div style={{ display:'flex', gap:'6px' }}>
+        <button onClick={() => audio.microcosmPulse?.()} style={{
+          flex:1, fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'14px', letterSpacing:'2px',
+          padding:'12px', cursor:'pointer', background:'var(--gold)', color:'#1A1400', border:'none',
+        }}>◉ PULSE</button>
+        <button onClick={() => {
+          if (running) { audio.microcosmHold?.(false); setRunning(false); }
+          else { audio.microcosmHold?.(true); setRunning(true); }
+        }} style={{
+          flex:1, fontFamily:'Rajdhani, sans-serif', fontWeight:600, fontSize:'14px', letterSpacing:'2px',
+          padding:'12px', cursor:'pointer',
+          background: running ? 'var(--red)' : 'var(--cream-light)',
+          color: running ? 'white' : 'var(--dark)', border:`1px solid ${running ? 'var(--red-dark)' : 'var(--border)'}`,
+        }}>{running ? '■ HOLDING' : '∞ HOLD'}</button>
+      </div>
+
+      {/* Microcosm XY performance pad */}
+      <MicrocosmPad audio={audio} />
+
+      {/* Density + Spread */}
       <div style={{ display:'flex', flexDirection:'column', gap:'8px', padding:'10px', background:'var(--cream-light)', border:'1px solid var(--border)' }}>
-        <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>FREEZE
-          <input type="range" min="0" max="100" defaultValue="0" onChange={e => audio.granularFreeze?.(+e.target.value/100)} style={{ width:'100%' }} />
+        <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>DENSITY
+          <input type="range" min="2" max="40" defaultValue="14" onChange={e => audio.microcosmDensity?.(+e.target.value)} style={{ width:'100%' }} />
         </label>
-        <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>PITCH
-          <input type="range" min="-2400" max="2400" defaultValue="0" onChange={e => audio.granularDetune?.(+e.target.value)} style={{ width:'100%' }} />
+        <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>SPREAD
+          <input type="range" min="1" max="50" defaultValue="14" onChange={e => audio.microcosmSpread?.(+e.target.value/10)} style={{ width:'100%' }} />
         </label>
-        <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>GRAIN SIZE
-          <input type="range" min="1" max="50" defaultValue="20" onChange={e => audio.granularGrainSize?.(+e.target.value/100)} style={{ width:'100%' }} />
+        <label style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--mid)', letterSpacing:'1px' }}>REVERB
+          <input type="range" min="0" max="100" defaultValue="70" onChange={e => audio.microcosmReverb?.(+e.target.value/100)} style={{ width:'100%' }} />
         </label>
-        <button onClick={() => audio.granularReverse?.(true)} style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', padding:'5px', cursor:'pointer', background:'var(--gold)', border:'none' }}>REVERSE</button>
       </div>
 
       {/* Capture (stub) */}

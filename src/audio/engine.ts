@@ -4,6 +4,7 @@ import { Voice } from './voice';
 import { Patch, LayerConfig } from './patch';
 import { SampleVoice } from './sampleVoice';
 import { GranularEngine, renderToneBuffer } from './granular';
+import { GrainScatter, renderPulseSource } from './grainScatter';
 
 interface ChainEffect {
   id: number;
@@ -159,6 +160,13 @@ export function getPatchLayers(): LayerConfig[] {
 }
 export function setMovement(amount: number): void {
   patch?.setMovement(amount);
+}
+
+// Mute/unmute the dry synth (patchBus) — used when Microcosm should be heard alone
+export function setDrySynthMuted(muted: boolean): void {
+  if (patchBus) {
+    try { patchBus.gain.rampTo(muted ? 0 : 1, 0.1); } catch {}
+  }
 }
 export function loadPatchLayers(layers: LayerConfig[]): void {
   console.log('[engine] loadPatchLayers called, patch exists:', !!patch, 'layers:', layers.map(l => l.enabled));
@@ -515,6 +523,7 @@ export async function startGranular(waveform: string, freq: number): Promise<voi
   granular.setBuffer(buf);
   granular.setLoop(true);
   granular.start();
+  setDrySynthMuted(true);  // hear ONLY the transformation
 }
 
 export function granularFreeze(amount: number): void { granular?.freeze(amount); }
@@ -522,4 +531,59 @@ export function granularRate(r: number): void { granular?.setRate(r); }
 export function granularDetune(c: number): void { granular?.setDetune(c); }
 export function granularGrainSize(s: number): void { granular?.setGrainSize(s); }
 export function granularReverse(rev: boolean): void { granular?.setReverse(rev); }
-export function stopGranular(): void { try { granular?.stop(); } catch {} }
+export function stopGranular(): void { try { granular?.stop(); } catch {} setDrySynthMuted(false); }
+
+
+// ── MICROCOSM (GrainScatter) — self-contained, independent of synth PLAY ───────
+let scatter: GrainScatter | null = null;
+let scatterReady = false;
+let microMaster: Tone.Gain | null = null;
+
+async function ensureMicrocosm(): Promise<void> {
+  // Start audio context if the synth never initialised it
+  if (Tone.getContext().state !== 'running') {
+    await Tone.start();
+  }
+  if (!scatter) {
+    // The Microcosm has its own output to destination, independent of the synth chain,
+    // via a limiter for safety.
+    const limiter = new Tone.Limiter(-1).toDestination();
+    microMaster = new Tone.Gain(1).connect(limiter);
+    scatter = new GrainScatter();
+    scatter.output.connect(microMaster);
+    const buf = await renderPulseSource('sine', 220);
+    scatter.setBuffer(buf);
+    scatterReady = true;
+  }
+}
+
+export async function microcosmSetSource(waveform: string, freq: number): Promise<void> {
+  await ensureMicrocosm();
+  const buf = await renderPulseSource(waveform, freq);
+  scatter?.setBuffer(buf);
+}
+
+export async function microcosmPulse(): Promise<void> {
+  await ensureMicrocosm();
+  scatter?.pulse();
+}
+
+export async function microcosmHold(on: boolean): Promise<void> {
+  await ensureMicrocosm();
+  if (on) scatter?.startHold();
+  else scatter?.stopHold();
+}
+
+// XY pad — X = ping-pong feedback/wet (space), Y = shimmer amount (height)
+export function microcosmXY(x: number, y: number): void {
+  if (!scatter) return;
+  scatter.setPingPong(0.3 + x * 0.55, 0.3 + x * 0.5);
+  scatter.setShimmer(y);
+}
+export function microcosmDensity(n: number): void { scatter?.setDensity(n); }
+export function microcosmSpread(s: number): void { scatter?.setSpread(s); }
+export function microcosmReverb(w: number): void { scatter?.setReverb(w); }
+
+export function microcosmStop(): void {
+  scatter?.stopHold();
+}
