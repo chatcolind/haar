@@ -25,9 +25,13 @@ const ALL_ORBS: OrbDef[] = [
 ];
 
 const FIELD_H = 0.70;
-const NOTES = ['G','A','B','C','D','E','F'];
+const NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 // base frequencies for octave 0 reference (G3..F4 around the 220Hz source)
-const NOTE_BASE: Record<string, number> = { G:196.00, A:220.00, B:246.94, C:261.63, D:293.66, E:329.63, F:349.23 };
+// chromatic frequencies, octave 4 (equal temperament). Ascending C..B.
+const NOTE_BASE: Record<string, number> = {
+  'C':261.63, 'C#':277.18, 'D':293.66, 'D#':311.13, 'E':329.63, 'F':349.23,
+  'F#':369.99, 'G':392.00, 'G#':415.30, 'A':440.00, 'A#':466.16, 'B':493.88,
+};
 // flavour palettes for the picker — name, label, colour, one-line descriptor
 const FLAVOURS = [
   { id:'open',      name:'Open',      col:'#e6ebff', desc:'octaves & fifths · pure' },
@@ -99,8 +103,11 @@ export default function FieldPage() {
   const [state, setState] = useState<'idle'|'playing'|'stopped'>('idle');
   const [muted, setMuted] = useState(false);
   const [xyMap, setXyMap] = useState<Record<string, XY>>(defaultXY);
-  const [key, setKey] = useState('C');
-  const [octave, setOctave] = useState(0); // -2..+2 shift
+  const [lockKey, setLockKey] = useState('C');   // the LOCKED root (yellow), double-click to set
+  const [playNote, setPlayNote] = useState('C'); // current note being played (white)
+  const [playSemi, setPlaySemi] = useState(0); // semitones from locked root      // octave offset of the played note from lock
+  const [octave, setOctave] = useState(0);        // whole-keyboard register shift
+  const lastTap = useRef<{ key:string; t:number }>({ key:'', t:0 });
   const [palette, setPalette] = useState('open');     // armed flavour palette (global)
   const [pickerOpen, setPickerOpen] = useState(false);  // flavour picker visible
   const [life, setLife] = useState(0.32);
@@ -138,15 +145,40 @@ export default function FieldPage() {
 
   useEffect(() => { if (started.current && state==='playing') activateRack(); /* eslint-disable-next-line */ }, [count]);
 
-  function applyKey(note: string, oct: number) {
-    const hz = (NOTE_BASE[note] ?? 261.63) * Math.pow(2, oct);
+  // play a note `semis` semitones from the locked root (negative = down, positive = up)
+  function playAt(note: string, semis: number) {
+    const rootHz = NOTE_BASE[lockKey] ?? 261.63;
+    const hz = rootHz * Math.pow(2, (semis / 12) + octave);
     microcosmSourceFreq(hz);
+    setPlayNote(note); setPlaySemi(semis);
+  }
+  // double-click a note to LOCK it as the root (yellow); single tap to play
+  // `semis` = semitone distance from current locked root
+  function tapNote(note: string, semis: number) {
+    const now = Date.now();
+    const tapId = note + ':' + semis;
+    if (lastTap.current.key === tapId && now - lastTap.current.t < 320) {
+      // double-click -> LOCK this note as the new root; it becomes the centre (0 semis)
+      setLockKey(note);
+      setPlayNote(note); setPlaySemi(0);
+      const rootHz = NOTE_BASE[note] ?? 261.63;
+      microcosmSourceFreq(rootHz * Math.pow(2, octave));
+      lastTap.current = { key:'', t:0 };
+    } else {
+      // single tap -> play this note (semis from current locked root)
+      playAt(note, semis);
+      lastTap.current = { key: tapId, t: now };
+    }
   }
 
   async function ensureStarted() {
     if (started.current) return;
     started.current = true;
     await startAudio(); await microcosmStart();
+    // tune the source to the locked root so audio matches the yellow label from note one
+    const rootHz = NOTE_BASE[lockKey] ?? 261.63;
+    microcosmSourceFreq(rootHz * Math.pow(2, octave));
+    setPlayNote(lockKey); setPlaySemi(0);
     setState('playing'); activateRack();
   }
   async function handleSelect(id: string) {
@@ -245,96 +277,131 @@ export default function FieldPage() {
         <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>add machine</span>
       </div>
 
-      <div style={{ position:'absolute', left:0, right:0, bottom:0, height: dim.h*0.30, display:'grid', gridTemplateColumns:'1fr 1.1fr 1fr', alignItems:'center', padding:'0 70px', boxSizing:'border-box' }}>
-        <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-start' }}>
-          <div style={zlabel}>FIELD</div>
-          <div style={{ display:'flex', alignItems:'center', gap:42 }}>
-            <div style={{ textAlign:'center', cursor:'pointer' }}>
-              <div style={{ width:58, height:58, borderRadius:'50%', border:'1px solid rgba(174,240,255,0.5)', background:'rgba(174,240,255,0.06)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                <svg width="26" height="26" viewBox="0 0 20 20"><g stroke="#cdf5ff" strokeWidth="1.3" opacity="0.85"><line x1="10" y1="2" x2="10" y2="18"/><line x1="3" y1="6" x2="17" y2="14"/><line x1="3" y1="14" x2="17" y2="6"/></g></svg>
-              </div>
-              <div style={{ fontSize:11, color:'#bfe8f5', marginTop:9, opacity:0.85 }}>Freeze</div>
-            </div>
-            <div style={{ textAlign:'center', cursor:'pointer' }}>
-              <div style={{ width:58, height:58, borderRadius:'50%', border:'1px solid rgba(255,214,166,0.5)', background:'rgba(255,214,166,0.06)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                <svg width="26" height="26" viewBox="0 0 20 20"><g fill="#ffe6c4"><circle cx="7" cy="6" r="1.7"/><circle cx="13" cy="7" r="1.7"/><circle cx="8" cy="13" r="1.7"/><circle cx="13" cy="13" r="1.7"/><circle cx="10" cy="10" r="1.7"/></g></svg>
-              </div>
-              <div style={{ fontSize:11, color:'#ffdcb0', marginTop:9, opacity:0.85 }}>Perturb</div>
-            </div>
-            <div style={{ textAlign:'center', cursor:'pointer' }}>
-              <div style={{ position:'relative', width:70, height:70 }}>
-                <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:`radial-gradient(circle, rgba(216,166,255,${0.4+life*0.5}) 0%, rgba(138,61,245,${0.15+life*0.3}) 50%, transparent 72%)`, filter:'blur(2px)' }} />
-                <div style={{ position:'absolute', inset:18, borderRadius:'50%', background:'#fff', opacity:0.9, filter:'blur(1px)' }} />
-              </div>
-              <div style={{ fontSize:11, color:'#e0c4ff', marginTop:5 }}>Life · {Math.round(life*100)}%</div>
-            </div>
-          </div>
-        </div>
+      {/* BOTTOM CONTROLS — two tiers: keyboard on top, FIELD/Flavour/SYSTEM beneath */}
+      <div style={{ position:'absolute', left:0, right:0, bottom:0, height: dim.h*0.30, display:'flex', flexDirection:'column', justifyContent:'center', gap:18, padding:'0 40px', boxSizing:'border-box' }}>
 
+        {/* TIER 1 — full-width keyboard */}
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
-          <div style={zlabel}>KEY</div>
-          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            <div onClick={()=>{ const o=Math.max(-2,octave-1); setOctave(o); applyKey(key,o); }} style={{ fontSize:14, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none' }}>◂</div>
-            {NOTES.map(n => {
-              const on = n===key;
-              return (
-                <div key={n} onClick={()=>{ setKey(n); applyKey(n, octave); }} style={{ width:on?44:38, height:on?44:38, borderRadius:'50%', cursor:'pointer',
-                  background: on ? 'radial-gradient(circle, #fff 0%, rgba(170,196,255,0.7) 48%, transparent 75%)' : 'radial-gradient(circle, rgba(234,240,255,0.5) 0%, rgba(170,192,232,0.18) 55%, transparent 78%)',
-                  display:'flex', alignItems:'center', justifyContent:'center',
-                  fontSize:14, fontWeight: on?700:500, color: on?'#1a2030':'#e8eeff' }}>{n}</div>
-              );
-            })}
-            <div onClick={()=>{ const o=Math.min(2,octave+1); setOctave(o); applyKey(key,o); }} style={{ fontSize:14, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none' }}>▸</div>
-          </div>
-          <div style={{ fontSize:9, color:'rgba(255,255,255,0.3)', marginTop:10 }}>whole-machine key · tap a note</div>
-          {/* FLAVOUR chip — opens the picker */}
-          <div onClick={()=>setPickerOpen(true)}
-            style={{ marginTop:12, display:'flex', alignItems:'center', gap:8, padding:'6px 16px', cursor:'pointer',
-              border:`0.5px solid ${palette==='open'?'rgba(255,255,255,0.22)':flavourOf(palette).col+'77'}`,
-              borderRadius:20, background: palette==='open'?'rgba(255,255,255,0.04)':flavourOf(palette).col+'12' }}>
-            {palette!=='open' && <div style={{ width:7, height:7, borderRadius:'50%', background:flavourOf(palette).col }} />}
-            <span style={{ fontSize:11, letterSpacing:'0.04em', color: palette==='open'?'rgba(255,255,255,0.7)':flavourOf(palette).col }}>
-              {palette==='open' ? 'Flavour' : `Flavour · ${flavourOf(palette).name}`}
-            </span>
-            <span style={{ fontSize:9, color:'rgba(255,255,255,0.35)' }}>▾</span>
+          <div style={{ ...zlabel, marginBottom:10 }}>KEY · double-tap to lock root · tap to play</div>
+          <div style={{ display:'flex', alignItems:'center', gap:4, maxWidth:'100%' }}>
+            <div onClick={()=>{ const o=Math.max(-3,octave-1); setOctave(o); playAt(playNote, playSemi); }}
+              style={{ fontSize:15, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none', padding:'0 6px' }}>◂</div>
+            {(() => {
+              const li = NOTES.indexOf(lockKey);
+              const cells = [];
+              for (let off = -12; off <= 12; off++) {
+                let idx = li + off;
+                idx = ((idx % 12) + 12) % 12;
+                const n = NOTES[idx];
+                const sharp = n.includes('#');
+                const isLock = off === 0;
+                const isPlay = (off === playSemi);   // off IS the semitone distance from root
+                const sz = isLock ? 34 : sharp ? 17 : 26;
+                cells.push(
+                  <div key={off} onClick={()=>tapNote(n, off)} title={n}
+                    style={{ width:sz, height:sz, borderRadius:'50%', cursor:'pointer', flexShrink:0,
+                      display:'flex', alignItems:'center', justifyContent:'center',
+                      fontSize: isLock?12:sharp?8:10, fontWeight: (isLock||isPlay)?700:500,
+                      boxShadow: isLock ? '0 0 12px 1px rgba(255,210,80,0.45)' : 'none',
+                      background: isLock
+                        ? 'radial-gradient(circle, #ffe066 0%, rgba(224,170,40,0.6) 52%, transparent 78%)'
+                        : isPlay
+                          ? 'radial-gradient(circle, #fff 0%, rgba(170,196,255,0.7) 48%, transparent 76%)'
+                          : sharp
+                            ? 'radial-gradient(circle, rgba(120,130,160,0.5) 0%, rgba(60,68,92,0.22) 55%, transparent 80%)'
+                            : 'radial-gradient(circle, rgba(234,240,255,0.42) 0%, rgba(170,192,232,0.14) 55%, transparent 80%)',
+                      color: isLock?'#2a2008':isPlay?'#1a2030':sharp?'rgba(215,222,238,0.6)':'#e8eeff' }}>
+                    {(isLock||isPlay||!sharp) ? n : ''}
+                  </div>
+                );
+              }
+              return cells;
+            })()}
+            <div onClick={()=>{ const o=Math.min(3,octave+1); setOctave(o); playAt(playNote, playSemi); }}
+              style={{ fontSize:15, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none', padding:'0 6px' }}>▸</div>
           </div>
         </div>
 
-        <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end' }}>
-          <div style={{ ...zlabel, alignSelf:'flex-end' }}>SYSTEM</div>
-          <div style={{ display:'flex', alignItems:'flex-end', gap:34 }}>
-            {[
-              { k:'Source', col:'rgba(255,216,107,0.5)', bg:'rgba(255,216,107,0.06)', dot:'#ffd86b' },
-              { k:'Scenes', col:'rgba(180,200,230,0.5)', bg:'rgba(180,200,230,0.05)', dot:'#8aa0d0' },
-              { k:'Rec',    col:'rgba(224,80,58,0.5)',   bg:'rgba(224,80,58,0.06)',   dot:'#ff7a5a' },
-            ].map(u => (
-              <div key={u.k} style={{ textAlign:'center', cursor:'pointer' }}>
-                <div style={{ width:48, height:48, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  <div style={{ width:8, height:8, borderRadius:'50%', background:u.dot }} />
+        {/* TIER 2 — FIELD (left) · FLAVOUR (centre) · SYSTEM (right) */}
+        <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:20 }}>
+
+          {/* FIELD */}
+          <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-start' }}>
+            <div style={zlabel}>FIELD</div>
+            <div style={{ display:'flex', alignItems:'flex-end', gap:30 }}>
+              <div style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(174,240,255,0.5)', background:'rgba(174,240,255,0.06)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <svg width="24" height="24" viewBox="0 0 20 20"><g stroke="#cdf5ff" strokeWidth="1.3" opacity="0.85"><line x1="10" y1="2" x2="10" y2="18"/><line x1="3" y1="6" x2="17" y2="14"/><line x1="3" y1="14" x2="17" y2="6"/></g></svg>
                 </div>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,0.6)', marginTop:9 }}>{u.k}</div>
+                <div style={{ fontSize:10, color:'#bfe8f5', marginTop:8, opacity:0.85 }}>Freeze</div>
               </div>
-            ))}
-            <div style={{ width:1, height:48, background:'rgba(255,255,255,0.1)' }} />
-            <div style={{ textAlign:'center' }}>
-              <div style={{ width:58, height:58, borderRadius:'50%', border:'2px solid rgba(122,245,200,0.4)', background:'radial-gradient(circle, rgba(122,245,200,0.45) 0%, transparent 70%)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
-                <div style={{ fontSize:15, fontWeight:700 }}>92</div>
-                <div style={{ fontSize:7, color:'#9affc8' }}>BPM</div>
+              <div style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(255,214,166,0.5)', background:'rgba(255,214,166,0.06)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <svg width="24" height="24" viewBox="0 0 20 20"><g fill="#ffe6c4"><circle cx="7" cy="6" r="1.7"/><circle cx="13" cy="7" r="1.7"/><circle cx="8" cy="13" r="1.7"/><circle cx="13" cy="13" r="1.7"/><circle cx="10" cy="10" r="1.7"/></g></svg>
+                </div>
+                <div style={{ fontSize:10, color:'#ffdcb0', marginTop:8, opacity:0.85 }}>Perturb</div>
               </div>
-              <div style={{ fontSize:10, color:'rgba(255,255,255,0.5)', marginTop:9 }}>Tempo</div>
+              <div style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ position:'relative', width:62, height:62 }}>
+                  <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:`radial-gradient(circle, rgba(216,166,255,${0.4+life*0.5}) 0%, rgba(138,61,245,${0.15+life*0.3}) 50%, transparent 72%)`, filter:'blur(2px)' }} />
+                  <div style={{ position:'absolute', inset:16, borderRadius:'50%', background:'#fff', opacity:0.9, filter:'blur(1px)' }} />
+                </div>
+                <div style={{ fontSize:10, color:'#e0c4ff', marginTop:4 }}>Life · {Math.round(life*100)}%</div>
+              </div>
             </div>
-            <div style={{ textAlign:'center' }}>
-              <div onClick={()=>{ if(state==='stopped') doStart(); else toggleMute(); }}
-                style={{ width:62, height:62, borderRadius:'50%', cursor:'pointer',
-                  border:`3px solid ${muted?'rgba(224,80,58,0.6)':'rgba(255,255,255,0.32)'}`,
-                  background:'radial-gradient(circle, rgba(255,255,255,0.55) 0%, transparent 70%)',
-                  display:'flex', alignItems:'center', justifyContent:'center' }}>
-                <div style={{ width:16, height:16, borderRadius:'50%', background: muted?'#e0503a':'#fff' }} />
+          </div>
+
+          {/* FLAVOUR chip (centre) */}
+          <div style={{ display:'flex', flexDirection:'column', alignItems:'center', paddingBottom:6 }}>
+            <div onClick={()=>setPickerOpen(true)}
+              style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 18px', cursor:'pointer',
+                border:`0.5px solid ${palette==='open'?'rgba(255,255,255,0.22)':flavourOf(palette).col+'77'}`,
+                borderRadius:20, background: palette==='open'?'rgba(255,255,255,0.04)':flavourOf(palette).col+'12' }}>
+              {palette!=='open' && <div style={{ width:7, height:7, borderRadius:'50%', background:flavourOf(palette).col }} />}
+              <span style={{ fontSize:11, letterSpacing:'0.04em', color: palette==='open'?'rgba(255,255,255,0.7)':flavourOf(palette).col }}>
+                {palette==='open' ? 'Flavour' : `Flavour · ${flavourOf(palette).name}`}
+              </span>
+              <span style={{ fontSize:9, color:'rgba(255,255,255,0.35)' }}>▾</span>
+            </div>
+          </div>
+
+          {/* SYSTEM */}
+          <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end' }}>
+            <div style={{ ...zlabel, alignSelf:'flex-end' }}>SYSTEM</div>
+            <div style={{ display:'flex', alignItems:'flex-end', gap:26 }}>
+              {[
+                { k:'Source', col:'rgba(255,216,107,0.5)', bg:'rgba(255,216,107,0.06)', dot:'#ffd86b' },
+                { k:'Scenes', col:'rgba(180,200,230,0.5)', bg:'rgba(180,200,230,0.05)', dot:'#8aa0d0' },
+                { k:'Rec',    col:'rgba(224,80,58,0.5)',   bg:'rgba(224,80,58,0.06)',   dot:'#ff7a5a' },
+              ].map(u => (
+                <div key={u.k} style={{ textAlign:'center', cursor:'pointer' }}>
+                  <div style={{ width:44, height:44, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    <div style={{ width:7, height:7, borderRadius:'50%', background:u.dot }} />
+                  </div>
+                  <div style={{ fontSize:9, color:'rgba(255,255,255,0.6)', marginTop:8 }}>{u.k}</div>
+                </div>
+              ))}
+              <div style={{ width:1, height:44, background:'rgba(255,255,255,0.1)' }} />
+              <div style={{ textAlign:'center' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:'2px solid rgba(122,245,200,0.4)', background:'radial-gradient(circle, rgba(122,245,200,0.45) 0%, transparent 70%)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
+                  <div style={{ fontSize:14, fontWeight:700 }}>92</div>
+                  <div style={{ fontSize:7, color:'#9affc8' }}>BPM</div>
+                </div>
+                <div style={{ fontSize:9, color:'rgba(255,255,255,0.5)', marginTop:8 }}>Tempo</div>
               </div>
-              <div style={{ display:'flex', gap:9, justifyContent:'center', marginTop:9 }}>
-                <span onClick={doStart} style={{ fontSize:9, color:'rgba(255,255,255,0.55)', cursor:'pointer' }}>start</span>
-                <span onClick={doStop} style={{ fontSize:9, color:'rgba(255,255,255,0.55)', cursor:'pointer' }}>stop</span>
-                <span onClick={toggleMute} style={{ fontSize:9, color: muted?'#ff7a5a':'rgba(255,255,255,0.55)', cursor:'pointer' }}>{muted?'unmute':'mute'}</span>
+              <div style={{ textAlign:'center' }}>
+                <div onClick={()=>{ if(state==='stopped') doStart(); else toggleMute(); }}
+                  style={{ width:56, height:56, borderRadius:'50%', cursor:'pointer',
+                    border:`3px solid ${muted?'rgba(224,80,58,0.6)':'rgba(255,255,255,0.32)'}`,
+                    background:'radial-gradient(circle, rgba(255,255,255,0.55) 0%, transparent 70%)',
+                    display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <div style={{ width:15, height:15, borderRadius:'50%', background: muted?'#e0503a':'#fff' }} />
+                </div>
+                <div style={{ display:'flex', gap:8, justifyContent:'center', marginTop:8 }}>
+                  <span onClick={doStart} style={{ fontSize:9, color:'rgba(255,255,255,0.55)', cursor:'pointer' }}>start</span>
+                  <span onClick={doStop} style={{ fontSize:9, color:'rgba(255,255,255,0.55)', cursor:'pointer' }}>stop</span>
+                  <span onClick={toggleMute} style={{ fontSize:9, color: muted?'#ff7a5a':'rgba(255,255,255,0.55)', cursor:'pointer' }}>{muted?'unmute':'mute'}</span>
+                </div>
               </div>
             </div>
           </div>

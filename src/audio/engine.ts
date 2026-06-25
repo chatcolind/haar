@@ -592,6 +592,7 @@ export function microcosmStop(): void {
 // ── MICROCOSM ENGINE ───────────────────────────────────────────────────────
 let microcosmCore: MicrocosmCore | null = null;
 let microTestOsc: OscillatorNode | null = null;
+let microSrcGain: GainNode | null = null;  // source feed gain (for ducking on pitch change)
 
 async function ensureMicrocosmCore(): Promise<void> {
   if (!microcosmCore) {
@@ -607,7 +608,8 @@ async function ensureMicrocosmCore(): Promise<void> {
     microTestOsc.type = 'triangle';
     microTestOsc.frequency.value = 220;
     const g = ctx.createGain();
-    g.gain.value = 0.5;
+    g.gain.value = 0.32;  // headroom: high notes + octave-up grains were railing
+    microSrcGain = g;
     microTestOsc.connect(g);
     g.connect(microcosmCore.nativeIn);
     microTestOsc.start();
@@ -633,6 +635,33 @@ export function microcosmFreeze(on: boolean): void { microcosmCore?.setFreeze(on
 export function microcosmArmedPalette(name: string): void { (microcosmCore as any)?.setArmedPalette(name); }
 export function microcosmEngineAmount(id: string, amt: number): void { (microcosmCore as any)?.setEngineAmount(id, amt); }
 export function microcosmGrainDensity(d: number): void { (microcosmCore as any)?.setDensity(d); }  // TEST DENSITY
+// glide time for root changes (seconds). Slow = smooth tape-slide, no pop.
+let microGlide = 0.28;
+export function microcosmGlideTime(sec: number): void { microGlide = Math.max(0.02, sec); }
 export function microcosmSourceFreq(hz: number): void {
-  if (microTestOsc) { try { microTestOsc.frequency.setTargetAtTime(hz, microcosmCore!.context.currentTime, 0.02); } catch {} }
+  if (microTestOsc) {
+    try {
+      const ctx = microcosmCore!.context;
+      const t = ctx.currentTime;
+      const cur = microTestOsc.frequency.value;
+      // pitch glide
+      microTestOsc.frequency.cancelScheduledValues(t);
+      microTestOsc.frequency.setValueAtTime(Math.max(1, cur), t);
+      microTestOsc.frequency.exponentialRampToValueAtTime(Math.max(1, hz), t + microGlide);
+      // DUCK the source briefly so in-flight grains crossing the pitch change aren't heard popping
+      if (microSrcGain) {
+        const base = 0.32;
+        const dip = 0.06;        // near-silence during the change
+        const tIn = 0.04;        // fade down
+        const hold = microGlide; // stay low through the glide
+        const tOut = 0.10;       // fade back up
+        const g = microSrcGain.gain;
+        g.cancelScheduledValues(t);
+        g.setValueAtTime(Math.max(0.0001, g.value), t);
+        g.linearRampToValueAtTime(dip, t + tIn);
+        g.setValueAtTime(dip, t + tIn + hold);
+        g.linearRampToValueAtTime(base, t + tIn + hold + tOut);
+      }
+    } catch {}
+  }
 }

@@ -16,6 +16,7 @@ export class Microcosm {
   private ctx: AudioContext;
   readonly nativeIn: GainNode;     // sources connect here (native)
   readonly nativeOut: GainNode;    // processed signal leaves here (native)
+  private limiter: DynamicsCompressorNode;  // catches peaks — never clip
 
   private node: AudioWorkletNode | null = null;
   private filter: BiquadFilterNode;
@@ -59,7 +60,7 @@ export class Microcosm {
 
   // ===== FLAVOUR SYSTEM ==========================================================
   // Constant consonant bed (octaves + fifths) — always present, the "open" sound.
-  private consonant = [1, 2, 1.5, 0.5, 3];   // root, 8ve up, 5th, 8ve down, 8ve+5th
+  private consonant = [1, 2, 1.5, 0.5];   // root, 8ve up, 5th, 8ve down (dropped 8ve+5th: aliased high notes)
   // Flavour palettes: each is a set of COLOUR-tone ratios layered over the bed.
   // 'open' has none (pure). Others are just-intonation colour tones that define them.
   static FLAVOUR_PALETTES: Record<string, number[]> = {
@@ -102,9 +103,18 @@ export class Microcosm {
     this._sr = ctx.sampleRate;
     this.nativeIn = ctx.createGain();
     this.nativeOut = ctx.createGain();
+    // limiter on the output bus: fast, hard, threshold just below 0dB — prevents clipping
+    this.limiter = ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -3;
+    this.limiter.knee.value = 0;
+    this.limiter.ratio.value = 20;
+    this.limiter.attack.value = 0.002;
+    this.limiter.release.value = 0.15;
+    // trim the bus a touch so we hit the limiter gently, not slam it
+    this.nativeOut.gain.value = 0.8;
     this.filter = ctx.createBiquadFilter();
     this.filter.type = 'lowpass';
-    this.filter.frequency.value = 12000;
+    this.filter.frequency.value = 8000;  // tame high-note aliasing
     this.filter.Q.value = 1;
     this.reverb = ctx.createConvolver();
     this.reverb.buffer = this.makeImpulse(3.5, 2.5);
@@ -150,10 +160,13 @@ export class Microcosm {
   get isReady(): boolean { return this.ready; }
 
   // Connect the Microcosm output somewhere (native node, e.g. ctx.destination)
-  connectOut(dest: AudioNode): void { this.nativeOut.connect(dest); }
+  connectOut(dest: AudioNode): void { this.nativeOut.connect(this.limiter); this.limiter.connect(dest); }
 
   spawnGrain(spec: GrainSpec): void {
-    this.node?.port.postMessage({ type: 'grain', ...spec });
+    // safety: clamp |rate| so high notes * up-pitched grains can't alias into crackle
+    const r = spec.rate;
+    const capped = Math.sign(r || 1) * Math.min(Math.abs(r), 2.2);
+    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped });
   }
   setFreeze(on: boolean): void { this.node?.port.postMessage({ type: 'freeze', value: on }); }
   clearGrains(): void { this.node?.port.postMessage({ type: 'clearGrains' }); }
@@ -440,7 +453,7 @@ export class Microcosm {
   dispose(): void {
     this.stopMosaic();
     try { this.node?.disconnect(); } catch {}
-    [this.nativeIn, this.nativeOut, this.filter, this.reverb, this.reverbWet, this.reverbDry]
+    [this.nativeIn, this.nativeOut, this.limiter, this.filter, this.reverb, this.reverbWet, this.reverbDry]
       .forEach(n => { try { n.disconnect(); } catch {} });
   }
 }

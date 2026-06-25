@@ -88,6 +88,12 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         gr.pos += gr.rate;
         if (gr.pos >= this.size) gr.pos -= this.size;
         if (gr.pos < 0) gr.pos += this.size;
+        // guard: a grain reading faster than the write head (rate>1) will catch the
+        // write head and read a discontinuity. Track headroom; end the grain before it crosses.
+        if (gr.rate > 1) {
+          gr.maxRead -= (gr.rate - 1);   // remaining samples of safe headroom
+          if (gr.maxRead <= 64 && gr.remaining > 1) gr.remaining = 1; // force a quick clean finish
+        }
         gr.remaining--;
       }
     }
