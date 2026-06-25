@@ -630,6 +630,9 @@ export function microcosmPitchSpread(y: number): void { microcosmCore?.setPitchS
 export function microcosmSetFilter(hz: number): void { microcosmCore?.setFilter(hz); }
 export function microcosmSetSpace(w: number): void { microcosmCore?.setSpace(w); }
 export function microcosmFreeze(on: boolean): void { microcosmCore?.setFreeze(on); }
+export function microcosmArmedPalette(name: string): void { (microcosmCore as any)?.setArmedPalette(name); }
+export function microcosmEngineAmount(id: string, amt: number): void { (microcosmCore as any)?.setEngineAmount(id, amt); }
+export function microcosmGrainDensity(d: number): void { (microcosmCore as any)?.setDensity(d); }  // TEST DENSITY
 export function microcosmSourceFreq(hz: number): void {
   if (microTestOsc) { try { microTestOsc.frequency.setTargetAtTime(hz, microcosmCore!.context.currentTime, 0.02); } catch {} }
 }

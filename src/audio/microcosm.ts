@@ -29,6 +29,7 @@ export class Microcosm {
   private activity = 0.5;     // 0..1 density
   private grainSpread = 0.5;  // X: 0 = small/tight, 1 = large/diffuse
   private pitchSpread = 0.5;  // Y: 0 = unison, 1 = full octave-stack
+  private density = 0.5;      // TEST: 0 = sparse single notes, 1 = dense cluster
   // Engine rack — each independently on/off with its own fader level
   private rack: Record<string, { active: boolean; level: number }> = {
     mosaic:  { active: false, level: 0.8 },
@@ -55,6 +56,43 @@ export class Microcosm {
     [1, 2, 1.5],            // + fifth
     [1, 2, 1.5, 0.5],       // + octave down (full bright stack)
   ];
+
+  // ===== FLAVOUR SYSTEM ==========================================================
+  // Constant consonant bed (octaves + fifths) — always present, the "open" sound.
+  private consonant = [1, 2, 1.5, 0.5, 3];   // root, 8ve up, 5th, 8ve down, 8ve+5th
+  // Flavour palettes: each is a set of COLOUR-tone ratios layered over the bed.
+  // 'open' has none (pure). Others are just-intonation colour tones that define them.
+  static FLAVOUR_PALETTES: Record<string, number[]> = {
+    open:      [],
+    bhairav:   [16/15, 8/5],          // India: flat-2 (komal Re), flat-6 (komal Dha)
+    hijaz:     [16/15, 5/4 * 16/15],  // Arabic: flat-2 + raised-3 (augmented 2nd gap)
+    hirajoshi: [16/15, 8/5],          // Japan koto: flat-2, flat-6 (pentatonic colour)
+    dorian:    [6/5, 16/9],           // modal: flat-3, flat-7 (gentle)
+  };
+  // The globally ARMED palette (chosen by the Flavour chip). Default open.
+  private armedPalette: string = 'open';
+  setArmedPalette(name: string): void {
+    if (Microcosm.FLAVOUR_PALETTES[name]) this.armedPalette = name;
+  }
+  // Per-engine flavour AMOUNT (0..1). DEFAULT 0 = pure octaves/fifths for every orb.
+  private engineAmount: Record<string, number> = {};
+  setEngineAmount(id: string, amt: number): void {
+    this.engineAmount[id] = Math.max(0, Math.min(1, amt));
+  }
+  // Pick one playback rate for a grain of engine `id`:
+  // mostly the consonant bed; with probability = THIS engine's amount, a colour
+  // tone from the armed palette. amount 0 or palette 'open' => always consonant.
+  private pickRate(id: string): number {
+    const amt = this.engineAmount[id] ?? 0;
+    const pal = Microcosm.FLAVOUR_PALETTES[this.armedPalette] ?? [];
+    if (amt > 0 && pal.length && Math.random() < amt) {
+      return pal[Math.floor(Math.random() * pal.length)];
+    }
+    return this.consonant[Math.floor(Math.random() * this.consonant.length)];
+  }
+  private get tiers() { return this.pitchTiers; } // engines still using tiers
+  // ===== END FLAVOUR SYSTEM ======================================================
+
 
   constructor() {
     // Own dedicated native AudioContext — no Tone wrapping, no bridge seam.
@@ -181,18 +219,20 @@ export class Microcosm {
 
   // ── MOSAIC: bright, octave-stacked overlapping loops ──
   private tickMosaic(lvl: number = 1): number {
-    const voices = 1 + Math.round(this.activity * 3);
-    const tier = this.pitchTiers[Math.min(3, Math.floor(this.pitchSpread * 4))];
+    // TEST DENSITY: voices + firing rate driven by density (not activity)
+    const voices = 1 + Math.round(this.density * 4);          // 1..5 voices
+    const tier = this.tiers[Math.min(this.tiers.length-1, Math.floor(this.pitchSpread * 4))];
     const baseLen = 0.04 + this.grainSpread * 0.36;
     const spreadRange = 0.1 + this.grainSpread * 1.9;
     for (let v = 0; v < voices; v++) {
-      const rate = tier[Math.floor(Math.random() * tier.length)];
+      const rate = this.pickRate('mosaic');   // flavour-aware grain pitch
       const lenSamp = Math.floor(this._sr * (baseLen * (0.7 + Math.random() * 0.6)));
       const behind = Math.floor(this._sr * (0.15 + Math.random() * spreadRange));
       const gain = 0.35 / Math.sqrt(voices) * 1.6 * lvl;
       this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
     }
-    return 90 - this.activity * 50;
+    // sparse = slow ticks (notes arrive one at a time), dense = fast ticks
+    return 260 - this.density * 200;   // ~260ms (sparse) .. ~60ms (dense)
   }
 
   // ── HAZE: slow, long, diffuse wash — no octave jumps, dense overlapping ──
@@ -220,7 +260,7 @@ export class Microcosm {
     const tier = downTiers[Math.min(2, Math.floor(this.pitchSpread * 3))];
     const baseLen = 0.6 + this.grainSpread * 1.0;
     for (let v = 0; v < voices; v++) {
-      const rate = tier[Math.floor(Math.random() * tier.length)];
+      const rate = this.pickRate('tunnel');
       const lenSamp = Math.floor(this._sr * (baseLen * (0.8 + Math.random() * 0.4)));
       const behind = Math.floor(this._sr * (0.5 + Math.random() * 2.0));
       const gain = 0.3 / Math.sqrt(voices) * 1.6 * lvl;
@@ -233,7 +273,7 @@ export class Microcosm {
   private strumStep = 0;
   private tickStrum(lvl: number = 1): number {
     // fire a quick ascending run of short grains
-    const tier = this.pitchTiers[Math.min(3, Math.floor(this.pitchSpread * 4))];
+    const tier = this.tiers[Math.min(this.tiers.length-1, Math.floor(this.pitchSpread * 4))];
     const rate = tier[this.strumStep % tier.length];
     this.strumStep++;
     const lenSamp = Math.floor(this._sr * (0.06 + this.grainSpread * 0.1));
@@ -247,10 +287,10 @@ export class Microcosm {
   private warpPhase = 0;
   private tickReverse(lvl: number = 1): number {
     const voices = 2 + Math.round(this.activity * 2);
-    const tier = this.pitchTiers[Math.min(3, Math.floor(this.pitchSpread * 4))];
+    const tier = this.tiers[Math.min(this.tiers.length-1, Math.floor(this.pitchSpread * 4))];
     const baseLen = 0.2 + this.grainSpread * 0.5;
     for (let v = 0; v < voices; v++) {
-      const semi = tier[Math.floor(Math.random() * tier.length)];
+      const semi = this.pickRate('reverse');
       const rate = -Math.abs(semi); // negative = reverse, always
       const lenSamp = Math.floor(this._sr * (baseLen * (0.8 + Math.random() * 0.4)));
       // Start point must be far enough back that playing BACKWARD (toward older
@@ -272,7 +312,7 @@ export class Microcosm {
     const tier = upTiers[Math.min(2, Math.floor(this.pitchSpread * 3))];
     const baseLen = 0.15 + this.grainSpread * 0.35;
     for (let v = 0; v < voices; v++) {
-      const rate = tier[Math.floor(Math.random() * tier.length)];
+      const rate = this.pickRate('shimmer');
       const lenSamp = Math.floor(this._sr * (baseLen * (0.7 + Math.random() * 0.6)));
       const behind = Math.floor(this._sr * (0.2 + Math.random() * 1.5));
       const gain = 0.22 / Math.sqrt(voices) * 1.6 * lvl;
@@ -334,12 +374,12 @@ export class Microcosm {
   // ── SWELL: Hendrix-style reverse bursts — discrete longer reversed grains,
   // each blooming up to a peak, fired in rhythmic spaced hits (not a wash) ──
   private tickSwell(lvl: number = 1): number {
-    const tier = this.pitchTiers[Math.min(3, Math.floor(this.pitchSpread * 4))];
+    const tier = this.tiers[Math.min(this.tiers.length-1, Math.floor(this.pitchSpread * 4))];
     // 1-2 grains per hit (a small reversed chord), longer so the swell is heard
     const voices = 1 + Math.round(this.pitchSpread * 1);
     const baseLen = 0.35 + this.grainSpread * 0.5;  // 0.35s..0.85s — clear swells
     for (let v = 0; v < voices; v++) {
-      const semi = tier[Math.floor(Math.random() * tier.length)];
+      const semi = this.pickRate('swell');
       const rate = -Math.abs(semi);
       const lenSamp = Math.floor(this._sr * (baseLen * (0.9 + Math.random() * 0.2)));
       const behind = Math.floor(this._sr * (0.3 + Math.random() * 0.6));
@@ -395,6 +435,7 @@ export class Microcosm {
   setActivity(a: number): void { this.activity = Math.max(0, Math.min(1, a)); }
   setGrainSpread(x: number): void { this.grainSpread = Math.max(0, Math.min(1, x)); }
   setPitchSpread(y: number): void { this.pitchSpread = Math.max(0, Math.min(1, y)); }
+  setDensity(d: number): void { this.density = Math.max(0, Math.min(1, d)); }  // TEST DENSITY
 
   dispose(): void {
     this.stopMosaic();

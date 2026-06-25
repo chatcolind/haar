@@ -5,25 +5,38 @@ import Orb from '../../components/field/Orb';
 import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel,
-  microcosmGrainSpread, microcosmPitchSpread,
+  microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq,
+  microcosmGrainDensity, microcosmArmedPalette, microcosmEngineAmount,
 } from '../../audio/engine';
 
 type OrbDef = { id: string; label: string; colorKey: any };
 const ALL_ORBS: OrbDef[] = [
+  // TEST BHAIRAV: Bhairav-capable engines first (mosaic/shimmer/warp/glitch use tiers)
+  { id: 'mosaic',  label: 'Mosaic',  colorKey: 'tunnel'  },
+  { id: 'shimmer', label: 'Shimmer', colorKey: 'shimmer' },
+  { id: 'warp',    label: 'Warp',    colorKey: 'warp'    },
+  { id: 'glitch',  label: 'Glitch',  colorKey: 'glitch'  },
   { id: 'bubbles', label: 'Bubbles', colorKey: 'bubbles' },
   { id: 'tunnel',  label: 'Tunnel',  colorKey: 'tunnel'  },
-  { id: 'shimmer', label: 'Shimmer', colorKey: 'shimmer' },
   { id: 'strum',   label: 'Strum',   colorKey: 'strum'   },
   { id: 'haze',    label: 'Haze',    colorKey: 'haze'    },
-  { id: 'glitch',  label: 'Glitch',  colorKey: 'glitch'  },
   { id: 'swarm',   label: 'Swarm',   colorKey: 'swarm'   },
-  { id: 'warp',    label: 'Warp',    colorKey: 'warp'    },
-  { id: 'mosaic',  label: 'Mosaic',  colorKey: 'tunnel'  },
   { id: 'reverse', label: 'Reverse', colorKey: 'shimmer' },
 ];
 
 const FIELD_H = 0.70;
 const NOTES = ['G','A','B','C','D','E','F'];
+// base frequencies for octave 0 reference (G3..F4 around the 220Hz source)
+const NOTE_BASE: Record<string, number> = { G:196.00, A:220.00, B:246.94, C:261.63, D:293.66, E:329.63, F:349.23 };
+// flavour palettes for the picker — name, label, colour, one-line descriptor
+const FLAVOURS = [
+  { id:'open',      name:'Open',      col:'#e6ebff', desc:'octaves & fifths · pure' },
+  { id:'bhairav',   name:'Bhairav',   col:'#ffcf6b', desc:'India · flat-2, flat-6' },
+  { id:'hijaz',     name:'Hijaz',     col:'#c9a0ff', desc:'Arabic · raised 2nd' },
+  { id:'hirajoshi', name:'Hirajoshi', col:'#ff9bb0', desc:'Japan · koto' },
+  { id:'dorian',    name:'Dorian',    col:'#7af5c8', desc:'modal · flat-3, flat-7' },
+];
+const flavourOf = (id: string) => FLAVOURS.find(f => f.id === id) ?? FLAVOURS[0];
 const CENTRE = { fx: 0.50, fy: 0.46, size: 200 };
 
 type XY = { x: number; y: number };
@@ -81,13 +94,21 @@ function satelliteSlots(count: number, W: number, H: number, centreSize: number)
 
 export default function FieldPage() {
   const [count, setCount] = useState(4);
-  const [selected, setSelected] = useState<string>('bubbles');
+  const [selected, setSelected] = useState<string>('mosaic'); // TEST BHAIRAV
   const [dim, setDim] = useState({ w: 1440, h: 900 });
   const [state, setState] = useState<'idle'|'playing'|'stopped'>('idle');
   const [muted, setMuted] = useState(false);
   const [xyMap, setXyMap] = useState<Record<string, XY>>(defaultXY);
   const [key, setKey] = useState('C');
+  const [octave, setOctave] = useState(0); // -2..+2 shift
+  const [palette, setPalette] = useState('open');     // armed flavour palette (global)
+  const [pickerOpen, setPickerOpen] = useState(false);  // flavour picker visible
   const [life, setLife] = useState(0.32);
+  const [solo, setSolo] = useState(false);      // TEST SOLO
+  const soloRef = useRef(false);                // TEST SOLO
+  const [density, setDensity] = useState(0.5);  // TEST DENSITY
+  const amountRef = useRef<Record<string, number>>({}); // per-orb flavour amount (default 0)
+  const [, forceAmt] = useState(0);
   const started = useRef(false);
   const mutedRef = useRef(false);
   const xyRef = useRef<Record<string, XY>>(defaultXY());
@@ -107,13 +128,20 @@ export default function FieldPage() {
     ALL_ORBS.forEach(o => {
       const on = orbs.some(v => v.id === o.id);
       microcosmEngineActive(o.id, on);
-      if (on) microcosmEngineLevel(o.id, mutedRef.current ? 0 : (o.id === selected ? 1 : 0.6));
+      if (on) microcosmEngineLevel(o.id, mutedRef.current ? 0
+        : soloRef.current ? (o.id === selected ? 1 : 0)   // TEST SOLO: only selected
+        : (o.id === selected ? 1 : 0.6));
     });
     const v = xyRef.current[selected] ?? { x:0.5, y:0.5 };
     microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
   }
 
   useEffect(() => { if (started.current && state==='playing') activateRack(); /* eslint-disable-next-line */ }, [count]);
+
+  function applyKey(note: string, oct: number) {
+    const hz = (NOTE_BASE[note] ?? 261.63) * Math.pow(2, oct);
+    microcosmSourceFreq(hz);
+  }
 
   async function ensureStarted() {
     if (started.current) return;
@@ -127,7 +155,9 @@ export default function FieldPage() {
     if (state === 'stopped') return;
     // selection = focus: this orb full level + its XY drives the controls
     ALL_ORBS.forEach(o => {
-      if (orbs.some(v => v.id === o.id)) microcosmEngineLevel(o.id, mutedRef.current ? 0 : (o.id === id ? 1 : 0.6));
+      if (orbs.some(v => v.id === o.id)) microcosmEngineLevel(o.id, mutedRef.current ? 0
+        : soloRef.current ? (o.id === id ? 1 : 0)   // TEST SOLO
+        : (o.id === id ? 1 : 0.6));
     });
     const v = xyRef.current[id] ?? { x:0.5, y:0.5 };
     microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
@@ -165,6 +195,33 @@ export default function FieldPage() {
       <div style={{ position:'absolute', top:24, left:32, fontSize:21, letterSpacing:'0.6em', fontWeight:500 }}>H A A R</div>
       <div style={{ position:'absolute', top:28, right:32, fontSize:11, fontWeight:500, color:'rgba(255,255,255,0.55)' }}>
         {state==='playing' ? `${muted?'muted':'playing'} · ${count} active` : state==='stopped' ? 'stopped' : `field · ${count} active`}
+      </div>
+
+
+      {/* TEST SOLO: hear only selected orb (temporary, removable) */}
+      <div onClick={()=>{ const v=!soloRef.current; soloRef.current=v; setSolo(v); activateRack(); }}
+        style={{ position:'absolute', top:108, left:'50%', transform:'translateX(-50%)', zIndex:100, padding:'7px 16px', fontSize:11, cursor:'pointer', userSelect:'none', borderRadius:18,
+          background: solo ? 'rgba(122,245,200,0.25)' : 'rgba(255,255,255,0.06)', border:'0.5px solid rgba(255,255,255,0.2)',
+          color: solo ? '#fff' : 'rgba(255,255,255,0.5)' }}>
+        {solo ? 'SOLO on · only selected' : 'Solo off · all play'}
+      </div>
+
+      {/* TEST DENSITY: slider (temporary, removable) */}
+      <div style={{ position:'absolute', top:200, left:32, zIndex:100, display:'flex', flexDirection:'column', alignItems:'flex-start', gap:5, background:'rgba(255,255,255,0.06)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:14, padding:'8px 16px' }}>
+        <div style={{ fontSize:10, color:'rgba(255,255,255,0.6)', letterSpacing:'0.1em' }}>DENSITY · {Math.round(density*100)}%</div>
+        <input type="range" min={0} max={1} step={0.01} value={density}
+          onChange={(e)=>{ const d=parseFloat(e.target.value); setDensity(d); microcosmGrainDensity(d); }}
+          style={{ width:200, accentColor:'#d8a6ff' }} />
+        <div style={{ fontSize:8, color:'rgba(255,255,255,0.4)' }}>sparse · single notes &nbsp;→&nbsp; dense · cluster</div>
+      </div>
+
+      {/* TEMP per-orb flavour AMOUNT (acts on selected orb; real control = orb back) */}
+      <div style={{ position:'absolute', top:280, left:32, zIndex:100, display:'flex', flexDirection:'column', alignItems:'flex-start', gap:5, background:'rgba(255,255,255,0.06)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:14, padding:'8px 16px' }}>
+        <div style={{ fontSize:10, color:'rgba(255,255,255,0.6)', letterSpacing:'0.1em' }}>{selected.toUpperCase()} AMOUNT · {Math.round((amountRef.current[selected]||0)*100)}%</div>
+        <input type="range" min={0} max={1} step={0.01} value={amountRef.current[selected]||0}
+          onChange={(e)=>{ const a=parseFloat(e.target.value); amountRef.current[selected]=a; microcosmEngineAmount(selected, a); forceAmt(x=>x+1); }}
+          style={{ width:200, accentColor:'#ffd86b' }} />
+        <div style={{ fontSize:8, color:'rgba(255,255,255,0.4)' }}>0 · pure open &nbsp;→&nbsp; full {palette} colour</div>
       </div>
 
       {/* TEST: orb count stepper (top-left, clear of orbs, above field) */}
@@ -217,19 +274,30 @@ export default function FieldPage() {
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
           <div style={zlabel}>KEY</div>
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            <div style={{ fontSize:14, color:'rgba(255,255,255,0.4)', cursor:'pointer' }}>◂</div>
+            <div onClick={()=>{ const o=Math.max(-2,octave-1); setOctave(o); applyKey(key,o); }} style={{ fontSize:14, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none' }}>◂</div>
             {NOTES.map(n => {
               const on = n===key;
               return (
-                <div key={n} onClick={()=>setKey(n)} style={{ width:on?44:38, height:on?44:38, borderRadius:'50%', cursor:'pointer',
+                <div key={n} onClick={()=>{ setKey(n); applyKey(n, octave); }} style={{ width:on?44:38, height:on?44:38, borderRadius:'50%', cursor:'pointer',
                   background: on ? 'radial-gradient(circle, #fff 0%, rgba(170,196,255,0.7) 48%, transparent 75%)' : 'radial-gradient(circle, rgba(234,240,255,0.5) 0%, rgba(170,192,232,0.18) 55%, transparent 78%)',
                   display:'flex', alignItems:'center', justifyContent:'center',
                   fontSize:14, fontWeight: on?700:500, color: on?'#1a2030':'#e8eeff' }}>{n}</div>
               );
             })}
-            <div style={{ fontSize:14, color:'rgba(255,255,255,0.4)', cursor:'pointer' }}>▸</div>
+            <div onClick={()=>{ const o=Math.min(2,octave+1); setOctave(o); applyKey(key,o); }} style={{ fontSize:14, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none' }}>▸</div>
           </div>
           <div style={{ fontSize:9, color:'rgba(255,255,255,0.3)', marginTop:10 }}>whole-machine key · tap a note</div>
+          {/* FLAVOUR chip — opens the picker */}
+          <div onClick={()=>setPickerOpen(true)}
+            style={{ marginTop:12, display:'flex', alignItems:'center', gap:8, padding:'6px 16px', cursor:'pointer',
+              border:`0.5px solid ${palette==='open'?'rgba(255,255,255,0.22)':flavourOf(palette).col+'77'}`,
+              borderRadius:20, background: palette==='open'?'rgba(255,255,255,0.04)':flavourOf(palette).col+'12' }}>
+            {palette!=='open' && <div style={{ width:7, height:7, borderRadius:'50%', background:flavourOf(palette).col }} />}
+            <span style={{ fontSize:11, letterSpacing:'0.04em', color: palette==='open'?'rgba(255,255,255,0.7)':flavourOf(palette).col }}>
+              {palette==='open' ? 'Flavour' : `Flavour · ${flavourOf(palette).name}`}
+            </span>
+            <span style={{ fontSize:9, color:'rgba(255,255,255,0.35)' }}>▾</span>
+          </div>
         </div>
 
         <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end' }}>
@@ -272,6 +340,34 @@ export default function FieldPage() {
           </div>
         </div>
       </div>
+      {/* FLAVOUR PICKER — blooms up from the chip */}
+      {pickerOpen && (
+        <div onClick={()=>setPickerOpen(false)}
+          style={{ position:'absolute', inset:0, zIndex:200, background:'rgba(2,3,8,0.55)', backdropFilter:'blur(4px)',
+            display:'flex', alignItems:'flex-end', justifyContent:'center', paddingBottom:'32vh' }}>
+          <div onClick={(e)=>e.stopPropagation()}
+            style={{ background:'rgba(14,16,26,0.94)', border:'0.5px solid rgba(255,255,255,0.16)', borderRadius:22,
+              padding:'24px 30px', backdropFilter:'blur(10px)' }}>
+            <div style={{ fontSize:10, letterSpacing:'0.26em', color:'rgba(255,255,255,0.35)', marginBottom:22, textAlign:'center' }}>FLAVOUR — THE FIELD'S TONAL WORLD</div>
+            <div style={{ display:'flex', gap:26 }}>
+              {FLAVOURS.map(f => {
+                const sel = f.id===palette;
+                return (
+                  <div key={f.id} onClick={()=>{ setPalette(f.id); microcosmArmedPalette(f.id); setTimeout(()=>setPickerOpen(false),200); }}
+                    style={{ width:100, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:10, textAlign:'center' }}>
+                    <div style={{ width:60, height:60, borderRadius:'50%',
+                      background:`radial-gradient(circle, ${f.col} 0%, ${f.col}66 50%, transparent 74%)`,
+                      boxShadow: sel ? `0 0 0 2px rgba(255,255,255,0.45)` : 'none', transition:'transform 0.18s' }} />
+                    <div style={{ fontSize:12, color: sel?'#fff':'rgba(255,255,255,0.8)' }}>{f.name}</div>
+                    <div style={{ fontSize:8.5, color:'rgba(255,255,255,0.4)', lineHeight:1.3 }}>{f.desc}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize:9, color:'rgba(255,255,255,0.3)', marginTop:20, textAlign:'center' }}>arms the palette · turn an orb's amount up to hear it</div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
