@@ -668,7 +668,7 @@ function MicrocosmPanel({ audio }: { audio: ReturnType<typeof useAudio> }) {
       <div>
         <div style={{ fontFamily:'Space Mono, monospace', fontSize:'9px', color:'var(--light)', letterSpacing:'2px', marginBottom:'6px' }}>ENGINES</div>
         <div style={{ display:'flex', flexDirection:'column', gap:'5px', marginBottom:'12px' }}>
-          {(['mosaic','haze','tunnel','strum'] as const).map(eng => {
+          {(['mosaic','haze','tunnel','strum','reverse','shimmer','glitch','warp','swarm','swell','bubbles','chop'] as const).map(eng => {
             const on = activeEngines.includes(eng);
             return (
               <div key={eng} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
