@@ -18,25 +18,30 @@ export const ORB_COLORS: Record<string, OrbColor> = {
 type OrbProps = {
   id: string; label: string; colorKey: keyof typeof ORB_COLORS;
   x: number; y: number; size?: number; volume?: number;
-  selected?: boolean; onSelect?: (id: string) => void;
+  selected?: boolean;
+  xy?: { x: number; y: number };
+  onSelect?: (id: string) => void;
+  onXY?: (x: number, y: number) => void;
 };
 
-const BOX = 600; // fixed canvas per orb; orb scales within it so travel is smooth
+const BOX = 600;
+const TRAVEL = 0.42;
 
 export default function Orb({
   id, label, colorKey, x, y,
-  size = 130, volume = 0.7, selected = false, onSelect,
+  size = 130, volume = 0.7, selected = false,
+  xy = { x: 0.5, y: 0.5 }, onSelect, onXY,
 }: OrbProps) {
   const c = ORB_COLORS[colorKey];
   const waveRef = useRef<SVGPathElement>(null);
   const phase = useRef(0);
+  const dragging = useRef(false);
 
   useEffect(() => {
     let raf = 0;
     const tick = () => {
       phase.current += 0.018;
-      const p = phase.current;
-      const w = 44; const a = 7;
+      const p = phase.current; const w = 44; const a = 7;
       const path = `M ${-w} 0 Q ${-w/2} ${Math.sin(p)*a} 0 0 T ${w} ${Math.sin(p+1.2)*a}`;
       if (waveRef.current) waveRef.current.setAttribute('d', path);
       raf = requestAnimationFrame(tick);
@@ -45,18 +50,41 @@ export default function Orb({
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const r = size;            // orb radius within the fixed box
+  const r = size;
   const haloR = r * 0.62;
   const haloW = 14 + volume * 22;
   const cx = BOX / 2;
+  const reach = r * TRAVEL;
+  const hitR = r * 0.7; // clickable disc ~ visible body, NOT the full 600px box
+
+  const coreX = selected ? (xy.x - 0.5) * 2 * reach : 0;
+  const coreY = selected ? -(xy.y - 0.5) * 2 * reach : 0;
+
+  function corePointerDown(e: React.PointerEvent) {
+    if (!selected) return;
+    e.stopPropagation();
+    dragging.current = true;
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  }
+  function corePointerMove(e: React.PointerEvent) {
+    if (!dragging.current || !selected) return;
+    e.stopPropagation();
+    const svg = (e.currentTarget as SVGElement).ownerSVGElement!;
+    const rect = svg.getBoundingClientRect();
+    const localX = (e.clientX - rect.left) / rect.width * BOX - cx;
+    const localY = (e.clientY - rect.top) / rect.height * BOX - cx;
+    const nx = Math.min(1, Math.max(0, 0.5 + localX / reach / 2));
+    const ny = Math.min(1, Math.max(0, 0.5 - localY / reach / 2));
+    onXY?.(nx, ny);
+  }
+  function corePointerUp(e: React.PointerEvent) { dragging.current = false; e.stopPropagation(); }
 
   return (
     <div
-      onClick={() => onSelect?.(id)}
       style={{
         position: 'absolute',
         left: x - BOX / 2, top: y - BOX / 2, width: BOX, height: BOX,
-        cursor: 'pointer',
+        pointerEvents: 'none',              // wrapper does NOT catch clicks
         transition: 'left 0.9s cubic-bezier(0.34,0.01,0.2,1), top 0.9s cubic-bezier(0.34,0.01,0.2,1), opacity 0.8s ease',
         opacity: selected ? 1 : 0.8,
         zIndex: selected ? 10 : 1,
@@ -77,17 +105,28 @@ export default function Orb({
           <filter id={`halo-${id}`} x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="7" /></filter>
           <filter id={`soft-${id}`} x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="2.2" /></filter>
         </defs>
-        <g transform={`translate(${cx} ${cx})`} style={{ transition: 'all 0.9s cubic-bezier(0.34,0.01,0.2,1)' }}>
-          <ellipse cx="0" cy="0" rx={r} ry={r} fill={`url(#fill-${id})`}
-            style={{ transition: 'all 0.9s cubic-bezier(0.34,0.01,0.2,1)' }} />
-          <circle cx="0" cy="0" r={haloR} fill="none" stroke={c.mid}
-            strokeWidth={haloW} opacity={selected ? 0.3 : 0.18} filter={`url(#halo-${id})`}
-            style={{ transition: 'all 0.9s cubic-bezier(0.34,0.01,0.2,1)' }} />
-          <path ref={waveRef} d="M -44 0 Q -22 0 0 0 T 44 0"
-            fill="none" stroke={c.core} strokeWidth="1.5" opacity="0.6" />
-          <circle cx="0" cy="0" r={selected ? 18 : 11} fill={`url(#star-${id})`} filter={`url(#soft-${id})`}
-            style={{ transition: 'all 0.9s ease' }} />
-          <circle cx="0" cy="0" r={selected ? 7 : 4} fill="#fff" style={{ transition: 'all 0.9s ease' }} />
+        <g transform={`translate(${cx} ${cx})`}>
+          {/* visuals — non-interactive */}
+          <g style={{ pointerEvents: 'none' }}>
+            <ellipse cx="0" cy="0" rx={r} ry={r} fill={`url(#fill-${id})`} />
+            <circle cx="0" cy="0" r={haloR} fill="none" stroke={c.mid}
+              strokeWidth={haloW} opacity={selected ? 0.3 : 0.18} filter={`url(#halo-${id})`} />
+            <path ref={waveRef} transform={`translate(${coreX} ${coreY})`} d="M -44 0 Q -22 0 0 0 T 44 0"
+              fill="none" stroke={c.core} strokeWidth="1.5" opacity="0.6" />
+          </g>
+          {/* select disc — bounded to visible body */}
+          <circle cx="0" cy="0" r={hitR} fill="transparent"
+            style={{ pointerEvents: 'all', cursor: 'pointer' }}
+            onClick={() => { if (!dragging.current) onSelect?.(id); }} />
+          {/* draggable core (on top) */}
+          <g transform={`translate(${coreX} ${coreY})`}
+             onPointerDown={corePointerDown} onPointerMove={corePointerMove}
+             onPointerUp={corePointerUp} onPointerLeave={corePointerUp}
+             style={{ pointerEvents: selected ? 'all' : 'none', cursor: selected ? 'grab' : 'pointer' }}>
+            <circle cx="0" cy="0" r={selected ? 34 : 18} fill="transparent" />
+            <circle cx="0" cy="0" r={selected ? 18 : 11} fill={`url(#star-${id})`} filter={`url(#soft-${id})`} style={{ pointerEvents: 'none' }} />
+            <circle cx="0" cy="0" r={selected ? 7 : 4} fill="#fff" style={{ pointerEvents: 'none' }} />
+          </g>
         </g>
       </svg>
       <div style={{
