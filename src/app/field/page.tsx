@@ -9,26 +9,78 @@ import {
 } from '../../audio/engine';
 
 type OrbDef = { id: string; label: string; colorKey: any };
-const ORBS: OrbDef[] = [
+const ALL_ORBS: OrbDef[] = [
   { id: 'bubbles', label: 'Bubbles', colorKey: 'bubbles' },
   { id: 'tunnel',  label: 'Tunnel',  colorKey: 'tunnel'  },
   { id: 'shimmer', label: 'Shimmer', colorKey: 'shimmer' },
   { id: 'strum',   label: 'Strum',   colorKey: 'strum'   },
+  { id: 'haze',    label: 'Haze',    colorKey: 'haze'    },
+  { id: 'glitch',  label: 'Glitch',  colorKey: 'glitch'  },
+  { id: 'swarm',   label: 'Swarm',   colorKey: 'swarm'   },
+  { id: 'warp',    label: 'Warp',    colorKey: 'warp'    },
+  { id: 'mosaic',  label: 'Mosaic',  colorKey: 'tunnel'  },
+  { id: 'reverse', label: 'Reverse', colorKey: 'shimmer' },
 ];
-const CENTRE = { fx: 0.50, fy: 0.44, size: 210 };
-const SATELLITES = [
-  { fx: 0.20, fy: 0.30, size: 118 },
-  { fx: 0.80, fy: 0.26, size: 118 },
-  { fx: 0.74, fy: 0.66, size: 118 },
-];
+
 const FIELD_H = 0.70;
 const NOTES = ['G','A','B','C','D','E','F'];
+const CENTRE = { fx: 0.50, fy: 0.46, size: 200 };
 
 type XY = { x: number; y: number };
 const defaultXY = (): Record<string, XY> =>
-  Object.fromEntries(ORBS.map(o => [o.id, { x: 0.5, y: 0.5 }]));
+  Object.fromEntries(ALL_ORBS.map(o => [o.id, { x: 0.5, y: 0.5 }]));
+
+// Seeded-random scatter with VARIED sizes + collision rejection.
+// Organic look, but guaranteed no overlap (uses visible-glow radii).
+function satelliteSlots(count: number, W: number, H: number, centreSize: number) {
+  const n = count - 1;
+  if (n <= 0) return [];
+
+  // deterministic PRNG so positions are stable per count (no jitter each render)
+  let seed = 1000 + n * 97;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+
+  const cx = W * 0.5, cy = H * 0.5;
+  const cenR = centreSize * 0.95;               // centre glow radius
+  const gap = 22;
+  const padX = 110, padY = 90;                  // keep off the screen edges
+
+  // base satellite size shrinks with count; each orb varies +/- around it
+  const baseSize = n <= 3 ? 138 : n <= 5 ? 120 : n <= 7 ? 106 : 92;
+
+  type S = { x:number; y:number; size:number; r:number };
+  const placed: S[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const size = baseSize * (0.82 + rnd() * 0.36);   // varied size per orb
+    const r = size * 0.92;                            // its glow radius
+    let ok = false;
+    for (let tries = 0; tries < 300 && !ok; tries++) {
+      const x = padX + rnd() * (W - padX * 2);
+      const y = padY + rnd() * (H - padY * 2);
+      // clear of centre?
+      if (Math.hypot(x - cx, y - cy) < cenR + r + gap) continue;
+      // clear of all placed satellites?
+      let clash = false;
+      for (const q of placed) {
+        if (Math.hypot(x - q.x, y - q.y) < r + q.r + gap) { clash = true; break; }
+      }
+      if (clash) continue;
+      placed.push({ x, y, size, r });
+      ok = true;
+    }
+    // fallback: if no spot found in 300 tries, drop it on a wide ring (still clears)
+    if (!ok) {
+      const a = (i / n) * Math.PI * 2;
+      const rr = cenR + r + gap + 40;
+      placed.push({ x: cx + Math.cos(a) * rr, y: cy + Math.sin(a) * rr, size, r });
+    }
+  }
+  return placed.map(s => ({ x: s.x, y: s.y, size: s.size }));
+}
 
 export default function FieldPage() {
+  const [count, setCount] = useState(4);
   const [selected, setSelected] = useState<string>('bubbles');
   const [dim, setDim] = useState({ w: 1440, h: 900 });
   const [state, setState] = useState<'idle'|'playing'|'stopped'>('idle');
@@ -37,9 +89,10 @@ export default function FieldPage() {
   const [key, setKey] = useState('C');
   const [life, setLife] = useState(0.32);
   const started = useRef(false);
-  const activeEngine = useRef<string>('');
   const mutedRef = useRef(false);
   const xyRef = useRef<Record<string, XY>>(defaultXY());
+
+  const orbs = ALL_ORBS.slice(0, count);
 
   useEffect(() => {
     const update = () => setDim({ w: window.innerWidth, h: window.innerHeight });
@@ -48,45 +101,62 @@ export default function FieldPage() {
     return () => window.removeEventListener('resize', update);
   }, []);
 
+  // RACK: activate ALL visible orbs' engines (present = playing)
+  function activateRack() {
+    if (!started.current) return;
+    ALL_ORBS.forEach(o => {
+      const on = orbs.some(v => v.id === o.id);
+      microcosmEngineActive(o.id, on);
+      if (on) microcosmEngineLevel(o.id, mutedRef.current ? 0 : (o.id === selected ? 1 : 0.6));
+    });
+    const v = xyRef.current[selected] ?? { x:0.5, y:0.5 };
+    microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
+  }
+
+  useEffect(() => { if (started.current && state==='playing') activateRack(); /* eslint-disable-next-line */ }, [count]);
+
   async function ensureStarted() {
     if (started.current) return;
     started.current = true;
     await startAudio(); await microcosmStart();
-    setState('playing'); switchEngine(selected);
-  }
-  function switchEngine(id: string) {
-    if (!started.current) return;
-    if (activeEngine.current && activeEngine.current !== id) microcosmEngineActive(activeEngine.current, false);
-    microcosmEngineActive(id, true);
-    microcosmEngineLevel(id, mutedRef.current ? 0 : 1);
-    activeEngine.current = id;
-    const v = xyRef.current[id] ?? { x:0.5, y:0.5 };
-    microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
+    setState('playing'); activateRack();
   }
   async function handleSelect(id: string) {
-    setSelected(id); await ensureStarted();
-    if (state === 'stopped') return; switchEngine(id);
+    setSelected(id);
+    await ensureStarted();
+    if (state === 'stopped') return;
+    // selection = focus: this orb full level + its XY drives the controls
+    ALL_ORBS.forEach(o => {
+      if (orbs.some(v => v.id === o.id)) microcosmEngineLevel(o.id, mutedRef.current ? 0 : (o.id === id ? 1 : 0.6));
+    });
+    const v = xyRef.current[id] ?? { x:0.5, y:0.5 };
+    microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
   }
   function handleXY(nx: number, ny: number) {
     const id = selected;
     const next = { ...xyRef.current, [id]: { x:nx, y:ny } };
     xyRef.current = next; setXyMap(next);
-    if (activeEngine.current === id) { microcosmGrainSpread(nx); microcosmPitchSpread(ny); }
+    microcosmGrainSpread(nx); microcosmPitchSpread(ny);
   }
   async function doStart() {
     if (!started.current) { await ensureStarted(); return; }
-    await microcosmStart(); activeEngine.current=''; switchEngine(selected); setState('playing');
+    await microcosmStart(); activateRack(); setState('playing');
   }
-  function doStop() { microcosmStopEngine(); activeEngine.current=''; setState('stopped'); }
+  function doStop() { microcosmStopEngine(); setState('stopped'); }
   function toggleMute() {
     const m = !mutedRef.current; mutedRef.current=m; setMuted(m);
-    if (activeEngine.current) microcosmEngineLevel(activeEngine.current, m?0:1);
+    activateRack();
   }
 
-  const others = ORBS.filter(o => o.id !== selected);
-  const slotFor = (id: string) => id === selected ? CENTRE
-    : (SATELLITES[others.findIndex(o => o.id === id)] ?? SATELLITES[SATELLITES.length-1]);
   const fh = dim.h * FIELD_H;
+  const sats = satelliteSlots(count, dim.w, fh, CENTRE.size);
+  const others = orbs.filter(o => o.id !== selected);
+  const centrePos = { x: CENTRE.fx * dim.w, y: CENTRE.fy * fh, size: CENTRE.size };
+  const slotFor = (id: string) => {
+    if (id === selected) return centrePos;
+    const idx = others.findIndex(o => o.id === id);
+    return sats[idx] ?? centrePos;
+  };
   const zlabel: React.CSSProperties = { fontSize:9, fontWeight:500, letterSpacing:'0.25em', color:'rgba(255,255,255,0.3)', marginBottom:14 };
 
   return (
@@ -94,14 +164,21 @@ export default function FieldPage() {
       <div style={{ position:'absolute', inset:0, opacity:0.6, pointerEvents:'none', backgroundImage:'radial-gradient(1px 1px at 20% 14%, rgba(255,255,255,0.5), transparent), radial-gradient(1px 1px at 88% 9%, rgba(255,255,255,0.45), transparent), radial-gradient(1px 1px at 94% 42%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 8% 46%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 50% 8%, rgba(255,255,255,0.3), transparent)' }} />
       <div style={{ position:'absolute', top:24, left:32, fontSize:21, letterSpacing:'0.6em', fontWeight:500 }}>H A A R</div>
       <div style={{ position:'absolute', top:28, right:32, fontSize:11, fontWeight:500, color:'rgba(255,255,255,0.55)' }}>
-        {state==='playing' ? `${muted?'muted':'playing'} · ${selected}` : state==='stopped' ? 'stopped' : `field · ${ORBS.length} active`}
+        {state==='playing' ? `${muted?'muted':'playing'} · ${count} active` : state==='stopped' ? 'stopped' : `field · ${count} active`}
       </div>
 
-      {ORBS.map((o) => {
+      {/* TEST: orb count stepper (top-left, clear of orbs, above field) */}
+      <div style={{ position:'absolute', top:62, left:32, zIndex:100, display:'flex', alignItems:'center', gap:14, background:'rgba(255,255,255,0.08)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:20, padding:'7px 16px' }}>
+        <span onClick={()=>setCount(c=>Math.max(1,c-1))} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>−</span>
+        <span style={{ fontSize:11, color:'rgba(255,255,255,0.7)', minWidth:54, textAlign:'center' }}>{count} orbs</span>
+        <span onClick={()=>setCount(c=>Math.min(10,c+1))} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>+</span>
+      </div>
+
+      {orbs.map((o) => {
         const slot = slotFor(o.id);
         return (
           <Orb key={o.id} id={o.id} label={o.label} colorKey={o.colorKey}
-            x={slot.fx * dim.w} y={slot.fy * fh} size={slot.size} volume={0.7}
+            x={slot.x} y={slot.y} size={slot.size} volume={0.7}
             selected={selected===o.id} xy={xyMap[o.id]} onSelect={handleSelect} onXY={handleXY} />
         );
       })}
@@ -111,11 +188,7 @@ export default function FieldPage() {
         <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>add machine</span>
       </div>
 
-      {/* CONTROLS — bottom 30%, full width, three zones */}
-      <div style={{ position:'absolute', left:0, right:0, bottom:0, height: dim.h*0.30,
-        display:'grid', gridTemplateColumns:'1fr 1.1fr 1fr', alignItems:'center', padding:'0 70px', boxSizing:'border-box' }}>
-
-        {/* LEFT ZONE — gestures */}
+      <div style={{ position:'absolute', left:0, right:0, bottom:0, height: dim.h*0.30, display:'grid', gridTemplateColumns:'1fr 1.1fr 1fr', alignItems:'center', padding:'0 70px', boxSizing:'border-box' }}>
         <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-start' }}>
           <div style={zlabel}>FIELD</div>
           <div style={{ display:'flex', alignItems:'center', gap:42 }}>
@@ -141,7 +214,6 @@ export default function FieldPage() {
           </div>
         </div>
 
-        {/* CENTRE ZONE — KEY */}
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
           <div style={zlabel}>KEY</div>
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
@@ -160,7 +232,6 @@ export default function FieldPage() {
           <div style={{ fontSize:9, color:'rgba(255,255,255,0.3)', marginTop:10 }}>whole-machine key · tap a note</div>
         </div>
 
-        {/* RIGHT ZONE — utilities + tempo + master */}
         <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end' }}>
           <div style={{ ...zlabel, alignSelf:'flex-end' }}>SYSTEM</div>
           <div style={{ display:'flex', alignItems:'flex-end', gap:34 }}>
