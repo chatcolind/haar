@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import Orb from '../../components/field/Orb';
+import Orb, { ORB_COLORS } from '../../components/field/Orb';
 import {
   startAudio, microcosmStart, microcosmStopEngine,
-  microcosmEngineActive, microcosmEngineLevel,
+  microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq,
   microcosmGrainDensity, microcosmArmedPalette, microcosmEngineAmount,
 } from '../../audio/engine';
@@ -103,6 +103,7 @@ export default function FieldPage() {
   const [focusShown, setFocusShown] = useState(false); // drives the in/out transition (lags focused)
   const [mixOpen, setMixOpen] = useState(false);   // mix desk visible
   const [mixShown, setMixShown] = useState(false); // drives the desk slide transition
+  const [masterVol, setMasterVol] = useState(0.85);  // master fader
   const lastOrbTap = useRef<{ id:string; t:number }>({ id:'', t:0 });
   const [dim, setDim] = useState({ w: 1440, h: 900 });
   const [state, setState] = useState<'idle'|'playing'|'stopped'>('idle');
@@ -122,6 +123,7 @@ export default function FieldPage() {
   const amountRef = useRef<Record<string, number>>({}); // per-orb flavour amount (default 0)
   const volRef = useRef<Record<string, number>>({});   // per-orb volume (default 0.7)
   const densRef = useRef<Record<string, number>>({});  // per-orb density (default 0.5)
+  const muteRef = useRef<Record<string, boolean>>({});  // per-channel mute (mixer)
   const [, forceOrb] = useState(0); // re-render after per-orb ref writes
   const [, forceAmt] = useState(0);
   const started = useRef(false);
@@ -138,14 +140,20 @@ export default function FieldPage() {
   }, []);
 
   // RACK: activate ALL visible orbs' engines (present = playing)
+  // per-orb level = the orb's OWN volume (the mixer fader is the single source of truth).
+  // selection no longer changes volume; mute/solo still gate it.
+  function orbLevel(id: string): number {
+    if (mutedRef.current) return 0;
+    if (muteRef.current[id]) return 0;                    // per-channel mute (mixer)
+    if (soloRef.current && id !== selected) return 0;     // (legacy global solo, kept for now)
+    return volRef.current[id] ?? 0.7;                     // the fader value
+  }
   function activateRack() {
     if (!started.current) return;
     ALL_ORBS.forEach(o => {
       const on = orbs.some(v => v.id === o.id);
       microcosmEngineActive(o.id, on);
-      if (on) microcosmEngineLevel(o.id, mutedRef.current ? 0
-        : soloRef.current ? (o.id === selected ? 1 : 0)   // TEST SOLO: only selected
-        : (o.id === selected ? 1 : 0.6));
+      if (on) microcosmEngineLevel(o.id, orbLevel(o.id));
     });
     const v = xyRef.current[selected] ?? { x:0.5, y:0.5 };
     microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
@@ -205,11 +213,9 @@ export default function FieldPage() {
     setSelected(id);
     await ensureStarted();
     if (state === 'stopped') return;
-    // selection = focus: this orb full level + its XY drives the controls
+    // selection drives the XY controls only — volume stays each orb's own (the fader's truth)
     ALL_ORBS.forEach(o => {
-      if (orbs.some(v => v.id === o.id)) microcosmEngineLevel(o.id, mutedRef.current ? 0
-        : soloRef.current ? (o.id === id ? 1 : 0)   // TEST SOLO
-        : (o.id === id ? 1 : 0.6));
+      if (orbs.some(v => v.id === o.id)) microcosmEngineLevel(o.id, orbLevel(o.id));
     });
     const v = xyRef.current[id] ?? { x:0.5, y:0.5 };
     microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
@@ -393,7 +399,42 @@ export default function FieldPage() {
             <div style={{ position:'absolute', top:9, left:'50%', transform:'translateX(-50%)', width:40, height:4, borderRadius:3, background:'rgba(255,255,255,0.25)' }} />
             <div style={{ position:'absolute', top:20, left:26, fontSize:10, letterSpacing:'0.28em', color:'rgba(255,255,255,0.5)' }}>MIX DESK</div>
             <div onClick={closeMix} style={{ position:'absolute', top:14, right:22, width:28, height:28, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:14, cursor:'pointer' }}>⌄</div>
-            <div style={{ position:'absolute', top:46, left:20, right:20, bottom:18, display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.3)', fontSize:11 }}>channel strips coming next (2b)</div>
+            <div style={{ position:'absolute', top:42, left:18, right:18, bottom:14, display:'flex', gap:11 }}>
+              {orbs.map(o => {
+                const c = ORB_COLORS[(ALL_ORBS.find(a=>a.id===o.id)?.colorKey) || 'tunnel'];
+                const vol = volRef.current[o.id] ?? 0.7;
+                const mut = !!muteRef.current[o.id];
+                const db = vol <= 0 ? '-∞' : (20*Math.log10(vol)).toFixed(0);
+                return (
+                  <div key={o.id} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:`linear-gradient(180deg, ${c.glow}22, rgba(255,255,255,0.015))`, border:`0.5px solid ${c.mid}33`, padding:'10px 0 9px' }}>
+                    <div style={{ width:26, height:26, borderRadius:'50%', background:`radial-gradient(circle, ${c.core}, ${c.glow}44 60%, transparent 78%)` }} />
+                    <div style={{ fontSize:9.5, color:c.core, marginTop:5, letterSpacing:'0.06em' }}>{ALL_ORBS.find(a=>a.id===o.id)?.label || o.id}</div>
+                    <div style={{ flex:1, display:'flex', alignItems:'center', marginTop:10, minHeight:90 }}>
+                      <input type="range" min={0} max={1} step={0.01} value={vol}
+                        onChange={(e)=>{ const nv=parseFloat(e.target.value); volRef.current[o.id]=nv; microcosmEngineLevel(o.id, mut?0:nv); forceOrb(x=>x+1); }}
+                        style={{ writingMode:'vertical-lr' as any, direction:'rtl', width:8, height:'100%', accentColor:c.mid, cursor:'pointer' }} />
+                    </div>
+                    <div style={{ fontSize:9, color:c.core, marginTop:6 }}>{db} dB</div>
+                    <div onClick={()=>{ const nm=!muteRef.current[o.id]; muteRef.current[o.id]=nm; microcosmEngineLevel(o.id, nm?0:(volRef.current[o.id]??0.7)); forceOrb(x=>x+1); }}
+                      style={{ width:24, height:24, borderRadius:'50%', marginTop:7, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                        background: mut?'rgba(255,120,90,0.3)':'transparent', border:`1px solid ${mut?'rgba(255,120,90,0.7)':'rgba(255,120,90,0.4)'}`, color: mut?'#ff8c6e':'rgba(255,140,110,0.8)' }}>M</div>
+                  </div>
+                );
+              })}
+              <div style={{ width:1, background:'linear-gradient(180deg,transparent,rgba(255,255,255,0.15),transparent)', margin:'0 2px' }} />
+              {/* MASTER */}
+              <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:'linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02))', border:'0.5px solid rgba(255,255,255,0.3)', padding:'10px 0 9px' }}>
+                <div style={{ width:26, height:26, borderRadius:'50%', background:'radial-gradient(circle,#fff,rgba(255,255,255,0.3) 55%,transparent 78%)' }} />
+                <div style={{ fontSize:9.5, color:'#fff', marginTop:5, letterSpacing:'0.12em' }}>MASTER</div>
+                <div style={{ flex:1, display:'flex', alignItems:'center', marginTop:10, minHeight:90 }}>
+                  <input type="range" min={0} max={1} step={0.01} value={masterVol}
+                    onChange={(e)=>{ const nv=parseFloat(e.target.value); setMasterVol(nv); microcosmMasterLevel(nv); }}
+                    style={{ writingMode:'vertical-lr' as any, direction:'rtl', width:10, height:'100%', accentColor:'#ffffff', cursor:'pointer' }} />
+                </div>
+                <div style={{ fontSize:9, color:'#fff', marginTop:6 }}>{masterVol<=0?'-∞':(20*Math.log10(masterVol)).toFixed(0)} dB</div>
+                <div style={{ fontSize:6.5, color:'rgba(255,255,255,0.4)', marginTop:9, letterSpacing:'0.1em' }}>MAIN OUT</div>
+              </div>
+            </div>
           </div>
         </div>
       )}

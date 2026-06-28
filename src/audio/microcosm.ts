@@ -186,6 +186,10 @@ export class Microcosm {
   setEngineActive(id: string, on: boolean): void {
     if (this.rack[id]) this.rack[id].active = on;
   }
+  setMasterGain(v: number): void {
+    const g = Math.max(0, Math.min(1, v));
+    this.nativeOut.gain.setTargetAtTime(g, this.ctx.currentTime, 0.02);
+  }
   setEngineLevel(id: string, level: number): void {
     if (this.rack[id]) this.rack[id].level = Math.max(0, Math.min(1, level));
   }
