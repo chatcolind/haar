@@ -101,6 +101,8 @@ export default function FieldPage() {
   const [selected, setSelected] = useState<string>('mosaic'); // TEST BHAIRAV
   const [focused, setFocused] = useState<string | null>(null); // orb in focused (controls-beside) view
   const [focusShown, setFocusShown] = useState(false); // drives the in/out transition (lags focused)
+  const [mixOpen, setMixOpen] = useState(false);   // mix desk visible
+  const [mixShown, setMixShown] = useState(false); // drives the desk slide transition
   const lastOrbTap = useRef<{ id:string; t:number }>({ id:'', t:0 });
   const [dim, setDim] = useState({ w: 1440, h: 900 });
   const [state, setState] = useState<'idle'|'playing'|'stopped'>('idle');
@@ -118,6 +120,9 @@ export default function FieldPage() {
   const soloRef = useRef(false);                // TEST SOLO
   const [density, setDensity] = useState(0.5);  // TEST DENSITY
   const amountRef = useRef<Record<string, number>>({}); // per-orb flavour amount (default 0)
+  const volRef = useRef<Record<string, number>>({});   // per-orb volume (default 0.7)
+  const densRef = useRef<Record<string, number>>({});  // per-orb density (default 0.5)
+  const [, forceOrb] = useState(0); // re-render after per-orb ref writes
   const [, forceAmt] = useState(0);
   const started = useRef(false);
   const mutedRef = useRef(false);
@@ -186,6 +191,8 @@ export default function FieldPage() {
   }
   function enterFocus(id: string) { setSelected(id); setFocused(id); requestAnimationFrame(()=>setFocusShown(true)); }
   function exitFocus() { setFocusShown(false); setTimeout(()=>setFocused(null), 920); }
+  function openMix() { setMixOpen(true); requestAnimationFrame(()=>setMixShown(true)); }
+  function closeMix() { setMixShown(false); setTimeout(()=>setMixOpen(false), 420); }
   async function handleSelect(id: string) {
     // double-tap the same orb -> enter focused view
     const now = Date.now();
@@ -223,7 +230,15 @@ export default function FieldPage() {
     activateRack();
   }
 
-  const fh = dim.h * FIELD_H;
+  // ── LAYOUT MODEL ──────────────────────────────────────────────
+  // The screen has two territories: TOP (field-or-focus) and BOTTOM (mixer, when open).
+  // Opening the mixer shrinks the TOP; the field re-lays-out into the smaller height.
+  const MIXER_H = 0.40;                    // mixer occupies 40% of screen when open
+  const topFrac = mixOpen ? (1 - MIXER_H) : FIELD_H;  // top territory as fraction of screen
+  const fh = dim.h * topFrac;              // field height drives ALL orb positions (auto re-layout)
+  const mixerH = dim.h * MIXER_H;          // mixer territory height
+  const bottomBarH = dim.h * 0.30;         // the keyboard/field/system bar height (field state)
+  // ──────────────────────────────────────────────────────────────
   const sats = satelliteSlots(count, dim.w, fh, CENTRE.size);
   const others = orbs.filter(o => o.id !== selected);
   const centrePos = { x: CENTRE.fx * dim.w, y: CENTRE.fy * fh, size: CENTRE.size };
@@ -315,7 +330,44 @@ export default function FieldPage() {
             {/* CONTROLS — right, translucent glass (empty shell for now, filled in 1b) */}
             <div style={{ position:'absolute', right:'6%', top:90, bottom: fh*0.30 + 30, width:'40%', maxWidth:560, borderRadius:20, background:'rgba(22,20,36,0.78)', backdropFilter:'blur(12px)', border:'0.5px solid rgba(255,255,255,0.16)', padding:'26px 30px', boxSizing:'border-box', overflow:'auto', zIndex:2, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(40px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)' }}>
               <div style={{ fontSize:9, letterSpacing:'0.22em', color:'rgba(255,255,255,0.4)' }}>THIS ORB</div>
-              <div style={{ fontSize:10, color:'rgba(255,255,255,0.3)', marginTop:14 }}>controls coming next (1b)</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:20, marginTop:20 }}>
+
+                {/* VOLUME */}
+                <div>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
+                    <span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.6)' }}>VOLUME</span>
+                    <span style={{ fontSize:11, color:'#d8a6ff' }}>{Math.round((volRef.current[focused] ?? 0.7)*100)}%</span>
+                  </div>
+                  <input type="range" min={0} max={1} step={0.01} value={volRef.current[focused] ?? 0.7}
+                    onChange={(e)=>{ const v=parseFloat(e.target.value); volRef.current[focused]=v; microcosmEngineLevel(focused, mutedRef.current?0:v); forceOrb(x=>x+1); }}
+                    style={{ width:'100%', accentColor:'#d8a6ff' }} />
+                </div>
+
+                {/* DENSITY */}
+                <div>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
+                    <span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.6)' }}>DENSITY</span>
+                    <span style={{ fontSize:11, color:'#d8a6ff' }}>{Math.round((densRef.current[focused] ?? 0.5)*100)}%</span>
+                  </div>
+                  <input type="range" min={0} max={1} step={0.01} value={densRef.current[focused] ?? 0.5}
+                    onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; console.log('[orbback] density', focused, d); microcosmGrainDensity(d); forceOrb(x=>x+1); }}
+                    style={{ width:'100%', accentColor:'#d8a6ff' }} />
+                  <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)', marginTop:5 }}>sparse · single notes &nbsp;→&nbsp; dense · cluster</div>
+                </div>
+
+                {/* FLAVOUR AMOUNT */}
+                <div>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
+                    <span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.6)' }}>FLAVOUR AMOUNT</span>
+                    <span style={{ fontSize:11, color:'#ffcf6b' }}>{Math.round((amountRef.current[focused] ?? 0)*100)}%</span>
+                  </div>
+                  <input type="range" min={0} max={1} step={0.01} value={amountRef.current[focused] ?? 0}
+                    onChange={(e)=>{ const a=parseFloat(e.target.value); amountRef.current[focused]=a; microcosmEngineAmount(focused, a); forceOrb(x=>x+1); }}
+                    style={{ width:'100%', accentColor:'#ffcf6b' }} />
+                  <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)', marginTop:5 }}>pure open &nbsp;→&nbsp; full armed-palette colour</div>
+                </div>
+
+              </div>
             </div>
           </div>
         );
@@ -326,8 +378,28 @@ export default function FieldPage() {
         <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>add machine</span>
       </div>
 
+      {/* MIX DESK — slides up over the lower portion; orbs stay faint above */}
+      {mixOpen && (
+        <div style={{ position:'absolute', inset:0, zIndex:170 }}>
+          {/* faint dim only over the desk area handled by panel; keep field visible above */}
+          <div onClick={closeMix} style={{ position:'absolute', inset:0 }} />
+          <div style={{ position:'absolute', left:0, right:0, bottom:0, height: mixerH,
+            background:'linear-gradient(180deg, rgba(14,12,24,0.80), rgba(10,8,18,0.96))',
+            backdropFilter:'blur(10px)', borderTop:'0.5px solid rgba(255,255,255,0.14)',
+            borderRadius:'22px 22px 0 0',
+            transform: mixShown ? 'translateY(0)' : 'translateY(100%)',
+            transition:'transform 0.4s cubic-bezier(0.34,0.01,0.2,1)' }}
+            onClick={(e)=>e.stopPropagation()}>
+            <div style={{ position:'absolute', top:9, left:'50%', transform:'translateX(-50%)', width:40, height:4, borderRadius:3, background:'rgba(255,255,255,0.25)' }} />
+            <div style={{ position:'absolute', top:20, left:26, fontSize:10, letterSpacing:'0.28em', color:'rgba(255,255,255,0.5)' }}>MIX DESK</div>
+            <div onClick={closeMix} style={{ position:'absolute', top:14, right:22, width:28, height:28, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:14, cursor:'pointer' }}>⌄</div>
+            <div style={{ position:'absolute', top:46, left:20, right:20, bottom:18, display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.3)', fontSize:11 }}>channel strips coming next (2b)</div>
+          </div>
+        </div>
+      )}
+
       {/* BOTTOM CONTROLS — two tiers: keyboard on top, FIELD/Flavour/SYSTEM beneath */}
-      <div style={{ position:'absolute', left:0, right:0, bottom:0, height: dim.h*0.30, display:'flex', flexDirection:'column', justifyContent:'center', gap:18, padding:'0 40px', boxSizing:'border-box' }}>
+      <div style={{ position:'absolute', left:0, right:0, bottom: mixOpen ? mixerH : 0, height: dim.h*0.30, display:'flex', flexDirection:'column', justifyContent:'center', gap:18, padding:'0 40px', boxSizing:'border-box', transition:'bottom 0.4s cubic-bezier(0.34,0.01,0.2,1)', zIndex: mixOpen ? 180 : 'auto' }}>
 
         {/* TIER 1 — full-width keyboard */}
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
@@ -371,7 +443,8 @@ export default function FieldPage() {
           </div>
         </div>
 
-        {/* TIER 2 — FIELD (left) · FLAVOUR (centre) · SYSTEM (right) */}
+        {/* TIER 2 — FIELD (left) · FLAVOUR (centre) · SYSTEM (right) — hidden while mixing */}
+        {!mixOpen && (
         <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:20 }}>
 
           {/* FIELD */}
@@ -422,8 +495,9 @@ export default function FieldPage() {
                 { k:'Source', col:'rgba(255,216,107,0.5)', bg:'rgba(255,216,107,0.06)', dot:'#ffd86b' },
                 { k:'Scenes', col:'rgba(180,200,230,0.5)', bg:'rgba(180,200,230,0.05)', dot:'#8aa0d0' },
                 { k:'Rec',    col:'rgba(224,80,58,0.5)',   bg:'rgba(224,80,58,0.06)',   dot:'#ff7a5a' },
+                { k:'Mix',    col:'rgba(170,196,255,0.5)', bg:'rgba(170,196,255,0.06)', dot:'#aac4ff' },
               ].map(u => (
-                <div key={u.k} style={{ textAlign:'center', cursor:'pointer' }}>
+                <div key={u.k} onClick={()=>{ if(u.k==='Mix') openMix(); }} style={{ textAlign:'center', cursor:'pointer' }}>
                   <div style={{ width:44, height:44, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, display:'flex', alignItems:'center', justifyContent:'center' }}>
                     <div style={{ width:7, height:7, borderRadius:'50%', background:u.dot }} />
                   </div>
@@ -455,6 +529,7 @@ export default function FieldPage() {
             </div>
           </div>
         </div>
+        )}
       </div>
       {/* FLAVOUR PICKER — blooms up from the chip */}
       {pickerOpen && (
