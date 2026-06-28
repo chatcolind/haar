@@ -41,7 +41,7 @@ const FLAVOURS = [
   { id:'dorian',    name:'Dorian',    col:'#7af5c8', desc:'modal · flat-3, flat-7' },
 ];
 const flavourOf = (id: string) => FLAVOURS.find(f => f.id === id) ?? FLAVOURS[0];
-const CENTRE = { fx: 0.50, fy: 0.46, size: 200 };
+const CENTRE = { fx: 0.50, fy: 0.46, size: 260 };
 
 type XY = { x: number; y: number };
 const defaultXY = (): Record<string, XY> =>
@@ -99,6 +99,9 @@ function satelliteSlots(count: number, W: number, H: number, centreSize: number)
 export default function FieldPage() {
   const [count, setCount] = useState(4);
   const [selected, setSelected] = useState<string>('mosaic'); // TEST BHAIRAV
+  const [focused, setFocused] = useState<string | null>(null); // orb in focused (controls-beside) view
+  const [focusShown, setFocusShown] = useState(false); // drives the in/out transition (lags focused)
+  const lastOrbTap = useRef<{ id:string; t:number }>({ id:'', t:0 });
   const [dim, setDim] = useState({ w: 1440, h: 900 });
   const [state, setState] = useState<'idle'|'playing'|'stopped'>('idle');
   const [muted, setMuted] = useState(false);
@@ -181,7 +184,17 @@ export default function FieldPage() {
     setPlayNote(lockKey); setPlaySemi(0);
     setState('playing'); activateRack();
   }
+  function enterFocus(id: string) { setSelected(id); setFocused(id); requestAnimationFrame(()=>setFocusShown(true)); }
+  function exitFocus() { setFocusShown(false); setTimeout(()=>setFocused(null), 920); }
   async function handleSelect(id: string) {
+    // double-tap the same orb -> enter focused view
+    const now = Date.now();
+    if (lastOrbTap.current.id === id && now - lastOrbTap.current.t < 320) {
+      lastOrbTap.current = { id:'', t:0 };
+      enterFocus(id);
+      return;
+    }
+    lastOrbTap.current = { id, t: now };
     setSelected(id);
     await ensureStarted();
     if (state === 'stopped') return;
@@ -271,6 +284,42 @@ export default function FieldPage() {
             selected={selected===o.id} xy={xyMap[o.id]} onSelect={handleSelect} onXY={handleXY} />
         );
       })}
+
+      {/* FOCUSED VIEW — orb left (alive), controls right on glass, universe faint behind */}
+      {focused && (() => {
+        const fo = ALL_ORBS.find(o => o.id === focused);
+        const fc = '#d8a6ff';  // breadcrumb tint (Orb resolves its own colour)
+        return (
+          <div style={{ position:'absolute', inset:0, zIndex:150 }}>
+            {/* dim scrim so the field reads as 'faint behind' */}
+            <div style={{ position:'absolute', left:0, right:0, top:0, bottom: dim.h*0.30, background:'rgba(6,4,12,0.82)', backdropFilter:'blur(5px)', opacity: focusShown?1:0, transition:'opacity 0.42s ease' }} />
+
+            {/* breadcrumb + close */}
+            <div style={{ position:'absolute', top:18, left:24, zIndex:3, display:'flex', alignItems:'center', gap:9, opacity: focusShown?1:0, transition:'opacity 0.42s ease' }}>
+              <span onClick={exitFocus} style={{ fontSize:11, letterSpacing:'0.1em', color:'rgba(255,255,255,0.45)', cursor:'pointer' }}>FIELD</span>
+              <span style={{ fontSize:11, color:'rgba(255,255,255,0.3)' }}>›</span>
+              <span style={{ fontSize:11, letterSpacing:'0.1em', color:fc }}>{(fo?.label || focused).toUpperCase()}</span>
+            </div>
+            <div onClick={exitFocus} style={{ position:'absolute', top:14, right:22, zIndex:3, width:30, height:30, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:15, cursor:'pointer', opacity: focusShown?1:0, transition:'opacity 0.42s ease' }}>×</div>
+
+            {/* THE ORB — centred-left, large, alive + XY-playable. x,y = CENTRE in px. */}
+            <Orb id={focused} label={fo?.label || focused} colorKey={fo?.colorKey || 'mosaic'}
+              x={focusShown ? dim.w*0.27 : centrePos.x}
+              y={focusShown ? fh*0.44 : centrePos.y}
+              size={focusShown ? 300 : centrePos.size}
+              volume={0.7}
+              selected={true} xy={xyMap[focused]} onSelect={()=>{}} onXY={handleXY} />
+            <div style={{ position:'absolute', left:0, width:dim.w*0.54, top:fh*0.44 + 200, textAlign:'center', fontSize:15, letterSpacing:'0.18em', color:'#f4ecff', zIndex:3 }}>{(fo?.label || focused).toUpperCase()}</div>
+            <div style={{ position:'absolute', left:0, width:dim.w*0.54, top:fh*0.44 + 226, textAlign:'center', fontSize:9, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
+
+            {/* CONTROLS — right, translucent glass (empty shell for now, filled in 1b) */}
+            <div style={{ position:'absolute', right:'6%', top:90, bottom: fh*0.30 + 30, width:'40%', maxWidth:560, borderRadius:20, background:'rgba(22,20,36,0.78)', backdropFilter:'blur(12px)', border:'0.5px solid rgba(255,255,255,0.16)', padding:'26px 30px', boxSizing:'border-box', overflow:'auto', zIndex:2, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(40px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)' }}>
+              <div style={{ fontSize:9, letterSpacing:'0.22em', color:'rgba(255,255,255,0.4)' }}>THIS ORB</div>
+              <div style={{ fontSize:10, color:'rgba(255,255,255,0.3)', marginTop:14 }}>controls coming next (1b)</div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div style={{ position:'absolute', top: fh - 12, left:'50%', transform:'translateX(-50%)', display:'flex', alignItems:'center', gap:8, opacity:0.4, cursor:'pointer' }}>
         <div style={{ width:24, height:24, borderRadius:'50%', border:'0.5px dashed rgba(255,255,255,0.4)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:200 }}>+</div>
