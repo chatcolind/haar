@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Orb, { ORB_COLORS } from '../../components/field/Orb';
 import {
   startAudio, microcosmStart, microcosmStopEngine,
-  microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel,
+  microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq,
   microcosmGrainDensity, microcosmArmedPalette, microcosmEngineAmount,
 } from '../../audio/engine';
@@ -124,6 +124,8 @@ export default function FieldPage() {
   const volRef = useRef<Record<string, number>>({});   // per-orb volume (default 0.7)
   const densRef = useRef<Record<string, number>>({});  // per-orb density (default 0.5)
   const muteRef = useRef<Record<string, boolean>>({});  // per-channel mute (mixer)
+  const panRef = useRef<Record<string, number>>({});    // per-channel pan (-1..1, 0=centre)
+  const [expandedChannel, setExpandedChannel] = useState<string|null>(null); // mixer channel expanded sideways
   const [, forceOrb] = useState(0); // re-render after per-orb ref writes
   const [, forceAmt] = useState(0);
   const started = useRef(false);
@@ -399,31 +401,77 @@ export default function FieldPage() {
             <div style={{ position:'absolute', top:9, left:'50%', transform:'translateX(-50%)', width:40, height:4, borderRadius:3, background:'rgba(255,255,255,0.25)' }} />
             <div style={{ position:'absolute', top:20, left:26, fontSize:10, letterSpacing:'0.28em', color:'rgba(255,255,255,0.5)' }}>MIX DESK</div>
             <div onClick={closeMix} style={{ position:'absolute', top:14, right:22, width:28, height:28, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:14, cursor:'pointer' }}>⌄</div>
-            <div style={{ position:'absolute', top:42, left:18, right:18, bottom:14, display:'flex', gap:11 }}>
+            <div style={{ position:'absolute', top:42, left:18, right:18, bottom:14, display:'flex', gap:11, justifyContent:'center' }}>
               {orbs.map(o => {
                 const c = ORB_COLORS[(ALL_ORBS.find(a=>a.id===o.id)?.colorKey) || 'tunnel'];
                 const vol = volRef.current[o.id] ?? 0.7;
                 const mut = !!muteRef.current[o.id];
                 const db = vol <= 0 ? '-∞' : (20*Math.log10(vol)).toFixed(0);
+                const exp = expandedChannel === o.id;
+                const setVol = (nv:number)=>{ volRef.current[o.id]=nv; microcosmEngineLevel(o.id, muteRef.current[o.id]?0:nv); forceOrb(x=>x+1); };
+                const toggleMute = ()=>{ const nm=!muteRef.current[o.id]; muteRef.current[o.id]=nm; microcosmEngineLevel(o.id, nm?0:(volRef.current[o.id]??0.7)); forceOrb(x=>x+1); };
+                const pan = panRef.current[o.id] ?? 0;
+                const fader = (
+                  <div style={{ flex:1, display:'flex', alignItems:'center', minHeight:90 }}>
+                    <input type="range" min={0} max={1} step={0.01} value={vol}
+                      onChange={(e)=>setVol(parseFloat(e.target.value))}
+                      style={{ writingMode:'vertical-lr' as any, direction:'rtl', width:8, height:'100%', accentColor:c.mid, cursor:'pointer' }} />
+                  </div>
+                );
+                const muteBtn = (
+                  <div onClick={toggleMute} style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                    background: mut?'rgba(255,120,90,0.3)':'transparent', border:`1px solid ${mut?'rgba(255,120,90,0.7)':'rgba(255,120,90,0.4)'}`, color: mut?'#ff8c6e':'rgba(255,140,110,0.8)' }}>M</div>
+                );
+                // glowing pan knob (used in expanded view)
+                const panKnob = (
+                  <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
+                    <div onPointerDown={(e)=>{ const sx=e.clientX; const sp=panRef.current[o.id]??0; const mv=(ev:any)=>{ const np=Math.max(-1,Math.min(1,sp+(ev.clientX-sx)/80)); panRef.current[o.id]=np; microcosmEnginePan(o.id,np); forceOrb(x=>x+1); }; const up=()=>{ window.removeEventListener('pointermove',mv); window.removeEventListener('pointerup',up); }; window.addEventListener('pointermove',mv); window.addEventListener('pointerup',up); }}
+                      onDoubleClick={()=>{ panRef.current[o.id]=0; microcosmEnginePan(o.id,0); forceOrb(x=>x+1); }}
+                      style={{ width:32, height:32, borderRadius:'50%', position:'relative', cursor:'ew-resize', border:`1.5px solid ${c.mid}`, boxShadow:`0 0 10px 1px ${c.glow}88, inset 0 0 6px ${c.glow}55`, background:`radial-gradient(circle, ${c.glow}22, transparent 70%)` }}>
+                      <div style={{ position:'absolute', width:2, height:12, background:c.core, top:3, left:'50%', transform:`translateX(-50%) rotate(${pan*135}deg)`, transformOrigin:'bottom', boxShadow:`0 0 4px ${c.core}` }} />
+                    </div>
+                    <div style={{ fontSize:7, color:'rgba(255,255,255,0.5)', letterSpacing:'0.05em' }}>PAN</div>
+                  </div>
+                );
+                const resetBtn = (
+                  <div onClick={()=>{ panRef.current[o.id]=0; microcosmEnginePan(o.id,0); volRef.current[o.id]=0.7; microcosmEngineLevel(o.id, muteRef.current[o.id]?0:0.7); forceOrb(x=>x+1); }}
+                    style={{ padding:'5px 12px', borderRadius:12, border:'0.5px solid rgba(255,255,255,0.25)', fontSize:8, letterSpacing:'0.12em', color:'rgba(255,255,255,0.65)', cursor:'pointer', whiteSpace:'nowrap' }}>↺ RESET</div>
+                );
+
+                if (exp) {
+                  return (
+                    <div key={o.id} style={{ flex:1.8, maxWidth:240, minWidth:160, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:`linear-gradient(180deg, ${c.glow}33, rgba(255,255,255,0.02))`, border:`0.5px solid ${c.mid}`, padding:'10px 0 9px', position:'relative', transition:'flex 0.3s ease', overflow:'hidden' }}>
+                      <div onClick={()=>setExpandedChannel(null)} style={{ position:'absolute', top:7, right:9, fontSize:11, color:c.core, cursor:'pointer', zIndex:2 }}>⤡</div>
+                      <div style={{ width:24, height:24, borderRadius:'50%', background:`radial-gradient(circle, ${c.core}, ${c.glow}44 55%, transparent 78%)`, boxShadow:`0 0 12px 2px ${c.glow}66` }} />
+                      <div style={{ fontSize:9.5, color:c.core, marginTop:4, letterSpacing:'0.06em' }}>{ALL_ORBS.find(a=>a.id===o.id)?.label || o.id}</div>
+                      <div style={{ flex:1, display:'flex', alignItems:'stretch', gap:14, marginTop:8, width:'100%', justifyContent:'center', minHeight:0 }}>
+                        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>{panKnob}</div>
+                        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end' }}>
+                          {fader}
+                          <div style={{ fontSize:9, color:c.core, marginTop:4 }}>{db} dB</div>
+                        </div>
+                      </div>
+                      <div style={{ display:'flex', gap:8, marginTop:6, alignItems:'center' }}>
+                        {muteBtn}
+                        {resetBtn}
+                      </div>
+                    </div>
+                  );
+                }
                 return (
-                  <div key={o.id} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:`linear-gradient(180deg, ${c.glow}22, rgba(255,255,255,0.015))`, border:`0.5px solid ${c.mid}33`, padding:'10px 0 9px' }}>
+                  <div key={o.id} style={{ flex:1, maxWidth:140, minWidth:72, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:`linear-gradient(180deg, ${c.glow}22, rgba(255,255,255,0.015))`, border:`0.5px solid ${c.mid}33`, padding:'10px 0 9px', position:'relative', transition:'flex 0.3s ease' }}>
+                    <div onClick={()=>setExpandedChannel(o.id)} style={{ position:'absolute', top:7, right:8, fontSize:10, color:'rgba(255,255,255,0.35)', cursor:'pointer' }}>⤢</div>
                     <div style={{ width:26, height:26, borderRadius:'50%', background:`radial-gradient(circle, ${c.core}, ${c.glow}44 60%, transparent 78%)` }} />
                     <div style={{ fontSize:9.5, color:c.core, marginTop:5, letterSpacing:'0.06em' }}>{ALL_ORBS.find(a=>a.id===o.id)?.label || o.id}</div>
-                    <div style={{ flex:1, display:'flex', alignItems:'center', marginTop:10, minHeight:90 }}>
-                      <input type="range" min={0} max={1} step={0.01} value={vol}
-                        onChange={(e)=>{ const nv=parseFloat(e.target.value); volRef.current[o.id]=nv; microcosmEngineLevel(o.id, mut?0:nv); forceOrb(x=>x+1); }}
-                        style={{ writingMode:'vertical-lr' as any, direction:'rtl', width:8, height:'100%', accentColor:c.mid, cursor:'pointer' }} />
-                    </div>
+                    {fader}
                     <div style={{ fontSize:9, color:c.core, marginTop:6 }}>{db} dB</div>
-                    <div onClick={()=>{ const nm=!muteRef.current[o.id]; muteRef.current[o.id]=nm; microcosmEngineLevel(o.id, nm?0:(volRef.current[o.id]??0.7)); forceOrb(x=>x+1); }}
-                      style={{ width:24, height:24, borderRadius:'50%', marginTop:7, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
-                        background: mut?'rgba(255,120,90,0.3)':'transparent', border:`1px solid ${mut?'rgba(255,120,90,0.7)':'rgba(255,120,90,0.4)'}`, color: mut?'#ff8c6e':'rgba(255,140,110,0.8)' }}>M</div>
+                    <div style={{ marginTop:7 }}>{muteBtn}</div>
                   </div>
                 );
               })}
               <div style={{ width:1, background:'linear-gradient(180deg,transparent,rgba(255,255,255,0.15),transparent)', margin:'0 2px' }} />
               {/* MASTER */}
-              <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:'linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02))', border:'0.5px solid rgba(255,255,255,0.3)', padding:'10px 0 9px' }}>
+              <div style={{ flex:1, maxWidth:140, minWidth:72, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:'linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02))', border:'0.5px solid rgba(255,255,255,0.3)', padding:'10px 0 9px' }}>
                 <div style={{ width:26, height:26, borderRadius:'50%', background:'radial-gradient(circle,#fff,rgba(255,255,255,0.3) 55%,transparent 78%)' }} />
                 <div style={{ fontSize:9.5, color:'#fff', marginTop:5, letterSpacing:'0.12em' }}>MASTER</div>
                 <div style={{ flex:1, display:'flex', alignItems:'center', marginTop:10, minHeight:90 }}>

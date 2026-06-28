@@ -18,9 +18,15 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
 
     // Active grain voices
     this.grains = [];
+    // Per-engine channel pan (-1..1), applied on top of each grain's own pan
+    this.enginePan = {};
 
     this.port.onmessage = (e) => {
       const m = e.data;
+      if (m.type === 'enginePan') {
+        this.enginePan[m.id] = m.pan;
+        return;
+      }
       if (m.type === 'grain') {
         // startSamp is interpreted as "samples behind the current write head".
         // This keeps reads in recent, safe audio and never crosses the write
@@ -34,8 +40,8 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
           remaining: m.lenSamp,
           total: m.lenSamp,
           gain: m.gain,
-          panL: Math.cos((m.pan + 1) * 0.25 * Math.PI),
-          panR: Math.sin((m.pan + 1) * 0.25 * Math.PI),
+          panL: Math.cos((Math.max(-1, Math.min(1, m.pan + (this.enginePan[m.engine] || 0))) + 1) * 0.25 * Math.PI),
+          panR: Math.sin((Math.max(-1, Math.min(1, m.pan + (this.enginePan[m.engine] || 0))) + 1) * 0.25 * Math.PI),
           // safety margin: how many samples of headroom before the write head
           maxRead: behind,
         });

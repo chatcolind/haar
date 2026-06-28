@@ -162,11 +162,12 @@ export class Microcosm {
   // Connect the Microcosm output somewhere (native node, e.g. ctx.destination)
   connectOut(dest: AudioNode): void { this.nativeOut.connect(this.limiter); this.limiter.connect(dest); }
 
+  private _currentEngine: string = '';
   spawnGrain(spec: GrainSpec): void {
     // safety: clamp |rate| so high notes * up-pitched grains can't alias into crackle
     const r = spec.rate;
     const capped = Math.sign(r || 1) * Math.min(Math.abs(r), 2.2);
-    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped });
+    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine });
   }
   setFreeze(on: boolean): void { this.node?.port.postMessage({ type: 'freeze', value: on }); }
   clearGrains(): void { this.node?.port.postMessage({ type: 'clearGrains' }); }
@@ -185,6 +186,9 @@ export class Microcosm {
   // octave-stacked speeds. Activity controls density + number of voices.
   setEngineActive(id: string, on: boolean): void {
     if (this.rack[id]) this.rack[id].active = on;
+  }
+  setPan(id: string, pan: number): void {
+    this.node?.port.postMessage({ type: 'enginePan', id, pan: Math.max(-1, Math.min(1, pan)) });
   }
   setMasterGain(v: number): void {
     const g = Math.max(0, Math.min(1, v));
@@ -209,6 +213,7 @@ export class Microcosm {
         if (!e.active) continue;
         this.engineTickAccum[id] -= STEP;
         if (this.engineTickAccum[id] <= 0) {
+          this._currentEngine = id;   // tag grains spawned in this tick
           let next = 100;
           if (id === 'mosaic') next = this.tickMosaic(e.level);
           else if (id === 'haze') next = this.tickHaze(e.level);

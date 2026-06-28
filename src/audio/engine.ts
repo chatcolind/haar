@@ -627,6 +627,7 @@ export function microcosmStopEngine(): void {
 export function microcosmEngineActive(id: string, on: boolean): void { microcosmCore?.setEngineActive(id, on); }
 export function microcosmEngineLevel(id: string, level: number): void { microcosmCore?.setEngineLevel(id, level); }
 export function microcosmMasterLevel(v: number): void { (microcosmCore as any)?.setMasterGain(v); }
+export function microcosmEnginePan(id: string, pan: number): void { (microcosmCore as any)?.setPan(id, pan); }
 export function microcosmActivity(a: number): void { microcosmCore?.setActivity(a); }
 export function microcosmGrainSpread(x: number): void { microcosmCore?.setGrainSpread(x); }
 export function microcosmPitchSpread(y: number): void { microcosmCore?.setPitchSpread(y); }
