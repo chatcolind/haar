@@ -100,7 +100,28 @@ function satelliteSlots(count: number, W: number, H: number, centreSize: number)
 }
 
 export default function FieldPage() {
-  const [count, setCount] = useState(4);
+  // ---- field instances (rack-by-orb-id): the live orbs on the field ----
+  // Each is { id (unique instance), engineType (recipe), label, colorKey }. Starts with one default Mosaic.
+  type FieldOrb = { id: string; engineType: string; label: string; colorKey: any };
+  const [fieldOrbs, setFieldOrbs] = useState<FieldOrb[]>([
+    { id: 'mosaic_1', engineType: 'mosaic', label: 'Mosaic', colorKey: 'tunnel' },
+  ]);
+  const orbCounter = useRef<Record<string, number>>({ mosaic: 1 });
+  function mintOrbId(engineType: string): string {
+    const n = (orbCounter.current[engineType] || 0) + 1;
+    orbCounter.current[engineType] = n;
+    return `${engineType}_${n}`;
+  }
+  function addFieldOrb(engineType: string, label: string, colorKey: any): string {
+    const id = mintOrbId(engineType);
+    setFieldOrbs(prev => [...prev, { id, engineType, label, colorKey }]);
+    return id;
+  }
+  function removeFieldOrb(id: string): void {
+    microcosmEngineActive(id, false);
+    microcosmRemoveOrb(id);
+    setFieldOrbs(prev => prev.filter(o => o.id !== id));
+  }
   const [selected, setSelected] = useState<string>('mosaic'); // TEST BHAIRAV
   const [focused, setFocused] = useState<string | null>(null); // orb in focused (controls-beside) view
   const [focusShown, setFocusShown] = useState(false); // drives the in/out transition (lags focused)
@@ -171,7 +192,8 @@ export default function FieldPage() {
   const mutedRef = useRef(false);
   const xyRef = useRef<Record<string, XY>>(defaultXY());
 
-  const orbs = ALL_ORBS.slice(0, count);
+  const orbs = fieldOrbs;                 // field renders from live instances (was ALL_ORBS.slice(0,count))
+  const count = fieldOrbs.length;        // count now derives from instances (drives positioning)
 
   useEffect(() => {
     const update = () => setDim({ w: window.innerWidth, h: window.innerHeight });
@@ -183,7 +205,7 @@ export default function FieldPage() {
   // RACK: activate ALL visible orbs' engines (present = playing)
   // per-orb level = the orb's OWN volume (the mixer fader is the single source of truth).
   // selection no longer changes volume; mute/solo still gate it.
-  function reapplyLevels(){ ALL_ORBS.forEach(o => { if (orbs.some(v=>v.id===o.id)) microcosmEngineLevel(o.id, orbLevel(o.id)); }); }
+  function reapplyLevels(){ fieldOrbs.forEach(o => { microcosmEngineLevel(o.id, orbLevel(o.id)); }); }
   function orbLevel(id: string): number {
     if (mutedRef.current) return 0;
     if (muteRef.current[id]) return 0;                    // per-channel mute (mixer)
@@ -193,7 +215,7 @@ export default function FieldPage() {
   }
   function activateRack() {
     if (!started.current) return;
-    ALL_ORBS.forEach(o => {
+    fieldOrbs.forEach(o => {
       const on = orbs.some(v => v.id === o.id);
       if (on) microcosmAddOrb(o.id, o.engineType, orbLevel(o.id));  // register instance (id carries engineType)
       microcosmEngineActive(o.id, on);
@@ -288,7 +310,7 @@ export default function FieldPage() {
     await ensureStarted();
     if (state === 'stopped') return;
     // selection drives the XY controls only — volume stays each orb's own (the fader's truth)
-    ALL_ORBS.forEach(o => {
+    fieldOrbs.forEach(o => {
       if (orbs.some(v => v.id === o.id)) microcosmEngineLevel(o.id, orbLevel(o.id));
     });
     const v = xyRef.current[id] ?? { x:0.5, y:0.5 };
@@ -347,11 +369,11 @@ export default function FieldPage() {
       </div>
 
 
-      {/* TEST: orb count stepper (top-left, clear of orbs, above field) */}
+      {/* TEST: add/remove field orbs (top-left). +=add Mosaic instance, −=remove last. */}
       <div style={{ position:'absolute', top:62, left:32, zIndex:100, display:'flex', alignItems:'center', gap:14, background:'rgba(255,255,255,0.08)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:20, padding:'7px 16px' }}>
-        <span onClick={()=>setCount(c=>Math.max(1,c-1))} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>−</span>
+        <span onClick={()=>{ if (fieldOrbs.length>1) removeFieldOrb(fieldOrbs[fieldOrbs.length-1].id); }} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>−</span>
         <span style={{ fontSize:11, color:'rgba(255,255,255,0.7)', minWidth:54, textAlign:'center' }}>{count} orbs</span>
-        <span onClick={()=>setCount(c=>Math.min(10,c+1))} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>+</span>
+        <span onClick={()=>{ const id=addFieldOrb('mosaic','Mosaic','tunnel'); if (started.current && state==='playing'){ microcosmAddOrb(id,'mosaic',orbLevel(id)); microcosmEngineActive(id,true); microcosmEngineLevel(id,orbLevel(id)); } }} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>+</span>
       </div>
 
       {orbs.map((o) => {
@@ -366,7 +388,7 @@ export default function FieldPage() {
 
       {/* FOCUSED VIEW — orb left (alive), controls right on glass, universe faint behind */}
       {focused && (() => {
-        const fo = ALL_ORBS.find(o => o.id === focused);
+        const fo = fieldOrbs.find(o => o.id === focused);
         const fc = '#d8a6ff';  // breadcrumb tint (Orb resolves its own colour)
         return (
           <div style={{ position:'absolute', inset:0, zIndex:150, pointerEvents:'none' }}>
@@ -382,7 +404,7 @@ export default function FieldPage() {
             <div onClick={exitFocus} style={{ position:'absolute', top:14, right:22, zIndex:3, width:30, height:30, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:15, cursor:'pointer', opacity: focusShown?1:0, transition:'opacity 0.42s ease', pointerEvents:'auto' }}>×</div>
 
             {/* THE ORB — CENTRED, large, alive + XY-playable. x,y = CENTRE in px. */}
-            <Orb id={focused} label={fo?.label || focused} colorKey={fo?.colorKey || 'mosaic'}
+            <Orb id={focused} label={fo?.label || focused} colorKey={fo?.colorKey || 'tunnel'}
               x={focusShown ? dim.w*0.50 : centrePos.x}
               y={focusShown ? fh*0.42 : centrePos.y}
               size={focusShown ? 240 : centrePos.size}
@@ -618,7 +640,7 @@ export default function FieldPage() {
             <div onClick={closeMix} style={{ position:'absolute', top:14, right:22, width:28, height:28, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:14, cursor:'pointer' }}>⌄</div>
             <div style={{ position:'absolute', top:42, left:18, right:18, bottom:14, display:'flex', gap:11, justifyContent:'center' }}>
               {orbs.map(o => {
-                const c = ORB_COLORS[(ALL_ORBS.find(a=>a.id===o.id)?.colorKey) || 'tunnel'];
+                const c = ORB_COLORS[(fieldOrbs.find(a=>a.id===o.id)?.colorKey) || 'tunnel'];
                 const vol = volRef.current[o.id] ?? 0.7;
                 const mut = !!muteRef.current[o.id];
                 const db = vol <= 0 ? '-∞' : (20*Math.log10(vol)).toFixed(0);
@@ -684,7 +706,7 @@ export default function FieldPage() {
                     <div key={o.id} style={{ flex:1.8, maxWidth:240, minWidth:160, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:`linear-gradient(180deg, ${c.glow}33, rgba(255,255,255,0.02))`, border:`0.5px solid ${c.mid}`, padding:'10px 0 9px', position:'relative', transition:'flex 0.3s ease', overflow:'hidden' }}>
                       <div onClick={()=>setExpandedChannel(null)} style={{ position:'absolute', top:7, right:9, fontSize:11, color:c.core, cursor:'pointer', zIndex:2 }}>⤡</div>
                       <div style={{ width:24, height:24, borderRadius:'50%', background:`radial-gradient(circle, ${c.core}, ${c.glow}44 55%, transparent 78%)`, boxShadow:`0 0 12px 2px ${c.glow}66` }} />
-                      <div style={{ fontSize:9.5, color:c.core, marginTop:4, letterSpacing:'0.06em' }}>{ALL_ORBS.find(a=>a.id===o.id)?.label || o.id}</div>
+                      <div style={{ fontSize:9.5, color:c.core, marginTop:4, letterSpacing:'0.06em' }}>{fieldOrbs.find(a=>a.id===o.id)?.label || o.id}</div>
                       <div style={{ flex:1, display:'flex', alignItems:'stretch', gap:14, marginTop:8, width:'100%', justifyContent:'center', minHeight:0 }}>
                         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>{eqDials}</div>
                         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>{panKnob}</div>
@@ -705,7 +727,7 @@ export default function FieldPage() {
                   <div key={o.id} style={{ flex:1, maxWidth:140, minWidth:72, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:`linear-gradient(180deg, ${c.glow}22, rgba(255,255,255,0.015))`, border:`0.5px solid ${c.mid}33`, padding:'10px 0 9px', position:'relative', transition:'flex 0.3s ease' }}>
                     <div onClick={()=>setExpandedChannel(o.id)} style={{ position:'absolute', top:7, right:8, fontSize:10, color:'rgba(255,255,255,0.35)', cursor:'pointer' }}>⤢</div>
                     <div style={{ width:26, height:26, borderRadius:'50%', background:`radial-gradient(circle, ${c.core}, ${c.glow}44 60%, transparent 78%)` }} />
-                    <div style={{ fontSize:9.5, color:c.core, marginTop:5, letterSpacing:'0.06em' }}>{ALL_ORBS.find(a=>a.id===o.id)?.label || o.id}</div>
+                    <div style={{ fontSize:9.5, color:c.core, marginTop:5, letterSpacing:'0.06em' }}>{fieldOrbs.find(a=>a.id===o.id)?.label || o.id}</div>
                     {fader}
                     <div style={{ fontSize:9, color:c.core, marginTop:6 }}>{db} dB</div>
                     <div style={{ display:'flex', gap:7, marginTop:7 }}>{muteBtn}{soloBtn}</div>
