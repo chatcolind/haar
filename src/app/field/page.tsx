@@ -367,20 +367,20 @@ export default function FieldPage() {
     const idx = others.findIndex(o => o.id === id);
     return sats[idx] ?? centrePos;
   };
-  const zlabel: React.CSSProperties = { fontSize:9, fontWeight:500, letterSpacing:'0.25em', color:'rgba(255,255,255,0.3)', marginBottom:14 };
+  const zlabel: React.CSSProperties = { fontSize:11.5, fontWeight:500, letterSpacing:'0.25em', color:'rgba(255,255,255,0.3)', marginBottom:14 };
 
   return (
     <main style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'radial-gradient(ellipse at 50% 28%, #10131f 0%, #070810 66%, #04050a 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
       <div style={{ position:'absolute', inset:0, opacity:0.6, pointerEvents:'none', backgroundImage:'radial-gradient(1px 1px at 20% 14%, rgba(255,255,255,0.5), transparent), radial-gradient(1px 1px at 88% 9%, rgba(255,255,255,0.45), transparent), radial-gradient(1px 1px at 94% 42%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 8% 46%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 50% 8%, rgba(255,255,255,0.3), transparent)' }} />
       <div style={{ position:'absolute', top:24, left:32, fontSize:21, letterSpacing:'0.6em', fontWeight:500 }}>H A A R</div>
-      <div style={{ position:'absolute', top:28, right:32, fontSize:11, fontWeight:500, color:'rgba(255,255,255,0.55)' }}>
+      <div style={{ position:'absolute', top:28, right:32, fontSize:13, fontWeight:500, color:'rgba(255,255,255,0.55)' }}>
         {state==='playing' ? `${muted?'muted':'playing'} · ${count} active` : state==='stopped' ? 'stopped' : `field · ${count} active`}
       </div>
 
 
       {/* TEST SOLO: hear only selected orb (temporary, removable) */}
       <div onClick={()=>{ const v=!soloRef.current; soloRef.current=v; setSolo(v); activateRack(); }}
-        style={{ position:'absolute', top:108, left:'50%', transform:'translateX(-50%)', zIndex:100, padding:'7px 16px', fontSize:11, cursor:'pointer', userSelect:'none', borderRadius:18,
+        style={{ position:'absolute', top:108, left:'50%', transform:'translateX(-50%)', zIndex:100, padding:'7px 16px', fontSize:13, cursor:'pointer', userSelect:'none', borderRadius:18,
           background: solo ? 'rgba(122,245,200,0.25)' : 'rgba(255,255,255,0.06)', border:'0.5px solid rgba(255,255,255,0.2)',
           color: solo ? '#fff' : 'rgba(255,255,255,0.5)' }}>
         {solo ? 'SOLO on · only selected' : 'Solo off · all play'}
@@ -389,7 +389,7 @@ export default function FieldPage() {
 
       {/* TEST: add/remove field orbs (top-left). +=add Mosaic instance, −=remove last. */}
       <div style={{ position:'absolute', top:62, left:32, zIndex:100, display:'flex', alignItems:'center', gap:14, background:'rgba(255,255,255,0.08)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:20, padding:'7px 16px' }}>
-        <span style={{ fontSize:11, color:'rgba(255,255,255,0.7)', minWidth:54, textAlign:'center' }}>{count} orbs</span>
+        <span style={{ fontSize:13, color:'rgba(255,255,255,0.7)', minWidth:54, textAlign:'center' }}>{count} orbs</span>
         <span onClick={()=>setCreateOpen(true)} style={{ cursor:'pointer', fontSize:18, color:'#a6fff2', userSelect:'none' }}>+</span>
       </div>
 
@@ -414,9 +414,9 @@ export default function FieldPage() {
 
             {/* breadcrumb + close */}
             <div style={{ position:'absolute', top:18, left:24, zIndex:3, display:'flex', alignItems:'center', gap:9, opacity: focusShown?1:0, transition:'opacity 0.42s ease', pointerEvents:'auto' }}>
-              <span onClick={exitFocus} style={{ fontSize:11, letterSpacing:'0.1em', color:'rgba(255,255,255,0.45)', cursor:'pointer' }}>FIELD</span>
-              <span style={{ fontSize:11, color:'rgba(255,255,255,0.3)' }}>›</span>
-              <span style={{ fontSize:11, letterSpacing:'0.1em', color:fc }}>{(fo?.label || focused).toUpperCase()}</span>
+              <span onClick={exitFocus} style={{ fontSize:13, letterSpacing:'0.1em', color:'rgba(255,255,255,0.45)', cursor:'pointer' }}>FIELD</span>
+              <span style={{ fontSize:13, color:'rgba(255,255,255,0.3)' }}>›</span>
+              <span style={{ fontSize:13, letterSpacing:'0.1em', color:fc }}>{(fo?.label || focused).toUpperCase()}</span>
             </div>
             <div onClick={exitFocus} style={{ position:'absolute', top:14, right:22, zIndex:3, width:30, height:30, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:15, cursor:'pointer', opacity: focusShown?1:0, transition:'opacity 0.42s ease', pointerEvents:'auto' }}>×</div>
 
@@ -428,24 +428,27 @@ export default function FieldPage() {
               volume={0.7}
               selected={true} xy={xyMap[focused]} onSelect={handleBackTap} onXY={handleXY} hideLabel />
             <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 150, textAlign:'center', fontSize:14, letterSpacing:'0.16em', color:'#f4ecff', zIndex:3 }}>{(fo?.label || focused).toUpperCase()}</div>
-            <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 174, textAlign:'center', fontSize:8.5, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
+            <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 174, textAlign:'center', fontSize:13, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
 
             {/* LEFT COLUMN — level + voices (distributed) */}
             <div style={{ position:'absolute', left:'3%', top:64, bottom: dim.h*0.30 + 16, width:'26%', maxWidth:340, boxSizing:'border-box', paddingLeft:18, overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
               {/* LEVEL */}
               <div>
-                <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:9 }}>LEVEL</div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:9 }}>
+                  <span style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)' }}>LEVEL</span>
+                  {fieldOrbs.length>1 && <span onClick={()=>{ const id=focused; exitFocus(); setTimeout(()=>removeFieldOrb(id), 60); }} style={{ fontSize:10, letterSpacing:'0.08em', color:'rgba(255,120,90,0.7)', cursor:'pointer' }}>remove orb</span>}
+                </div>
                 <div style={{ display:'flex', justifyContent:'space-between', marginBottom:7 }}>
-                  <span style={{ fontSize:10, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>VOLUME</span>
-                  <span style={{ fontSize:10, color:'#d8a6ff' }}>{Math.round((volRef.current[focused] ?? 0.7)*100)}%</span>
+                  <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>VOLUME</span>
+                  <span style={{ fontSize:12.5, color:'#d8a6ff' }}>{Math.round((volRef.current[focused] ?? 0.7)*100)}%</span>
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:9 }}>
                   <div onClick={()=>{ muteRef.current[focused]=!muteRef.current[focused]; reapplyLevels(); forceOrb(x=>x+1); }}
-                    style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                    style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11,
                       background: muteRef.current[focused]?'rgba(255,120,90,0.3)':'transparent', border:`1px solid ${muteRef.current[focused]?'rgba(255,120,90,0.8)':'rgba(255,120,90,0.45)'}`, color: muteRef.current[focused]?'#ff8c6e':'rgba(255,140,110,0.85)' }}>M</div>
                   <div onClick={()=>{ soloSetRef.current[focused]=!soloSetRef.current[focused]; reapplyLevels(); forceOrb(x=>x+1); }}
-                    style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                    style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11,
                       background: soloSetRef.current[focused]?'rgba(122,245,200,0.3)':'transparent', border:`1px solid ${soloSetRef.current[focused]?'rgba(122,245,200,0.8)':'rgba(122,245,200,0.45)'}`, color: soloSetRef.current[focused]?'#a6fff2':'rgba(122,245,200,0.85)' }}>S</div>
                   <input type="range" min={0} max={1} step={0.01} value={volRef.current[focused] ?? 0.7}
                     onChange={(e)=>{ const v=parseFloat(e.target.value); volRef.current[focused]=v; microcosmEngineLevel(focused, orbLevel(focused)); forceOrb(x=>x+1); }}
@@ -456,9 +459,9 @@ export default function FieldPage() {
               {/* VOICES — orbs + selected voice's sliders (UI ready; engine later) */}
               <div>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:11 }}>
-                  <span style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)' }}>VOICES</span>
+                  <span style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)' }}>VOICES</span>
                   <span onClick={()=>{ voicesRef.current[focused]=defaultVoices(); setSelVoice(null); forceOrb(x=>x+1); }}
-                    style={{ fontSize:7, letterSpacing:'0.08em', color:'rgba(255,255,255,0.35)', cursor:'pointer' }}>reset</span>
+                    style={{ fontSize:10, letterSpacing:'0.08em', color:'rgba(255,255,255,0.35)', cursor:'pointer' }}>reset</span>
                 </div>
                 <div style={{ display:'flex', gap:14, alignItems:'center', marginBottom:13, flexWrap:'wrap' }}>
                   {getVoices(focused).map(v => {
@@ -469,14 +472,14 @@ export default function FieldPage() {
                           background:`radial-gradient(circle, rgba(216,166,255,${v.on?0.9:0.4}), rgba(138,61,245,0.3) 55%, transparent 78%)`,
                           boxShadow: v.on?`0 0 ${sel?16:12}px ${sel?3:2}px rgba(216,166,255,${sel?0.7:0.5})`:'none',
                           border: sel?'2px solid #e0bfff':'2px solid transparent' }} />
-                        <div style={{ fontSize:8, color: v.on?'#e0bfff':'rgba(255,255,255,0.5)' }}>{v.type}{sel?' ✦':''}</div>
+                        <div style={{ fontSize:11, color: v.on?'#e0bfff':'rgba(255,255,255,0.5)' }}>{v.type}{sel?' ✦':''}</div>
                       </div>
                     );
                   })}
                   <div onClick={()=>{ const vs=getVoices(focused); vs.push({ id:'v_'+Date.now(), type:'Sine', on:true, oct:0, level:0.7, detune:0 }); forceOrb(x=>x+1); }}
                     style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:5, cursor:'pointer' }}>
                     <div style={{ width:30, height:30, borderRadius:'50%', border:'1px dashed rgba(255,255,255,0.4)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.55)', fontSize:13 }}>+</div>
-                    <div style={{ fontSize:7, color:'rgba(255,255,255,0.4)' }}>add</div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)' }}>add</div>
                   </div>
                 </div>
                 {(() => {
@@ -486,29 +489,29 @@ export default function FieldPage() {
                   const setV = (k: 'oct'|'level'|'detune', val: number) => { (v as any)[k] = val; forceOrb(x=>x+1); };
                   return (
                     <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                      <div style={{ fontSize:7.5, color:'#e0bfff', letterSpacing:'0.08em' }}>{v.type.toUpperCase()}</div>
+                      <div style={{ fontSize:10.5, color:'#e0bfff', letterSpacing:'0.08em' }}>{v.type.toUpperCase()}</div>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <span style={{ fontSize:7, color:'rgba(255,255,255,0.45)', width:42 }}>OCTAVE</span>
+                        <span style={{ fontSize:10, color:'rgba(255,255,255,0.45)', width:42 }}>OCTAVE</span>
                         <input type="range" min={-2} max={2} step={1} value={v.oct} onChange={(e)=>setV('oct', parseInt(e.target.value))} style={{ flex:1, accentColor:'#d8a6ff' }} />
-                        <span style={{ fontSize:7, color:'#cdb4ff', width:18 }}>{v.oct}</span>
+                        <span style={{ fontSize:10, color:'#cdb4ff', width:18 }}>{v.oct}</span>
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <span style={{ fontSize:7, color:'rgba(255,255,255,0.45)', width:42 }}>LEVEL</span>
+                        <span style={{ fontSize:10, color:'rgba(255,255,255,0.45)', width:42 }}>LEVEL</span>
                         <input type="range" min={0} max={1} step={0.01} value={v.level} onChange={(e)=>setV('level', parseFloat(e.target.value))} style={{ flex:1, accentColor:'#d8a6ff' }} />
-                        <span style={{ fontSize:7, color:'#cdb4ff', width:18 }}>{Math.round(v.level*100)}</span>
+                        <span style={{ fontSize:10, color:'#cdb4ff', width:18 }}>{Math.round(v.level*100)}</span>
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <span style={{ fontSize:7, color:'rgba(255,255,255,0.45)', width:42 }}>DETUNE</span>
+                        <span style={{ fontSize:10, color:'rgba(255,255,255,0.45)', width:42 }}>DETUNE</span>
                         <input type="range" min={-50} max={50} step={1} value={v.detune} onChange={(e)=>setV('detune', parseInt(e.target.value))} style={{ flex:1, accentColor:'#d8a6ff' }} />
-                        <span style={{ fontSize:7, color:'#cdb4ff', width:18 }}>{v.detune}</span>
+                        <span style={{ fontSize:10, color:'#cdb4ff', width:18 }}>{v.detune}</span>
                       </div>
                       <div onClick={()=>{ v.on=!v.on; forceOrb(x=>x+1); }} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', marginTop:2 }}>
                         <div style={{ width:30, height:16, borderRadius:9, background: v.on?'rgba(122,245,200,0.25)':'rgba(255,255,255,0.1)', border:`1px solid ${v.on?'#7af5c8':'rgba(255,255,255,0.3)'}`, position:'relative' }}>
                           <div style={{ position:'absolute', top:1.5, left: v.on?14:2, width:11, height:11, borderRadius:'50%', background: v.on?'#a6fff2':'rgba(255,255,255,0.5)', transition:'left 0.15s' }} />
                         </div>
-                        <span style={{ fontSize:7, color:'rgba(255,255,255,0.5)' }}>{v.on?'voice ON':'muted'}</span>
+                        <span style={{ fontSize:10, color:'rgba(255,255,255,0.5)' }}>{v.on?'voice ON':'muted'}</span>
                       </div>
-                      <div style={{ fontSize:7, color:'rgba(255,255,255,0.25)' }}>UI ready · not yet audible</div>
+                      <div style={{ fontSize:10, color:'rgba(255,255,255,0.25)' }}>UI ready · not yet audible</div>
                     </div>
                   );
                 })()}
@@ -522,9 +525,9 @@ export default function FieldPage() {
               {/* SIGNAL PATH — effect-orbs on a thread of light; tap to edit (UI ready, not yet audible) */}
               <div>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:11 }}>
-                  <span style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)' }}>SIGNAL PATH</span>
+                  <span style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)' }}>SIGNAL PATH</span>
                   <span onClick={()=>{ fxRef.current[focused]=defaultFx(); setSelFx(null); forceOrb(x=>x+1); }}
-                    style={{ fontSize:7, letterSpacing:'0.08em', color:'rgba(255,255,255,0.35)', cursor:'pointer' }}>reset</span>
+                    style={{ fontSize:10, letterSpacing:'0.08em', color:'rgba(255,255,255,0.35)', cursor:'pointer' }}>reset</span>
                 </div>
                 <div style={{ position:'relative', display:'inline-flex', width:'fit-content', maxWidth:'100%', alignItems:'center', gap:8, marginBottom:13, flexWrap:'wrap' }}>
                   {/* thread of light behind the orbs */}
@@ -537,14 +540,14 @@ export default function FieldPage() {
                           background:`radial-gradient(circle, rgba(216,166,255,${fx.on?0.85:0.3}), rgba(138,61,245,0.28) 55%, transparent 78%)`,
                           boxShadow: fx.on?`0 0 ${sel?15:11}px ${sel?3:2}px rgba(216,166,255,${sel?0.7:0.45})`:'none',
                           border: sel?'2px solid #e0bfff':'2px solid transparent' }} />
-                        <div style={{ fontSize:7.5, color: fx.on?'#e0bfff':'rgba(255,255,255,0.45)', whiteSpace:'nowrap' }}>{fx.type}{sel?' ✦':''}</div>
+                        <div style={{ fontSize:10.5, color: fx.on?'#e0bfff':'rgba(255,255,255,0.45)', whiteSpace:'nowrap' }}>{fx.type}{sel?' ✦':''}</div>
                       </div>
                     );
                   })}
                   <div onClick={()=>{ const xs=getFx(focused); const out=xs.findIndex(f=>f.id==='fx_out'); const ins=out<0?xs.length:out; xs.splice(ins,0,{ id:'fx_'+Date.now(), type:'Reverb', on:true, params:{ size:0.5, decay:0.5, mix:0.3 } }); forceOrb(x=>x+1); }}
                     style={{ position:'relative', zIndex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:5, cursor:'pointer' }}>
                     <div style={{ width:26, height:26, borderRadius:'50%', border:'1px dashed rgba(255,255,255,0.4)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.55)', fontSize:12 }}>+</div>
-                    <div style={{ fontSize:7, color:'rgba(255,255,255,0.4)' }}>add</div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)' }}>add</div>
                   </div>
                 </div>
                 {(() => {
@@ -564,15 +567,15 @@ export default function FieldPage() {
                   return (
                     <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                        <span style={{ fontSize:7.5, color:'#e0bfff', letterSpacing:'0.08em' }}>{fx.type.toUpperCase()}</span>
+                        <span style={{ fontSize:10.5, color:'#e0bfff', letterSpacing:'0.08em' }}>{fx.type.toUpperCase()}</span>
                         {!fx.fixed && <span onClick={(e)=>{ e.stopPropagation(); const a=getFx(focused); const i=a.findIndex(f=>f.id===fx.id); if(i>=0){ a.splice(i,1); if(selFx===fx.id) setSelFx(null); forceOrb(x=>x+1);} }}
-                          style={{ fontSize:7, color:'rgba(255,120,90,0.7)', cursor:'pointer' }}>remove</span>}
+                          style={{ fontSize:10, color:'rgba(255,120,90,0.7)', cursor:'pointer' }}>remove</span>}
                       </div>
                       {rows.map(r => (
                         <div key={r.k} style={{ display:'flex', alignItems:'center', gap:8 }}>
-                          <span style={{ fontSize:7, color:'rgba(255,255,255,0.45)', width:52 }}>{r.label}</span>
+                          <span style={{ fontSize:10, color:'rgba(255,255,255,0.45)', width:52 }}>{r.label}</span>
                           <input type="range" min={r.min} max={r.max} step={r.step} value={fx.params[r.k] ?? 0} onChange={(e)=>setP(r.k, r.step<1?parseFloat(e.target.value):parseInt(e.target.value))} style={{ flex:1, accentColor:'#d8a6ff' }} />
-                          <span style={{ fontSize:7, color:'#cdb4ff', width:22 }}>{fmt(r.k, fx.params[r.k] ?? 0)}</span>
+                          <span style={{ fontSize:10, color:'#cdb4ff', width:22 }}>{fmt(r.k, fx.params[r.k] ?? 0)}</span>
                         </div>
                       ))}
                       {!fx.fixed && (
@@ -580,10 +583,10 @@ export default function FieldPage() {
                           <div style={{ width:30, height:16, borderRadius:9, background: fx.on?'rgba(122,245,200,0.25)':'rgba(255,255,255,0.1)', border:`1px solid ${fx.on?'#7af5c8':'rgba(255,255,255,0.3)'}`, position:'relative' }}>
                             <div style={{ position:'absolute', top:1.5, left: fx.on?14:2, width:11, height:11, borderRadius:'50%', background: fx.on?'#a6fff2':'rgba(255,255,255,0.5)', transition:'left 0.15s' }} />
                           </div>
-                          <span style={{ fontSize:7, color:'rgba(255,255,255,0.5)' }}>{fx.on?'effect ON':'bypassed'}</span>
+                          <span style={{ fontSize:10, color:'rgba(255,255,255,0.5)' }}>{fx.on?'effect ON':'bypassed'}</span>
                         </div>
                       )}
-                      <div style={{ fontSize:7, color:'rgba(255,255,255,0.25)' }}>UI ready · not yet audible</div>
+                      <div style={{ fontSize:10, color:'rgba(255,255,255,0.25)' }}>UI ready · not yet audible</div>
                     </div>
                   );
                 })()}
@@ -591,7 +594,7 @@ export default function FieldPage() {
 
               {/* FLAVOUR — density + amount (real) */}
               <div>
-                <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:10 }}>FLAVOUR</div>
+                <div style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:10 }}>FLAVOUR</div>
                 {/* flavour-orbs — per-orb tonal world (UI per-orb; engine palette still global) */}
                 <div style={{ display:'flex', gap:13, alignItems:'flex-start', marginBottom:15, flexWrap:'wrap' }}>
                   {FLAVOURS.map(f => {
@@ -604,16 +607,16 @@ export default function FieldPage() {
                           background:`radial-gradient(circle, ${f.col}, ${f.col}44 55%, transparent 78%)`,
                           boxShadow: sel?`0 0 14px 3px ${f.col}aa`:`0 0 6px 1px ${f.col}55`,
                           border: sel?`2px solid ${f.col}`:'2px solid transparent' }} />
-                        <div style={{ fontSize:7.5, color: sel?f.col:'rgba(255,255,255,0.5)', whiteSpace:'nowrap' }}>{f.name}</div>
+                        <div style={{ fontSize:10.5, color: sel?f.col:'rgba(255,255,255,0.5)', whiteSpace:'nowrap' }}>{f.name}</div>
                       </div>
                     );
                   })}
                 </div>
-                <div style={{ fontSize:7, color:'rgba(255,255,255,0.25)', marginBottom:14 }}>palette is global today · per-orb later</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,0.25)', marginBottom:14 }}>palette is global today · per-orb later</div>
                 <div style={{ marginBottom:14 }}>
                   <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                    <span style={{ fontSize:10, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>DENSITY</span>
-                    <span style={{ fontSize:10, color:'#d8a6ff' }}>{Math.round((densRef.current[focused] ?? 0.5)*100)}%</span>
+                    <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>DENSITY</span>
+                    <span style={{ fontSize:12.5, color:'#d8a6ff' }}>{Math.round((densRef.current[focused] ?? 0.5)*100)}%</span>
                   </div>
                   <input type="range" min={0} max={1} step={0.01} value={densRef.current[focused] ?? 0.5}
                     onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; microcosmGrainDensity(focused, d); forceOrb(x=>x+1); }}
@@ -621,8 +624,8 @@ export default function FieldPage() {
                 </div>
                 <div>
                   <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                    <span style={{ fontSize:10, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>FLAVOUR AMOUNT</span>
-                    <span style={{ fontSize:10, color:'#ffcf6b' }}>{Math.round((amountRef.current[focused] ?? 0)*100)}%</span>
+                    <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>FLAVOUR AMOUNT</span>
+                    <span style={{ fontSize:12.5, color:'#ffcf6b' }}>{Math.round((amountRef.current[focused] ?? 0)*100)}%</span>
                   </div>
                   <input type="range" min={0} max={1} step={0.01} value={amountRef.current[focused] ?? 0}
                     onChange={(e)=>{ const a=parseFloat(e.target.value); amountRef.current[focused]=a; microcosmEngineAmount(focused, a); forceOrb(x=>x+1); }}
@@ -637,7 +640,7 @@ export default function FieldPage() {
 
       <div style={{ position:'absolute', top: fh - 12, left:'50%', transform:'translateX(-50%)', display:'flex', alignItems:'center', gap:8, opacity:0.4, cursor:'pointer' }}>
         <div style={{ width:24, height:24, borderRadius:'50%', border:'0.5px dashed rgba(255,255,255,0.4)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:200 }}>+</div>
-        <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>add machine</span>
+        <span style={{ fontSize:13, color:'rgba(255,255,255,0.5)' }}>add machine</span>
       </div>
 
       {/* MIX DESK — slides up over the lower portion; orbs stay faint above */}
@@ -653,7 +656,7 @@ export default function FieldPage() {
             transition:'transform 0.4s cubic-bezier(0.34,0.01,0.2,1)' }}
             onClick={(e)=>e.stopPropagation()}>
             <div style={{ position:'absolute', top:9, left:'50%', transform:'translateX(-50%)', width:40, height:4, borderRadius:3, background:'rgba(255,255,255,0.25)' }} />
-            <div style={{ position:'absolute', top:20, left:26, fontSize:10, letterSpacing:'0.28em', color:'rgba(255,255,255,0.5)' }}>MIX DESK</div>
+            <div style={{ position:'absolute', top:20, left:26, fontSize:12.5, letterSpacing:'0.28em', color:'rgba(255,255,255,0.5)' }}>MIX DESK</div>
             <div onClick={closeMix} style={{ position:'absolute', top:14, right:22, width:28, height:28, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:14, cursor:'pointer' }}>⌄</div>
             <div style={{ position:'absolute', top:42, left:18, right:18, bottom:14, display:'flex', gap:11, justifyContent:'center' }}>
               {orbs.map(o => {
@@ -673,13 +676,13 @@ export default function FieldPage() {
                   </div>
                 );
                 const muteBtn = (
-                  <div onClick={toggleMute} style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                  <div onClick={toggleMute} style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11,
                     background: mut?'rgba(255,120,90,0.3)':'transparent', border:`1px solid ${mut?'rgba(255,120,90,0.7)':'rgba(255,120,90,0.4)'}`, color: mut?'#ff8c6e':'rgba(255,140,110,0.8)' }}>M</div>
                 );
                 const soloOn = !!soloSetRef.current[o.id];
                 const soloBtn = (
                   <div onClick={()=>{ soloSetRef.current[o.id]=!soloSetRef.current[o.id]; reapplyLevels(); forceOrb(x=>x+1); }}
-                    style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                    style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11,
                       background: soloOn?'rgba(122,245,200,0.3)':'transparent', border:`1px solid ${soloOn?'rgba(122,245,200,0.8)':'rgba(122,245,200,0.4)'}`, color: soloOn?'#a6fff2':'rgba(122,245,200,0.8)' }}>S</div>
                 );
                 // glowing pan knob (used in expanded view)
@@ -689,7 +692,7 @@ export default function FieldPage() {
                       onChange={(e)=>{ const np=parseFloat(e.target.value); panRef.current[o.id]=np; microcosmEnginePan(o.id,np); forceOrb(x=>x+1); }}
                       onDoubleClick={()=>{ panRef.current[o.id]=0; microcosmEnginePan(o.id,0); forceOrb(x=>x+1); }}
                       style={{ width:80, accentColor:c.mid, cursor:'pointer' }} />
-                    <div style={{ fontSize:7, color: Math.abs(pan)>0.02?c.core:'rgba(255,255,255,0.5)', letterSpacing:'0.05em' }}>PAN {pan===0?'C':(pan<0?'L':'R')}</div>
+                    <div style={{ fontSize:10, color: Math.abs(pan)>0.02?c.core:'rgba(255,255,255,0.5)', letterSpacing:'0.05em' }}>PAN {pan===0?'C':(pan<0?'L':'R')}</div>
                   </div>
                 );
                 const eq = eqRef.current[o.id] || { lo:0, mid:0, hi:0 };
@@ -702,7 +705,7 @@ export default function FieldPage() {
                         onChange={(e)=>{ const nv=parseFloat(e.target.value); const ce=eqRef.current[o.id]||{lo:0,mid:0,hi:0}; ce[band]=nv; eqRef.current[o.id]=ce; pushEQ(); forceOrb(x=>x+1); }}
                         onDoubleClick={()=>{ const ce=eqRef.current[o.id]||{lo:0,mid:0,hi:0}; ce[band]=0; eqRef.current[o.id]=ce; pushEQ(); forceOrb(x=>x+1); }}
                         style={{ writingMode:'vertical-lr' as any, direction:'rtl', width:7, height:64, accentColor:c.mid, cursor:'pointer' }} />
-                      <div style={{ fontSize:7, color: Math.abs(val)>0.1?c.core:'rgba(255,255,255,0.5)' }}>{label}</div>
+                      <div style={{ fontSize:10, color: Math.abs(val)>0.1?c.core:'rgba(255,255,255,0.5)' }}>{label}</div>
                       <div style={{ fontSize:6.5, color:'rgba(255,255,255,0.35)' }}>{val>0?'+':''}{val.toFixed(0)}</div>
                     </div>
                   );
@@ -715,21 +718,21 @@ export default function FieldPage() {
                 );
                 const resetBtn = (
                   <div onClick={()=>{ panRef.current[o.id]=0; microcosmEnginePan(o.id,0); volRef.current[o.id]=0.7; microcosmEngineLevel(o.id, muteRef.current[o.id]?0:0.7); eqRef.current[o.id]={lo:0,mid:0,hi:0}; microcosmEngineEQ(o.id,0,0,0); forceOrb(x=>x+1); }}
-                    style={{ padding:'5px 12px', borderRadius:12, border:'0.5px solid rgba(255,255,255,0.25)', fontSize:8, letterSpacing:'0.12em', color:'rgba(255,255,255,0.65)', cursor:'pointer', whiteSpace:'nowrap' }}>↺ RESET</div>
+                    style={{ padding:'5px 12px', borderRadius:12, border:'0.5px solid rgba(255,255,255,0.25)', fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.65)', cursor:'pointer', whiteSpace:'nowrap' }}>↺ RESET</div>
                 );
 
                 if (exp) {
                   return (
                     <div key={o.id} style={{ flex:1.8, maxWidth:240, minWidth:160, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:`linear-gradient(180deg, ${c.glow}33, rgba(255,255,255,0.02))`, border:`0.5px solid ${c.mid}`, padding:'10px 0 9px', position:'relative', transition:'flex 0.3s ease', overflow:'hidden' }}>
-                      <div onClick={()=>setExpandedChannel(null)} style={{ position:'absolute', top:7, right:9, fontSize:11, color:c.core, cursor:'pointer', zIndex:2 }}>⤡</div>
+                      <div onClick={()=>setExpandedChannel(null)} style={{ position:'absolute', top:7, right:9, fontSize:13, color:c.core, cursor:'pointer', zIndex:2 }}>⤡</div>
                       <div style={{ width:24, height:24, borderRadius:'50%', background:`radial-gradient(circle, ${c.core}, ${c.glow}44 55%, transparent 78%)`, boxShadow:`0 0 12px 2px ${c.glow}66` }} />
-                      <div style={{ fontSize:9.5, color:c.core, marginTop:4, letterSpacing:'0.06em' }}>{fieldOrbs.find(a=>a.id===o.id)?.label || o.id}</div>
+                      <div style={{ fontSize:12, color:c.core, marginTop:4, letterSpacing:'0.06em' }}>{fieldOrbs.find(a=>a.id===o.id)?.label || o.id}</div>
                       <div style={{ flex:1, display:'flex', alignItems:'stretch', gap:14, marginTop:8, width:'100%', justifyContent:'center', minHeight:0 }}>
                         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>{eqDials}</div>
                         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>{panKnob}</div>
                         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end' }}>
                           {fader}
-                          <div style={{ fontSize:9, color:c.core, marginTop:4 }}>{db} dB</div>
+                          <div style={{ fontSize:11.5, color:c.core, marginTop:4 }}>{db} dB</div>
                         </div>
                       </div>
                       <div style={{ display:'flex', gap:8, marginTop:6, alignItems:'center' }}>
@@ -742,11 +745,11 @@ export default function FieldPage() {
                 }
                 return (
                   <div key={o.id} style={{ flex:1, maxWidth:140, minWidth:72, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:`linear-gradient(180deg, ${c.glow}22, rgba(255,255,255,0.015))`, border:`0.5px solid ${c.mid}33`, padding:'10px 0 9px', position:'relative', transition:'flex 0.3s ease' }}>
-                    <div onClick={()=>setExpandedChannel(o.id)} style={{ position:'absolute', top:7, right:8, fontSize:10, color:'rgba(255,255,255,0.35)', cursor:'pointer' }}>⤢</div>
+                    <div onClick={()=>setExpandedChannel(o.id)} style={{ position:'absolute', top:7, right:8, fontSize:12.5, color:'rgba(255,255,255,0.35)', cursor:'pointer' }}>⤢</div>
                     <div style={{ width:26, height:26, borderRadius:'50%', background:`radial-gradient(circle, ${c.core}, ${c.glow}44 60%, transparent 78%)` }} />
-                    <div style={{ fontSize:9.5, color:c.core, marginTop:5, letterSpacing:'0.06em' }}>{fieldOrbs.find(a=>a.id===o.id)?.label || o.id}</div>
+                    <div style={{ fontSize:12, color:c.core, marginTop:5, letterSpacing:'0.06em' }}>{fieldOrbs.find(a=>a.id===o.id)?.label || o.id}</div>
                     {fader}
-                    <div style={{ fontSize:9, color:c.core, marginTop:6 }}>{db} dB</div>
+                    <div style={{ fontSize:11.5, color:c.core, marginTop:6 }}>{db} dB</div>
                     <div style={{ display:'flex', gap:7, marginTop:7 }}>{muteBtn}{soloBtn}</div>
                   </div>
                 );
@@ -755,13 +758,13 @@ export default function FieldPage() {
               {/* MASTER */}
               <div style={{ flex:1, maxWidth:140, minWidth:72, display:'flex', flexDirection:'column', alignItems:'center', borderRadius:13, background:'linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02))', border:'0.5px solid rgba(255,255,255,0.3)', padding:'10px 0 9px' }}>
                 <div style={{ width:26, height:26, borderRadius:'50%', background:'radial-gradient(circle,#fff,rgba(255,255,255,0.3) 55%,transparent 78%)' }} />
-                <div style={{ fontSize:9.5, color:'#fff', marginTop:5, letterSpacing:'0.12em' }}>MASTER</div>
+                <div style={{ fontSize:12, color:'#fff', marginTop:5, letterSpacing:'0.12em' }}>MASTER</div>
                 <div style={{ flex:1, display:'flex', alignItems:'center', marginTop:10, minHeight:90 }}>
                   <input type="range" min={0} max={1} step={0.01} value={masterVol}
                     onChange={(e)=>{ const nv=parseFloat(e.target.value); setMasterVol(nv); microcosmMasterLevel(nv); }}
                     style={{ writingMode:'vertical-lr' as any, direction:'rtl', width:10, height:'100%', accentColor:'#ffffff', cursor:'pointer' }} />
                 </div>
-                <div style={{ fontSize:9, color:'#fff', marginTop:6 }}>{masterVol<=0?'-∞':(20*Math.log10(masterVol)).toFixed(0)} dB</div>
+                <div style={{ fontSize:11.5, color:'#fff', marginTop:6 }}>{masterVol<=0?'-∞':(20*Math.log10(masterVol)).toFixed(0)} dB</div>
                 <div style={{ fontSize:6.5, color:'rgba(255,255,255,0.4)', marginTop:9, letterSpacing:'0.1em' }}>MAIN OUT</div>
               </div>
             </div>
@@ -826,20 +829,20 @@ export default function FieldPage() {
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(174,240,255,0.5)', background:'rgba(174,240,255,0.06)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="24" height="24" viewBox="0 0 20 20"><g stroke="#cdf5ff" strokeWidth="1.3" opacity="0.85"><line x1="10" y1="2" x2="10" y2="18"/><line x1="3" y1="6" x2="17" y2="14"/><line x1="3" y1="14" x2="17" y2="6"/></g></svg>
                 </div>
-                <div style={{ fontSize:10, color:'#bfe8f5', marginTop:8, opacity:0.85 }}>Freeze</div>
+                <div style={{ fontSize:12.5, color:'#bfe8f5', marginTop:8, opacity:0.85 }}>Freeze</div>
               </div>
               <div style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(255,214,166,0.5)', background:'rgba(255,214,166,0.06)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="24" height="24" viewBox="0 0 20 20"><g fill="#ffe6c4"><circle cx="7" cy="6" r="1.7"/><circle cx="13" cy="7" r="1.7"/><circle cx="8" cy="13" r="1.7"/><circle cx="13" cy="13" r="1.7"/><circle cx="10" cy="10" r="1.7"/></g></svg>
                 </div>
-                <div style={{ fontSize:10, color:'#ffdcb0', marginTop:8, opacity:0.85 }}>Perturb</div>
+                <div style={{ fontSize:12.5, color:'#ffdcb0', marginTop:8, opacity:0.85 }}>Perturb</div>
               </div>
               <div style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ position:'relative', width:62, height:62 }}>
                   <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:`radial-gradient(circle, rgba(216,166,255,${0.4+life*0.5}) 0%, rgba(138,61,245,${0.15+life*0.3}) 50%, transparent 72%)`, filter:'blur(2px)' }} />
                   <div style={{ position:'absolute', inset:16, borderRadius:'50%', background:'#fff', opacity:0.9, filter:'blur(1px)' }} />
                 </div>
-                <div style={{ fontSize:10, color:'#e0c4ff', marginTop:4 }}>Life · {Math.round(life*100)}%</div>
+                <div style={{ fontSize:12.5, color:'#e0c4ff', marginTop:4 }}>Life · {Math.round(life*100)}%</div>
               </div>
             </div>
           </div>
@@ -851,10 +854,10 @@ export default function FieldPage() {
                 border:`0.5px solid ${palette==='open'?'rgba(255,255,255,0.22)':flavourOf(palette).col+'77'}`,
                 borderRadius:20, background: palette==='open'?'rgba(255,255,255,0.04)':flavourOf(palette).col+'12' }}>
               {palette!=='open' && <div style={{ width:7, height:7, borderRadius:'50%', background:flavourOf(palette).col }} />}
-              <span style={{ fontSize:11, letterSpacing:'0.04em', color: palette==='open'?'rgba(255,255,255,0.7)':flavourOf(palette).col }}>
+              <span style={{ fontSize:13, letterSpacing:'0.04em', color: palette==='open'?'rgba(255,255,255,0.7)':flavourOf(palette).col }}>
                 {palette==='open' ? 'Flavour' : `Flavour · ${flavourOf(palette).name}`}
               </span>
-              <span style={{ fontSize:9, color:'rgba(255,255,255,0.35)' }}>▾</span>
+              <span style={{ fontSize:11.5, color:'rgba(255,255,255,0.35)' }}>▾</span>
             </div>
           </div>
 
@@ -872,16 +875,16 @@ export default function FieldPage() {
                   <div style={{ width:44, height:44, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, display:'flex', alignItems:'center', justifyContent:'center' }}>
                     <div style={{ width:7, height:7, borderRadius:'50%', background:u.dot }} />
                   </div>
-                  <div style={{ fontSize:9, color:'rgba(255,255,255,0.6)', marginTop:8 }}>{u.k}</div>
+                  <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.6)', marginTop:8 }}>{u.k}</div>
                 </div>
               ))}
               <div style={{ width:1, height:44, background:'rgba(255,255,255,0.1)' }} />
               <div style={{ textAlign:'center' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'2px solid rgba(122,245,200,0.4)', background:'radial-gradient(circle, rgba(122,245,200,0.45) 0%, transparent 70%)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
                   <div style={{ fontSize:14, fontWeight:700 }}>92</div>
-                  <div style={{ fontSize:7, color:'#9affc8' }}>BPM</div>
+                  <div style={{ fontSize:10, color:'#9affc8' }}>BPM</div>
                 </div>
-                <div style={{ fontSize:9, color:'rgba(255,255,255,0.5)', marginTop:8 }}>Tempo</div>
+                <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.5)', marginTop:8 }}>Tempo</div>
               </div>
               <div style={{ textAlign:'center' }}>
                 <div onClick={()=>{ if(state==='playing') doStop(); else doStart(); }}
@@ -895,7 +898,7 @@ export default function FieldPage() {
                     : <div style={{ width:0, height:0, borderLeft:'15px solid #fff', borderTop:'9px solid transparent', borderBottom:'9px solid transparent', marginLeft:4 }} /> /* play triangle */
                   }
                 </div>
-                <div style={{ fontSize:9, color:'rgba(255,255,255,0.55)', marginTop:8, letterSpacing:'0.05em' }}>{state==='playing' ? 'Stop' : 'Start'}</div>
+                <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.55)', marginTop:8, letterSpacing:'0.05em' }}>{state==='playing' ? 'Stop' : 'Start'}</div>
               </div>
             </div>
           </div>
@@ -910,7 +913,7 @@ export default function FieldPage() {
           <div onClick={(e)=>e.stopPropagation()}
             style={{ background:'rgba(14,16,26,0.94)', border:'0.5px solid rgba(255,255,255,0.16)', borderRadius:22,
               padding:'24px 30px', backdropFilter:'blur(10px)' }}>
-            <div style={{ fontSize:10, letterSpacing:'0.26em', color:'rgba(255,255,255,0.35)', marginBottom:22, textAlign:'center' }}>FLAVOUR — THE FIELD'S TONAL WORLD</div>
+            <div style={{ fontSize:12.5, letterSpacing:'0.26em', color:'rgba(255,255,255,0.35)', marginBottom:22, textAlign:'center' }}>FLAVOUR — THE FIELD'S TONAL WORLD</div>
             <div style={{ display:'flex', gap:26 }}>
               {FLAVOURS.map(f => {
                 const sel = f.id===palette;
@@ -921,12 +924,12 @@ export default function FieldPage() {
                       background:`radial-gradient(circle, ${f.col} 0%, ${f.col}66 50%, transparent 74%)`,
                       boxShadow: sel ? `0 0 0 2px rgba(255,255,255,0.45)` : 'none', transition:'transform 0.18s' }} />
                     <div style={{ fontSize:12, color: sel?'#fff':'rgba(255,255,255,0.8)' }}>{f.name}</div>
-                    <div style={{ fontSize:8.5, color:'rgba(255,255,255,0.4)', lineHeight:1.3 }}>{f.desc}</div>
+                    <div style={{ fontSize:13, color:'rgba(255,255,255,0.4)', lineHeight:1.3 }}>{f.desc}</div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ fontSize:9, color:'rgba(255,255,255,0.3)', marginTop:20, textAlign:'center' }}>arms the palette · turn an orb's amount up to hear it</div>
+            <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.3)', marginTop:20, textAlign:'center' }}>arms the palette · turn an orb's amount up to hear it</div>
           </div>
         </div>
       )}
@@ -938,7 +941,7 @@ export default function FieldPage() {
             <div onClick={()=>setCreateOpen(false)} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
           </div>
           <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 56px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
-            <div style={{ fontSize:11, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:24, fontFamily:'monospace', textAlign:'center' }}>SOURCE</div>
+            <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:24, fontFamily:'monospace', textAlign:'center' }}>SOURCE</div>
             <div style={{ display:'flex', gap:24, marginBottom:72, justifyContent:'center' }}>
               {(['synth','sample','livein'] as const).map(src => {
                 const lbl = src==='synth'?'Synth':src==='sample'?'Sample':'Live in';
@@ -947,7 +950,7 @@ export default function FieldPage() {
                 return <div key={src} onClick={()=>setCreateSrc(src)} style={{ width:280, textAlign:'center', padding:'22px 0', borderRadius:16, cursor:'pointer', border: sel?'1px solid #d8a6ff':'0.5px solid rgba(255,255,255,0.16)', background: sel?'rgba(216,166,255,0.1)':'rgba(255,255,255,0.02)', color: sel?'#e0bfff':'rgba(255,255,255,0.6)', fontSize:19, letterSpacing:'0.04em' }}>{lbl}{soon?'  ·  soon':''}</div>;
               })}
             </div>
-            <div style={{ fontSize:11, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:30, fontFamily:'monospace' }}>ENGINE — tap to select</div>
+            <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:30, fontFamily:'monospace' }}>ENGINE — tap to select</div>
             <div style={{ display:'flex', gap:40, flexWrap:'wrap', rowGap:40 }}>
               {ALL_ORBS.map(e => {
                 const sel = createEngine===e.engineType;
