@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Orb, { ORB_COLORS } from '../../components/field/Orb';
 import {
   startAudio, microcosmStart, microcosmStopEngine,
-  microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan,
+  microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq,
   microcosmGrainDensity, microcosmArmedPalette, microcosmEngineAmount,
 } from '../../audio/engine';
@@ -124,7 +124,9 @@ export default function FieldPage() {
   const volRef = useRef<Record<string, number>>({});   // per-orb volume (default 0.7)
   const densRef = useRef<Record<string, number>>({});  // per-orb density (default 0.5)
   const muteRef = useRef<Record<string, boolean>>({});  // per-channel mute (mixer)
+  const soloSetRef = useRef<Record<string, boolean>>({}); // per-channel solo (mixer)
   const panRef = useRef<Record<string, number>>({});    // per-channel pan (-1..1, 0=centre)
+  const eqRef = useRef<Record<string, {lo:number;mid:number;hi:number}>>({}); // per-channel EQ dB (-12..12, 0=flat)
   const [expandedChannel, setExpandedChannel] = useState<string|null>(null); // mixer channel expanded sideways
   const [, forceOrb] = useState(0); // re-render after per-orb ref writes
   const [, forceAmt] = useState(0);
@@ -144,10 +146,12 @@ export default function FieldPage() {
   // RACK: activate ALL visible orbs' engines (present = playing)
   // per-orb level = the orb's OWN volume (the mixer fader is the single source of truth).
   // selection no longer changes volume; mute/solo still gate it.
+  function reapplyLevels(){ ALL_ORBS.forEach(o => { if (orbs.some(v=>v.id===o.id)) microcosmEngineLevel(o.id, orbLevel(o.id)); }); }
   function orbLevel(id: string): number {
     if (mutedRef.current) return 0;
     if (muteRef.current[id]) return 0;                    // per-channel mute (mixer)
-    if (soloRef.current && id !== selected) return 0;     // (legacy global solo, kept for now)
+    const anySolo = Object.values(soloSetRef.current).some(Boolean);
+    if (anySolo && !soloSetRef.current[id]) return 0;     // solo: non-soloed channels silent
     return volRef.current[id] ?? 0.7;                     // the fader value
   }
   function activateRack() {
@@ -162,6 +166,26 @@ export default function FieldPage() {
   }
 
   useEffect(() => { if (started.current && state==='playing') activateRack(); /* eslint-disable-next-line */ }, [count]);
+
+  // Spacebar = Start/Stop (ignore when typing in an input/textarea)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      const t = e.target as HTMLElement;
+      const tag = (t?.tagName || '').toLowerCase();
+      const type = (t as HTMLInputElement)?.type;
+      // only block space for TEXT entry (where space types a char) — not range sliders/buttons
+      if (tag === 'textarea' || t?.isContentEditable) return;
+      if (tag === 'input' && type !== 'range') return;
+      // also blur a focused range slider so repeated space doesn't get swallowed
+      if (tag === 'input' && type === 'range') t.blur();
+      e.preventDefault();
+      if (state === 'playing') doStop(); else doStart();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    /* eslint-disable-next-line */
+  }, [state]);
 
   // play a note `semis` semitones from the locked root (negative = down, positive = up)
   function playAt(note: string, semis: number) {
@@ -274,23 +298,6 @@ export default function FieldPage() {
         {solo ? 'SOLO on · only selected' : 'Solo off · all play'}
       </div>
 
-      {/* TEST DENSITY: slider (temporary, removable) */}
-      <div style={{ position:'absolute', top:200, left:32, zIndex:100, display:'flex', flexDirection:'column', alignItems:'flex-start', gap:5, background:'rgba(255,255,255,0.06)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:14, padding:'8px 16px' }}>
-        <div style={{ fontSize:10, color:'rgba(255,255,255,0.6)', letterSpacing:'0.1em' }}>DENSITY · {Math.round(density*100)}%</div>
-        <input type="range" min={0} max={1} step={0.01} value={density}
-          onChange={(e)=>{ const d=parseFloat(e.target.value); setDensity(d); microcosmGrainDensity(d); }}
-          style={{ width:200, accentColor:'#d8a6ff' }} />
-        <div style={{ fontSize:8, color:'rgba(255,255,255,0.4)' }}>sparse · single notes &nbsp;→&nbsp; dense · cluster</div>
-      </div>
-
-      {/* TEMP per-orb flavour AMOUNT (acts on selected orb; real control = orb back) */}
-      <div style={{ position:'absolute', top:280, left:32, zIndex:100, display:'flex', flexDirection:'column', alignItems:'flex-start', gap:5, background:'rgba(255,255,255,0.06)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:14, padding:'8px 16px' }}>
-        <div style={{ fontSize:10, color:'rgba(255,255,255,0.6)', letterSpacing:'0.1em' }}>{selected.toUpperCase()} AMOUNT · {Math.round((amountRef.current[selected]||0)*100)}%</div>
-        <input type="range" min={0} max={1} step={0.01} value={amountRef.current[selected]||0}
-          onChange={(e)=>{ const a=parseFloat(e.target.value); amountRef.current[selected]=a; microcosmEngineAmount(selected, a); forceAmt(x=>x+1); }}
-          style={{ width:200, accentColor:'#ffd86b' }} />
-        <div style={{ fontSize:8, color:'rgba(255,255,255,0.4)' }}>0 · pure open &nbsp;→&nbsp; full {palette} colour</div>
-      </div>
 
       {/* TEST: orb count stepper (top-left, clear of orbs, above field) */}
       <div style={{ position:'absolute', top:62, left:32, zIndex:100, display:'flex', alignItems:'center', gap:14, background:'rgba(255,255,255,0.08)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:20, padding:'7px 16px' }}>
@@ -358,7 +365,7 @@ export default function FieldPage() {
                     <span style={{ fontSize:11, color:'#d8a6ff' }}>{Math.round((densRef.current[focused] ?? 0.5)*100)}%</span>
                   </div>
                   <input type="range" min={0} max={1} step={0.01} value={densRef.current[focused] ?? 0.5}
-                    onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; console.log('[orbback] density', focused, d); microcosmGrainDensity(d); forceOrb(x=>x+1); }}
+                    onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; microcosmGrainDensity(d); forceOrb(x=>x+1); }}
                     style={{ width:'100%', accentColor:'#d8a6ff' }} />
                   <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)', marginTop:5 }}>sparse · single notes &nbsp;→&nbsp; dense · cluster</div>
                 </div>
@@ -422,19 +429,45 @@ export default function FieldPage() {
                   <div onClick={toggleMute} style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
                     background: mut?'rgba(255,120,90,0.3)':'transparent', border:`1px solid ${mut?'rgba(255,120,90,0.7)':'rgba(255,120,90,0.4)'}`, color: mut?'#ff8c6e':'rgba(255,140,110,0.8)' }}>M</div>
                 );
+                const soloOn = !!soloSetRef.current[o.id];
+                const soloBtn = (
+                  <div onClick={()=>{ soloSetRef.current[o.id]=!soloSetRef.current[o.id]; reapplyLevels(); forceOrb(x=>x+1); }}
+                    style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                      background: soloOn?'rgba(122,245,200,0.3)':'transparent', border:`1px solid ${soloOn?'rgba(122,245,200,0.8)':'rgba(122,245,200,0.4)'}`, color: soloOn?'#a6fff2':'rgba(122,245,200,0.8)' }}>S</div>
+                );
                 // glowing pan knob (used in expanded view)
                 const panKnob = (
-                  <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
-                    <div onPointerDown={(e)=>{ const sx=e.clientX; const sp=panRef.current[o.id]??0; const mv=(ev:any)=>{ const np=Math.max(-1,Math.min(1,sp+(ev.clientX-sx)/80)); panRef.current[o.id]=np; microcosmEnginePan(o.id,np); forceOrb(x=>x+1); }; const up=()=>{ window.removeEventListener('pointermove',mv); window.removeEventListener('pointerup',up); }; window.addEventListener('pointermove',mv); window.addEventListener('pointerup',up); }}
+                  <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
+                    <input type="range" min={-1} max={1} step={0.02} value={pan}
+                      onChange={(e)=>{ const np=parseFloat(e.target.value); panRef.current[o.id]=np; microcosmEnginePan(o.id,np); forceOrb(x=>x+1); }}
                       onDoubleClick={()=>{ panRef.current[o.id]=0; microcosmEnginePan(o.id,0); forceOrb(x=>x+1); }}
-                      style={{ width:32, height:32, borderRadius:'50%', position:'relative', cursor:'ew-resize', border:`1.5px solid ${c.mid}`, boxShadow:`0 0 10px 1px ${c.glow}88, inset 0 0 6px ${c.glow}55`, background:`radial-gradient(circle, ${c.glow}22, transparent 70%)` }}>
-                      <div style={{ position:'absolute', width:2, height:12, background:c.core, top:3, left:'50%', transform:`translateX(-50%) rotate(${pan*135}deg)`, transformOrigin:'bottom', boxShadow:`0 0 4px ${c.core}` }} />
+                      style={{ width:80, accentColor:c.mid, cursor:'pointer' }} />
+                    <div style={{ fontSize:7, color: Math.abs(pan)>0.02?c.core:'rgba(255,255,255,0.5)', letterSpacing:'0.05em' }}>PAN {pan===0?'C':(pan<0?'L':'R')}</div>
+                  </div>
+                );
+                const eq = eqRef.current[o.id] || { lo:0, mid:0, hi:0 };
+                const pushEQ = ()=>{ const e=eqRef.current[o.id]||{lo:0,mid:0,hi:0}; microcosmEngineEQ(o.id, e.lo, e.mid, e.hi); };
+                const eqSlider = (band:'lo'|'mid'|'hi', label:string) => {
+                  const val = (eqRef.current[o.id]?.[band]) ?? 0;   // -12..12 dB
+                  return (
+                    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
+                      <input type="range" min={-12} max={12} step={0.5} value={val}
+                        onChange={(e)=>{ const nv=parseFloat(e.target.value); const ce=eqRef.current[o.id]||{lo:0,mid:0,hi:0}; ce[band]=nv; eqRef.current[o.id]=ce; pushEQ(); forceOrb(x=>x+1); }}
+                        onDoubleClick={()=>{ const ce=eqRef.current[o.id]||{lo:0,mid:0,hi:0}; ce[band]=0; eqRef.current[o.id]=ce; pushEQ(); forceOrb(x=>x+1); }}
+                        style={{ writingMode:'vertical-lr' as any, direction:'rtl', width:7, height:64, accentColor:c.mid, cursor:'pointer' }} />
+                      <div style={{ fontSize:7, color: Math.abs(val)>0.1?c.core:'rgba(255,255,255,0.5)' }}>{label}</div>
+                      <div style={{ fontSize:6.5, color:'rgba(255,255,255,0.35)' }}>{val>0?'+':''}{val.toFixed(0)}</div>
                     </div>
-                    <div style={{ fontSize:7, color:'rgba(255,255,255,0.5)', letterSpacing:'0.05em' }}>PAN</div>
+                  );
+                };
+                const eqDials = (
+                  <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
+                    <div style={{ display:'flex', gap:10 }}>{eqSlider('lo','LO')}{eqSlider('mid','MID')}{eqSlider('hi','HI')}</div>
+                    <div style={{ fontSize:6.5, color:'rgba(255,255,255,0.35)', letterSpacing:'0.18em' }}>EQ</div>
                   </div>
                 );
                 const resetBtn = (
-                  <div onClick={()=>{ panRef.current[o.id]=0; microcosmEnginePan(o.id,0); volRef.current[o.id]=0.7; microcosmEngineLevel(o.id, muteRef.current[o.id]?0:0.7); forceOrb(x=>x+1); }}
+                  <div onClick={()=>{ panRef.current[o.id]=0; microcosmEnginePan(o.id,0); volRef.current[o.id]=0.7; microcosmEngineLevel(o.id, muteRef.current[o.id]?0:0.7); eqRef.current[o.id]={lo:0,mid:0,hi:0}; microcosmEngineEQ(o.id,0,0,0); forceOrb(x=>x+1); }}
                     style={{ padding:'5px 12px', borderRadius:12, border:'0.5px solid rgba(255,255,255,0.25)', fontSize:8, letterSpacing:'0.12em', color:'rgba(255,255,255,0.65)', cursor:'pointer', whiteSpace:'nowrap' }}>↺ RESET</div>
                 );
 
@@ -445,6 +478,7 @@ export default function FieldPage() {
                       <div style={{ width:24, height:24, borderRadius:'50%', background:`radial-gradient(circle, ${c.core}, ${c.glow}44 55%, transparent 78%)`, boxShadow:`0 0 12px 2px ${c.glow}66` }} />
                       <div style={{ fontSize:9.5, color:c.core, marginTop:4, letterSpacing:'0.06em' }}>{ALL_ORBS.find(a=>a.id===o.id)?.label || o.id}</div>
                       <div style={{ flex:1, display:'flex', alignItems:'stretch', gap:14, marginTop:8, width:'100%', justifyContent:'center', minHeight:0 }}>
+                        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>{eqDials}</div>
                         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>{panKnob}</div>
                         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end' }}>
                           {fader}
@@ -453,6 +487,7 @@ export default function FieldPage() {
                       </div>
                       <div style={{ display:'flex', gap:8, marginTop:6, alignItems:'center' }}>
                         {muteBtn}
+                        {soloBtn}
                         {resetBtn}
                       </div>
                     </div>
@@ -465,7 +500,7 @@ export default function FieldPage() {
                     <div style={{ fontSize:9.5, color:c.core, marginTop:5, letterSpacing:'0.06em' }}>{ALL_ORBS.find(a=>a.id===o.id)?.label || o.id}</div>
                     {fader}
                     <div style={{ fontSize:9, color:c.core, marginTop:6 }}>{db} dB</div>
-                    <div style={{ marginTop:7 }}>{muteBtn}</div>
+                    <div style={{ display:'flex', gap:7, marginTop:7 }}>{muteBtn}{soloBtn}</div>
                   </div>
                 );
               })}
@@ -602,18 +637,18 @@ export default function FieldPage() {
                 <div style={{ fontSize:9, color:'rgba(255,255,255,0.5)', marginTop:8 }}>Tempo</div>
               </div>
               <div style={{ textAlign:'center' }}>
-                <div onClick={()=>{ if(state==='stopped') doStart(); else toggleMute(); }}
+                <div onClick={()=>{ if(state==='playing') doStop(); else doStart(); }}
+                  title="Start / Stop  (spacebar)"
                   style={{ width:56, height:56, borderRadius:'50%', cursor:'pointer',
-                    border:`3px solid ${muted?'rgba(224,80,58,0.6)':'rgba(255,255,255,0.32)'}`,
-                    background:'radial-gradient(circle, rgba(255,255,255,0.55) 0%, transparent 70%)',
+                    border:`3px solid ${state==='playing'?'rgba(122,245,200,0.6)':'rgba(255,255,255,0.32)'}`,
+                    background: state==='playing' ? 'radial-gradient(circle, rgba(122,245,200,0.5) 0%, transparent 70%)' : 'radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%)',
                     display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  <div style={{ width:15, height:15, borderRadius:'50%', background: muted?'#e0503a':'#fff' }} />
+                  {state==='playing'
+                    ? <div style={{ width:14, height:14, background:'#a6fff2', borderRadius:2 }} />  /* stop square */
+                    : <div style={{ width:0, height:0, borderLeft:'15px solid #fff', borderTop:'9px solid transparent', borderBottom:'9px solid transparent', marginLeft:4 }} /> /* play triangle */
+                  }
                 </div>
-                <div style={{ display:'flex', gap:8, justifyContent:'center', marginTop:8 }}>
-                  <span onClick={doStart} style={{ fontSize:9, color:'rgba(255,255,255,0.55)', cursor:'pointer' }}>start</span>
-                  <span onClick={doStop} style={{ fontSize:9, color:'rgba(255,255,255,0.55)', cursor:'pointer' }}>stop</span>
-                  <span onClick={toggleMute} style={{ fontSize:9, color: muted?'#ff7a5a':'rgba(255,255,255,0.55)', cursor:'pointer' }}>{muted?'unmute':'mute'}</span>
-                </div>
+                <div style={{ fontSize:9, color:'rgba(255,255,255,0.55)', marginTop:8, letterSpacing:'0.05em' }}>{state==='playing' ? 'Stop' : 'Start'}</div>
               </div>
             </div>
           </div>

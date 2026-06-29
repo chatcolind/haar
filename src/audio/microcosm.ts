@@ -138,7 +138,7 @@ export class Microcosm {
   async load(): Promise<void> {
     if (this.ready) return;
     if (this.ctx.state !== 'running') { try { await this.ctx.resume(); } catch {} }
-    await this.ctx.audioWorklet.addModule('/microcosm-processor.js');
+    await this.ctx.audioWorklet.addModule('/microcosm-processor.js?v=' + Date.now());
     this.node = new AudioWorkletNode(this.ctx, 'microcosm-processor', {
       numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
     });
@@ -189,6 +189,9 @@ export class Microcosm {
   }
   setPan(id: string, pan: number): void {
     this.node?.port.postMessage({ type: 'enginePan', id, pan: Math.max(-1, Math.min(1, pan)) });
+  }
+  setEQ(id: string, lo: number, mid: number, hi: number): void {
+    this.node?.port.postMessage({ type: 'engineEQ', id, lo, mid, hi });
   }
   setMasterGain(v: number): void {
     const g = Math.max(0, Math.min(1, v));
