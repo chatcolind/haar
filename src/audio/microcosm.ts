@@ -219,6 +219,7 @@ export class Microcosm {
       level: existing ? existing.level : Math.max(0, Math.min(1, level)),
     };
     if (this.engineTickAccum[orbId] === undefined) this.engineTickAccum[orbId] = 0;
+    if (this.engineDensity[orbId] === undefined) this.engineDensity[orbId] = 0.5;  // seed per-orb density
   }
   // Remove an orb instance from the rack entirely.
   removeOrb(orbId: string): void {
