@@ -381,7 +381,7 @@ export default function FieldPage() {
       <div style={{ position:'absolute', top:62, left:32, zIndex:100, display:'flex', alignItems:'center', gap:14, background:'rgba(255,255,255,0.08)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:20, padding:'7px 16px' }}>
         <span onClick={()=>{ if (fieldOrbs.length>1) removeFieldOrb(fieldOrbs[fieldOrbs.length-1].id); }} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>−</span>
         <span style={{ fontSize:11, color:'rgba(255,255,255,0.7)', minWidth:54, textAlign:'center' }}>{count} orbs</span>
-        <span onClick={()=>{ const id=addFieldOrb('mosaic','Mosaic','tunnel'); if (started.current && state==='playing'){ microcosmAddOrb(id,'mosaic',orbLevel(id)); microcosmEngineActive(id,true); microcosmEngineLevel(id,orbLevel(id)); } }} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>+</span>
+        <span onClick={()=>{ const e=ALL_ORBS[fieldOrbs.length % ALL_ORBS.length]; const id=addFieldOrb(e.engineType, e.label, e.colorKey); if (started.current && state==='playing'){ microcosmAddOrb(id,e.engineType,orbLevel(id)); microcosmEngineActive(id,true); microcosmEngineLevel(id,orbLevel(id)); } }} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>+</span>
       </div>
 
       {orbs.map((o) => {

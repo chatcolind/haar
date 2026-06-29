@@ -301,7 +301,7 @@ export class Microcosm {
 
   // ── HAZE: slow, long, diffuse wash — no octave jumps, dense overlapping ──
   private tickHaze(lvl: number = 1): number {
-    const voices = 2 + Math.round(this.activity * 3);
+    const voices = 2 + Math.round(this.curDensity * 3);
     // Long grains (0.4s..1.2s), slight detune only — smeared, no rhythm
     const baseLen = 0.4 + this.grainSpread * 0.8;
     for (let v = 0; v < voices; v++) {
@@ -314,12 +314,12 @@ export class Microcosm {
       this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
     }
     // slow, steady replenishment
-    return 160 - this.activity * 70;
+    return 160 - this.curDensity * 70;
   }
 
   // ── TUNNEL: deep sustained drone — long grains, octave-DOWN emphasis ──
   private tickTunnel(lvl: number = 1): number {
-    const voices = 2 + Math.round(this.activity * 2);
+    const voices = 2 + Math.round(this.curDensity * 2);
     const downTiers = [[0.5], [0.5, 1], [0.5, 0.25, 1]];
     const tier = downTiers[Math.min(2, Math.floor(this.pitchSpread * 3))];
     const baseLen = 0.6 + this.grainSpread * 1.0;
@@ -330,7 +330,7 @@ export class Microcosm {
       const gain = 0.3 / Math.sqrt(voices) * 1.6 * lvl;
       this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
     }
-    return 180 - this.activity * 80;
+    return 180 - this.curDensity * 80;
   }
 
   // ── STRUM: rhythmic, sequenced bursts — tight grains fired in quick runs ──
@@ -344,13 +344,13 @@ export class Microcosm {
     const behind = Math.floor(this._sr * (0.15 + Math.random() * 0.6));
     this.spawnGrain({ startSamp: behind, rate, lenSamp, gain: 0.4 * lvl, pan: Math.random() * 2 - 1 });
     // rhythmic spacing — faster with activity
-    return 70 - this.activity * 40;
+    return 70 - this.curDensity * 40;
   }
 
   // ── REVERSE: grains played backwards — swelling, blooming, ethereal ──
   private warpPhase = 0;
   private tickReverse(lvl: number = 1): number {
-    const voices = 2 + Math.round(this.activity * 2);
+    const voices = 2 + Math.round(this.curDensity * 2);
     const tier = this.tiers[Math.min(this.tiers.length-1, Math.floor(this.pitchSpread * 4))];
     const baseLen = 0.2 + this.grainSpread * 0.5;
     for (let v = 0; v < voices; v++) {
@@ -365,12 +365,12 @@ export class Microcosm {
       const gain = 0.45 / Math.sqrt(voices) * 1.6 * lvl;  // louder — reverse was too quiet
       this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
     }
-    return 130 - this.activity * 60;
+    return 130 - this.curDensity * 60;
   }
 
   // ── SHIMMER: crystalline upward octave stacking — glassy, cathedral height ──
   private tickShimmer(lvl: number = 1): number {
-    const voices = 2 + Math.round(this.activity * 3);
+    const voices = 2 + Math.round(this.curDensity * 3);
     // upward intervals: octave, octave+fifth, two octaves
     const upTiers = [[2], [2, 3], [2, 3, 4]];
     const tier = upTiers[Math.min(2, Math.floor(this.pitchSpread * 3))];
@@ -382,7 +382,7 @@ export class Microcosm {
       const gain = 0.22 / Math.sqrt(voices) * 1.6 * lvl;
       this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
     }
-    return 80 - this.activity * 40;
+    return 80 - this.curDensity * 40;
   }
 
   // ── GLITCH: very short grains, stuttering repeated bursts — mechanical ──
@@ -399,13 +399,13 @@ export class Microcosm {
     const behind = Math.floor(this._sr * this.glitchPos);
     const rate = Math.random() < this.pitchSpread * 0.5 ? 2 : 1; // occasional octave jump
     this.spawnGrain({ startSamp: behind, rate, lenSamp, gain: 0.4 * lvl, pan: Math.random() * 2 - 1 });
-    return 45 - this.activity * 25;
+    return 45 - this.curDensity * 25;
   }
 
   // ── WARP: grain rate modulated by slow LFO — seasick, tape wow/flutter ──
   private tickWarp(lvl: number = 1): number {
     this.warpPhase += 0.08;
-    const voices = 2 + Math.round(this.activity * 2);
+    const voices = 2 + Math.round(this.curDensity * 2);
     // LFO bends pitch ±depth (depth grows with pitchSpread)
     const depth = 0.06 + this.pitchSpread * 0.25;
     const lfo = Math.sin(this.warpPhase) * depth;
@@ -417,12 +417,12 @@ export class Microcosm {
       const gain = 0.3 / Math.sqrt(voices) * 1.6 * lvl;
       this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
     }
-    return 100 - this.activity * 50;
+    return 100 - this.curDensity * 50;
   }
 
   // ── SWARM: many tiny micro-detuned grains, high density — insect cloud ──
   private tickSwarm(lvl: number = 1): number {
-    const voices = 3 + Math.round(this.activity * 5);
+    const voices = 3 + Math.round(this.curDensity * 5);
     for (let v = 0; v < voices; v++) {
       // tiny grains, micro-detune around unison (no octaves)
       const cents = (Math.random() * 2 - 1) * (10 + this.pitchSpread * 60);
@@ -432,7 +432,7 @@ export class Microcosm {
       const gain = 0.18 / Math.sqrt(voices) * 1.6 * lvl;
       this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
     }
-    return 35 - this.activity * 18;
+    return 35 - this.curDensity * 18;
   }
 
   // ── SWELL: Hendrix-style reverse bursts — discrete longer reversed grains,
@@ -451,7 +451,7 @@ export class Microcosm {
       this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: (Math.random() * 2 - 1) * 0.5 });
     }
     // RHYTHMIC spacing — discrete hits, faster with activity (700ms..180ms apart)
-    return 700 - this.activity * 520;
+    return 700 - this.curDensity * 520;
   }
 
   // ── BUBBLES: sparse short pops with space between — each a different size ──
@@ -464,7 +464,7 @@ export class Microcosm {
     const behind = Math.floor(this._sr * (0.15 + Math.random() * 1.5));
     this.spawnGrain({ startSamp: behind, rate, lenSamp, gain: 0.5 * lvl, pan: (Math.random() * 2 - 1) * 0.9 });
     // SPACE between bubbles — random gaps, fewer gaps with activity
-    const base = 500 - this.activity * 350;   // avg 500ms..150ms
+    const base = 500 - this.curDensity * 350;   // avg 500ms..150ms
     return base * (0.4 + Math.random() * 1.2); // randomised so they're irregular
   }
 
@@ -497,6 +497,8 @@ export class Microcosm {
     return STEP;
   }
   setActivity(a: number): void { this.activity = Math.max(0, Math.min(1, a)); }
+  // per-orb density for the engine currently ticking (rack-by-orb-id)
+  private get curDensity(): number { return this.engineDensity[this._currentEngine] ?? 0.5; }
   setGrainSpread(x: number): void { this.grainSpread = Math.max(0, Math.min(1, x)); }
   setPitchSpread(y: number): void { this.pitchSpread = Math.max(0, Math.min(1, y)); }
   setDensity(id: string, d: number): void { this.engineDensity[id] = Math.max(0, Math.min(1, d)); }
