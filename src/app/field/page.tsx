@@ -573,7 +573,7 @@ export default function FieldPage() {
                     <span style={{ fontSize:10, color:'#d8a6ff' }}>{Math.round((densRef.current[focused] ?? 0.5)*100)}%</span>
                   </div>
                   <input type="range" min={0} max={1} step={0.01} value={densRef.current[focused] ?? 0.5}
-                    onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; microcosmGrainDensity(d); forceOrb(x=>x+1); }}
+                    onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; microcosmGrainDensity(focused, d); forceOrb(x=>x+1); }}
                     style={{ width:'100%', accentColor:'#d8a6ff' }} />
                 </div>
                 <div>

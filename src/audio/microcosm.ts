@@ -50,6 +50,12 @@ export class Microcosm {
     mosaic: 0, haze: 0, tunnel: 0, strum: 0,
     reverse: 0, shimmer: 0, glitch: 0, warp: 0, swarm: 0, swell: 0, bubbles: 0, chop: 0,
   };
+  // per-orb density (0..1). Each engine's tick reads this[_currentEngine] and
+  // interprets it in its own character (voices/overlap + fire-rate, curved).
+  private engineDensity: Record<string, number> = {
+    mosaic: 0.5, haze: 0.5, tunnel: 0.5, strum: 0.5,
+    reverse: 0.5, shimmer: 0.5, glitch: 0.5, warp: 0.5, swarm: 0.5, swell: 0.5, bubbles: 0.5, chop: 0.5,
+  };
   // pitch sets revealed progressively by pitchSpread
   private pitchTiers = [
     [1],                    // unison
@@ -245,7 +251,8 @@ export class Microcosm {
   // ── MOSAIC: bright, octave-stacked overlapping loops ──
   private tickMosaic(lvl: number = 1): number {
     // TEST DENSITY: voices + firing rate driven by density (not activity)
-    const voices = 1 + Math.round(this.density * 4);          // 1..5 voices
+    const d = this.engineDensity[this._currentEngine] ?? 0.5;   // per-orb density
+    const voices = 1 + Math.round(d * 4);                       // 1..5 voices
     const tier = this.tiers[Math.min(this.tiers.length-1, Math.floor(this.pitchSpread * 4))];
     const baseLen = 0.04 + this.grainSpread * 0.36;
     const spreadRange = 0.1 + this.grainSpread * 1.9;
@@ -257,7 +264,7 @@ export class Microcosm {
       this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
     }
     // sparse = slow ticks (notes arrive one at a time), dense = fast ticks
-    return 260 - this.density * 200;   // ~260ms (sparse) .. ~60ms (dense)
+    return 60 * Math.pow(260/60, 1 - d);   // ~260ms (sparse) .. ~60ms (dense), geometric
   }
 
   // ── HAZE: slow, long, diffuse wash — no octave jumps, dense overlapping ──
@@ -460,7 +467,7 @@ export class Microcosm {
   setActivity(a: number): void { this.activity = Math.max(0, Math.min(1, a)); }
   setGrainSpread(x: number): void { this.grainSpread = Math.max(0, Math.min(1, x)); }
   setPitchSpread(y: number): void { this.pitchSpread = Math.max(0, Math.min(1, y)); }
-  setDensity(d: number): void { this.density = Math.max(0, Math.min(1, d)); }  // TEST DENSITY
+  setDensity(id: string, d: number): void { this.engineDensity[id] = Math.max(0, Math.min(1, d)); }
 
   dispose(): void {
     this.stopMosaic();
