@@ -83,6 +83,11 @@ export class Microcosm {
   setArmedPalette(name: string): void {
     if (Microcosm.FLAVOUR_PALETTES[name]) this.armedPalette = name;
   }
+  // per-orb palette (rack-by-orb-id). pickRate reads this[_currentEngine].
+  private enginePalette: Record<string, string> = {};
+  setOrbPalette(id: string, name: string): void {
+    if (Microcosm.FLAVOUR_PALETTES[name]) this.enginePalette[id] = name;
+  }
   // Per-engine flavour AMOUNT (0..1). DEFAULT 0 = pure octaves/fifths for every orb.
   private engineAmount: Record<string, number> = {};
   setEngineAmount(id: string, amt: number): void {
@@ -93,7 +98,8 @@ export class Microcosm {
   // tone from the armed palette. amount 0 or palette 'open' => always consonant.
   private pickRate(id: string): number {
     const amt = this.engineAmount[id] ?? 0;
-    const pal = Microcosm.FLAVOUR_PALETTES[this.armedPalette] ?? [];
+    const palName = this.enginePalette[id] ?? this.armedPalette;
+    const pal = Microcosm.FLAVOUR_PALETTES[palName] ?? [];
     if (amt > 0 && pal.length && Math.random() < amt) {
       return pal[Math.floor(Math.random() * pal.length)];
     }
@@ -220,6 +226,7 @@ export class Microcosm {
     };
     if (this.engineTickAccum[orbId] === undefined) this.engineTickAccum[orbId] = 0;
     if (this.engineDensity[orbId] === undefined) this.engineDensity[orbId] = 0.5;  // seed per-orb density
+    if (this.enginePalette[orbId] === undefined) this.enginePalette[orbId] = 'open';  // seed per-orb palette
   }
   // Remove an orb instance from the rack entirely.
   removeOrb(orbId: string): void {
@@ -282,7 +289,7 @@ export class Microcosm {
     const baseLen = 0.04 + this.grainSpread * 0.36;
     const spreadRange = 0.1 + this.grainSpread * 1.9;
     for (let v = 0; v < voices; v++) {
-      const rate = this.pickRate('mosaic');   // flavour-aware grain pitch
+      const rate = this.pickRate(this._currentEngine);   // flavour-aware grain pitch
       const lenSamp = Math.floor(this._sr * (baseLen * (0.7 + Math.random() * 0.6)));
       const behind = Math.floor(this._sr * (0.15 + Math.random() * spreadRange));
       const gain = 0.35 / Math.sqrt(voices) * 1.6 * lvl;
@@ -317,7 +324,7 @@ export class Microcosm {
     const tier = downTiers[Math.min(2, Math.floor(this.pitchSpread * 3))];
     const baseLen = 0.6 + this.grainSpread * 1.0;
     for (let v = 0; v < voices; v++) {
-      const rate = this.pickRate('tunnel');
+      const rate = this.pickRate(this._currentEngine);
       const lenSamp = Math.floor(this._sr * (baseLen * (0.8 + Math.random() * 0.4)));
       const behind = Math.floor(this._sr * (0.5 + Math.random() * 2.0));
       const gain = 0.3 / Math.sqrt(voices) * 1.6 * lvl;
@@ -347,7 +354,7 @@ export class Microcosm {
     const tier = this.tiers[Math.min(this.tiers.length-1, Math.floor(this.pitchSpread * 4))];
     const baseLen = 0.2 + this.grainSpread * 0.5;
     for (let v = 0; v < voices; v++) {
-      const semi = this.pickRate('reverse');
+      const semi = this.pickRate(this._currentEngine);
       const rate = -Math.abs(semi); // negative = reverse, always
       const lenSamp = Math.floor(this._sr * (baseLen * (0.8 + Math.random() * 0.4)));
       // Start point must be far enough back that playing BACKWARD (toward older
@@ -369,7 +376,7 @@ export class Microcosm {
     const tier = upTiers[Math.min(2, Math.floor(this.pitchSpread * 3))];
     const baseLen = 0.15 + this.grainSpread * 0.35;
     for (let v = 0; v < voices; v++) {
-      const rate = this.pickRate('shimmer');
+      const rate = this.pickRate(this._currentEngine);
       const lenSamp = Math.floor(this._sr * (baseLen * (0.7 + Math.random() * 0.6)));
       const behind = Math.floor(this._sr * (0.2 + Math.random() * 1.5));
       const gain = 0.22 / Math.sqrt(voices) * 1.6 * lvl;
@@ -436,7 +443,7 @@ export class Microcosm {
     const voices = 1 + Math.round(this.pitchSpread * 1);
     const baseLen = 0.35 + this.grainSpread * 0.5;  // 0.35s..0.85s — clear swells
     for (let v = 0; v < voices; v++) {
-      const semi = this.pickRate('swell');
+      const semi = this.pickRate(this._currentEngine);
       const rate = -Math.abs(semi);
       const lenSamp = Math.floor(this._sr * (baseLen * (0.9 + Math.random() * 0.2)));
       const behind = Math.floor(this._sr * (0.3 + Math.random() * 0.6));

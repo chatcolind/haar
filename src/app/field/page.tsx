@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq,
-  microcosmGrainDensity, microcosmArmedPalette, microcosmEngineAmount,
+  microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmEngineAmount,
 } from '../../audio/engine';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
@@ -114,6 +114,14 @@ export default function FieldPage() {
   }
   function addFieldOrb(engineType: string, label: string, colorKey: any): string {
     const id = mintOrbId(engineType);
+    volRef.current[id] = 0.7;
+    densRef.current[id] = 0.5;
+    amountRef.current[id] = 0;
+    flavourRef.current[id] = 'open';
+    muteRef.current[id] = false;
+    soloSetRef.current[id] = false;
+    panRef.current[id] = 0;
+    eqRef.current[id] = { lo:0, mid:0, hi:0 };
     setFieldOrbs(prev => [...prev, { id, engineType, label, colorKey }]);
     return id;
   }
@@ -581,7 +589,7 @@ export default function FieldPage() {
                     const cur = flavourRef.current[focused] ?? 'open';
                     const sel = cur === f.id;
                     return (
-                      <div key={f.id} onClick={()=>{ flavourRef.current[focused]=f.id; microcosmArmedPalette(f.id); forceOrb(x=>x+1); }}
+                      <div key={f.id} onClick={()=>{ flavourRef.current[focused]=f.id; microcosmOrbPalette(focused, f.id); forceOrb(x=>x+1); }}
                         style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:5, cursor:'pointer', opacity: sel?1:0.5 }}>
                         <div style={{ width:30, height:30, borderRadius:'50%',
                           background:`radial-gradient(circle, ${f.col}, ${f.col}44 55%, transparent 78%)`,
