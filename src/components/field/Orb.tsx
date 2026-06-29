@@ -130,12 +130,12 @@ export default function Orb({
           </g>
         </g>
       </svg>
-      <div style={{
+      {!hideLabel && <div style={{
         position: 'absolute', left: 0, right: 0, top: cx + haloR - 6,
         textAlign: 'center', color: c.core, fontSize: 15, fontWeight: 500,
         letterSpacing: '0.04em', opacity: selected ? 0.95 : 0.66, pointerEvents: 'none',
         transition: 'all 0.9s ease',
-      }}>{label}</div>
+      }}>{label}</div>}
     </div>
   );
 }

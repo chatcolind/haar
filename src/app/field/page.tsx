@@ -140,6 +140,23 @@ export default function FieldPage() {
     }
     return voicesRef.current[orbId];
   }
+  // ---- per-orb FX chain (signal path) — UI ready, not yet audible ----
+  type FxDef = { id: string; type: string; on: boolean; fixed?: boolean; params: Record<string, number> };
+  const fxRef = useRef<Record<string, FxDef[]>>({});   // per-orb effect chain
+  const [selFx, setSelFx] = useState<string | null>(null); // selected effect id (this orb)
+  function getFx(orbId: string): FxDef[] {
+    if (!fxRef.current[orbId]) {
+      fxRef.current[orbId] = [
+        { id:'fx_grain',  type:'Grain',  on:true, fixed:true,  params:{ size:0.5, spread:0.4, density:0.5 } },
+        { id:'fx_filter', type:'Filter', on:true,              params:{ cutoff:0.7, res:0.2, type:0 } },
+        { id:'fx_reverb', type:'Reverb', on:true,              params:{ size:0.5, decay:0.5, mix:0.3 } },
+        { id:'fx_delay',  type:'Delay',  on:true,              params:{ time:0.3, feedback:0.3, mix:0.25 } },
+        { id:'fx_out',    type:'Out',    on:true, fixed:true,  params:{ level:0.8 } },
+      ];
+    }
+    return fxRef.current[orbId];
+  }
+  const flavourRef = useRef<Record<string, string>>({});  // per-orb palette id (UI per-orb; engine still global)
   const panRef = useRef<Record<string, number>>({});    // per-channel pan (-1..1, 0=centre)
   const eqRef = useRef<Record<string, {lo:number;mid:number;hi:number}>>({}); // per-channel EQ dB (-12..12, 0=flat)
   const [expandedChannel, setExpandedChannel] = useState<string|null>(null); // mixer channel expanded sideways
@@ -359,7 +376,7 @@ export default function FieldPage() {
             <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 174, textAlign:'center', fontSize:8.5, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
 
             {/* LEFT COLUMN — level + voices (distributed) */}
-            <div style={{ position:'absolute', left:'3%', top:64, bottom: dim.h*0.30 + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
+            <div style={{ position:'absolute', left:'3%', top:64, bottom: dim.h*0.30 + 16, width:'26%', maxWidth:340, boxSizing:'border-box', paddingLeft:18, overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
               {/* LEVEL */}
               <div>
@@ -404,8 +421,9 @@ export default function FieldPage() {
                   </div>
                 </div>
                 {(() => {
-                  const v = getVoices(focused).find(x => x.id === selVoice);
-                  if (!v) return <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)' }}>tap a voice to edit</div>;
+                  const vs = getVoices(focused);
+                  const v = vs.find(x => x.id === selVoice) || vs[0];
+                  if (!v) return null;
                   const setV = (k: 'oct'|'level'|'detune', val: number) => { (v as any)[k] = val; forceOrb(x=>x+1); };
                   return (
                     <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
@@ -442,15 +460,93 @@ export default function FieldPage() {
             {/* RIGHT COLUMN — signal path + flavour (distributed) */}
             <div style={{ position:'absolute', right:'3%', top:64, bottom: dim.h*0.30 + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
-              {/* SIGNAL PATH (stub — wired later) */}
+              {/* SIGNAL PATH — effect-orbs on a thread of light; tap to edit (UI ready, not yet audible) */}
               <div>
-                <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:10 }}>SIGNAL PATH</div>
-                <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)' }}>signal path coming next</div>
+                <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:11 }}>SIGNAL PATH</div>
+                <div style={{ position:'relative', display:'inline-flex', width:'fit-content', maxWidth:'100%', alignItems:'center', gap:8, marginBottom:13, flexWrap:'wrap' }}>
+                  {/* thread of light behind the orbs */}
+                  <div style={{ position:'absolute', left:6, right:6, top:17, height:1, background:'linear-gradient(90deg, rgba(216,166,255,0.05), rgba(216,166,255,0.45), rgba(216,166,255,0.05))', zIndex:0 }} />
+                  {getFx(focused).map(fx => {
+                    const sel = selFx === fx.id;
+                    return (
+                      <div key={fx.id} onClick={()=>setSelFx(sel?null:fx.id)} style={{ position:'relative', zIndex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:5, cursor:'pointer', opacity: fx.on?1:0.35 }}>
+                        <div style={{ width:30, height:30, borderRadius:'50%',
+                          background:`radial-gradient(circle, rgba(216,166,255,${fx.on?0.85:0.3}), rgba(138,61,245,0.28) 55%, transparent 78%)`,
+                          boxShadow: fx.on?`0 0 ${sel?15:11}px ${sel?3:2}px rgba(216,166,255,${sel?0.7:0.45})`:'none',
+                          border: sel?'2px solid #e0bfff':'2px solid transparent' }} />
+                        <div style={{ fontSize:7.5, color: fx.on?'#e0bfff':'rgba(255,255,255,0.45)', whiteSpace:'nowrap' }}>{fx.type}{sel?' ✦':''}</div>
+                      </div>
+                    );
+                  })}
+                  <div onClick={()=>{ const xs=getFx(focused); const out=xs.findIndex(f=>f.id==='fx_out'); const ins=out<0?xs.length:out; xs.splice(ins,0,{ id:'fx_'+Date.now(), type:'Reverb', on:true, params:{ size:0.5, decay:0.5, mix:0.3 } }); forceOrb(x=>x+1); }}
+                    style={{ position:'relative', zIndex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:5, cursor:'pointer' }}>
+                    <div style={{ width:26, height:26, borderRadius:'50%', border:'1px dashed rgba(255,255,255,0.4)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.55)', fontSize:12 }}>+</div>
+                    <div style={{ fontSize:7, color:'rgba(255,255,255,0.4)' }}>add</div>
+                  </div>
+                </div>
+                {(() => {
+                  const xs = getFx(focused);
+                  const fx = xs.find(x => x.id === selFx) || xs[0];
+                  if (!fx) return null;
+                  const PARAMS: Record<string, {k:string;label:string;min:number;max:number;step:number}[]> = {
+                    Grain:  [ {k:'size',label:'SIZE',min:0,max:1,step:0.01}, {k:'spread',label:'SPREAD',min:0,max:1,step:0.01}, {k:'density',label:'DENSITY',min:0,max:1,step:0.01} ],
+                    Filter: [ {k:'cutoff',label:'CUTOFF',min:0,max:1,step:0.01}, {k:'res',label:'RES',min:0,max:1,step:0.01}, {k:'type',label:'TYPE',min:0,max:2,step:1} ],
+                    Reverb: [ {k:'size',label:'SIZE',min:0,max:1,step:0.01}, {k:'decay',label:'DECAY',min:0,max:1,step:0.01}, {k:'mix',label:'MIX',min:0,max:1,step:0.01} ],
+                    Delay:  [ {k:'time',label:'TIME',min:0,max:1,step:0.01}, {k:'feedback',label:'FEEDBACK',min:0,max:1,step:0.01}, {k:'mix',label:'MIX',min:0,max:1,step:0.01} ],
+                    Out:    [ {k:'level',label:'LEVEL',min:0,max:1,step:0.01} ],
+                  };
+                  const rows = PARAMS[fx.type] || [];
+                  const setP = (k:string, val:number) => { fx.params[k]=val; forceOrb(x=>x+1); };
+                  const fmt = (k:string, v:number) => k==='type' ? ['LP','HP','BP'][v]||String(v) : (v<=1 ? Math.round(v*100) : v);
+                  return (
+                    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <span style={{ fontSize:7.5, color:'#e0bfff', letterSpacing:'0.08em' }}>{fx.type.toUpperCase()}</span>
+                        {!fx.fixed && <span onClick={(e)=>{ e.stopPropagation(); const a=getFx(focused); const i=a.findIndex(f=>f.id===fx.id); if(i>=0){ a.splice(i,1); if(selFx===fx.id) setSelFx(null); forceOrb(x=>x+1);} }}
+                          style={{ fontSize:7, color:'rgba(255,120,90,0.7)', cursor:'pointer' }}>remove</span>}
+                      </div>
+                      {rows.map(r => (
+                        <div key={r.k} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                          <span style={{ fontSize:7, color:'rgba(255,255,255,0.45)', width:52 }}>{r.label}</span>
+                          <input type="range" min={r.min} max={r.max} step={r.step} value={fx.params[r.k] ?? 0} onChange={(e)=>setP(r.k, r.step<1?parseFloat(e.target.value):parseInt(e.target.value))} style={{ flex:1, accentColor:'#d8a6ff' }} />
+                          <span style={{ fontSize:7, color:'#cdb4ff', width:22 }}>{fmt(r.k, fx.params[r.k] ?? 0)}</span>
+                        </div>
+                      ))}
+                      {!fx.fixed && (
+                        <div onClick={()=>{ fx.on=!fx.on; forceOrb(x=>x+1); }} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', marginTop:2 }}>
+                          <div style={{ width:30, height:16, borderRadius:9, background: fx.on?'rgba(122,245,200,0.25)':'rgba(255,255,255,0.1)', border:`1px solid ${fx.on?'#7af5c8':'rgba(255,255,255,0.3)'}`, position:'relative' }}>
+                            <div style={{ position:'absolute', top:1.5, left: fx.on?14:2, width:11, height:11, borderRadius:'50%', background: fx.on?'#a6fff2':'rgba(255,255,255,0.5)', transition:'left 0.15s' }} />
+                          </div>
+                          <span style={{ fontSize:7, color:'rgba(255,255,255,0.5)' }}>{fx.on?'effect ON':'bypassed'}</span>
+                        </div>
+                      )}
+                      <div style={{ fontSize:7, color:'rgba(255,255,255,0.25)' }}>UI ready · not yet audible</div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* FLAVOUR — density + amount (real) */}
               <div>
                 <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:10 }}>FLAVOUR</div>
+                {/* flavour-orbs — per-orb tonal world (UI per-orb; engine palette still global) */}
+                <div style={{ display:'flex', gap:13, alignItems:'flex-start', marginBottom:15, flexWrap:'wrap' }}>
+                  {FLAVOURS.map(f => {
+                    const cur = flavourRef.current[focused] ?? 'open';
+                    const sel = cur === f.id;
+                    return (
+                      <div key={f.id} onClick={()=>{ flavourRef.current[focused]=f.id; microcosmArmedPalette(f.id); forceOrb(x=>x+1); }}
+                        style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:5, cursor:'pointer', opacity: sel?1:0.5 }}>
+                        <div style={{ width:30, height:30, borderRadius:'50%',
+                          background:`radial-gradient(circle, ${f.col}, ${f.col}44 55%, transparent 78%)`,
+                          boxShadow: sel?`0 0 14px 3px ${f.col}aa`:`0 0 6px 1px ${f.col}55`,
+                          border: sel?`2px solid ${f.col}`:'2px solid transparent' }} />
+                        <div style={{ fontSize:7.5, color: sel?f.col:'rgba(255,255,255,0.5)', whiteSpace:'nowrap' }}>{f.name}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize:7, color:'rgba(255,255,255,0.25)', marginBottom:14 }}>palette is global today · per-orb later</div>
                 <div style={{ marginBottom:14 }}>
                   <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
                     <span style={{ fontSize:10, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>DENSITY</span>
