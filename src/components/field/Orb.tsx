@@ -22,6 +22,7 @@ type OrbProps = {
   xy?: { x: number; y: number };
   onSelect?: (id: string) => void;
   onXY?: (x: number, y: number) => void;
+  hideLabel?: boolean;
 };
 
 const BOX = 600;
@@ -30,7 +31,7 @@ const TRAVEL = 0.42;
 export default function Orb({
   id, label, colorKey, x, y,
   size = 130, volume = 0.7, selected = false,
-  xy = { x: 0.5, y: 0.5 }, onSelect, onXY,
+  xy = { x: 0.5, y: 0.5 }, onSelect, onXY, hideLabel = false,
 }: OrbProps) {
   const c = ORB_COLORS[colorKey];
   const waveRef = useRef<SVGPathElement>(null);

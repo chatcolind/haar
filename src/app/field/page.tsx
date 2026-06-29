@@ -125,6 +125,21 @@ export default function FieldPage() {
   const densRef = useRef<Record<string, number>>({});  // per-orb density (default 0.5)
   const muteRef = useRef<Record<string, boolean>>({});  // per-channel mute (mixer)
   const soloSetRef = useRef<Record<string, boolean>>({}); // per-channel solo (mixer)
+
+  // ── ORB-BACK voice state (UI ready; engine wiring = multi-voice source layer, later) ──
+  type VoiceDef = { id: string; type: string; on: boolean; oct: number; level: number; detune: number };
+  const voicesRef = useRef<Record<string, VoiceDef[]>>({});   // per-orb voice list
+  const [selVoice, setSelVoice] = useState<string | null>(null); // selected voice id (this orb)
+  function getVoices(orbId: string): VoiceDef[] {
+    if (!voicesRef.current[orbId]) {
+      voicesRef.current[orbId] = [
+        { id:'v_tri',   type:'Tri',   on:true,  oct:0, level:0.75, detune:0 },
+        { id:'v_sine',  type:'Sine',  on:true,  oct:0, level:0.7,  detune:0 },
+        { id:'v_noise', type:'Noise', on:false, oct:0, level:0.5,  detune:0 },
+      ];
+    }
+    return voicesRef.current[orbId];
+  }
   const panRef = useRef<Record<string, number>>({});    // per-channel pan (-1..1, 0=centre)
   const eqRef = useRef<Record<string, {lo:number;mid:number;hi:number}>>({}); // per-channel EQ dB (-12..12, 0=flat)
   const [expandedChannel, setExpandedChannel] = useState<string|null>(null); // mixer channel expanded sideways
@@ -307,6 +322,7 @@ export default function FieldPage() {
       </div>
 
       {orbs.map((o) => {
+        if (focused === o.id) return null;   // hide the focused orb in the field — it lives in the back
         const slot = slotFor(o.id);
         return (
           <Orb key={o.id} id={o.id} label={o.label} colorKey={o.colorKey}
@@ -332,65 +348,129 @@ export default function FieldPage() {
             </div>
             <div onClick={exitFocus} style={{ position:'absolute', top:14, right:22, zIndex:3, width:30, height:30, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:15, cursor:'pointer', opacity: focusShown?1:0, transition:'opacity 0.42s ease', pointerEvents:'auto' }}>×</div>
 
-            {/* THE ORB — centred-left, large, alive + XY-playable. x,y = CENTRE in px. */}
+            {/* THE ORB — CENTRED, large, alive + XY-playable. x,y = CENTRE in px. */}
             <Orb id={focused} label={fo?.label || focused} colorKey={fo?.colorKey || 'mosaic'}
-              x={focusShown ? dim.w*0.27 : centrePos.x}
-              y={focusShown ? fh*0.44 : centrePos.y}
-              size={focusShown ? 300 : centrePos.size}
+              x={focusShown ? dim.w*0.50 : centrePos.x}
+              y={focusShown ? fh*0.42 : centrePos.y}
+              size={focusShown ? 240 : centrePos.size}
               volume={0.7}
-              selected={true} xy={xyMap[focused]} onSelect={()=>{}} onXY={handleXY} />
-            <div style={{ position:'absolute', left:0, width:dim.w*0.54, top:fh*0.44 + 200, textAlign:'center', fontSize:15, letterSpacing:'0.18em', color:'#f4ecff', zIndex:3 }}>{(fo?.label || focused).toUpperCase()}</div>
-            <div style={{ position:'absolute', left:0, width:dim.w*0.54, top:fh*0.44 + 226, textAlign:'center', fontSize:9, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
+              selected={true} xy={xyMap[focused]} onSelect={()=>{}} onXY={handleXY} hideLabel />
+            <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 150, textAlign:'center', fontSize:14, letterSpacing:'0.16em', color:'#f4ecff', zIndex:3 }}>{(fo?.label || focused).toUpperCase()}</div>
+            <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 174, textAlign:'center', fontSize:8.5, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
 
-            {/* CONTROLS — right, translucent glass (empty shell for now, filled in 1b) */}
-            <div style={{ position:'absolute', right:'3%', top:64, bottom: dim.h*0.30 + 16, width:'52%', maxWidth:640, borderRadius:20, background:'rgba(22,20,36,0.55)', backdropFilter:'blur(10px)', border:'0.5px solid rgba(255,255,255,0.12)', padding:'22px 30px', boxSizing:'border-box', overflow:'auto', zIndex:2, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(40px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
-              <div style={{ fontSize:9, letterSpacing:'0.22em', color:'rgba(255,255,255,0.4)' }}>THIS ORB</div>
-              <div style={{ display:'flex', flexDirection:'column', gap:20, marginTop:20 }}>
+            {/* LEFT COLUMN — level + voices (distributed) */}
+            <div style={{ position:'absolute', left:'3%', top:64, bottom: dim.h*0.30 + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
-                {/* VOLUME + MUTE + SOLO (shared state with mixer) */}
-                <div>
-                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
-                    <span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.6)' }}>VOLUME</span>
-                    <span style={{ fontSize:11, color:'#d8a6ff' }}>{Math.round((volRef.current[focused] ?? 0.7)*100)}%</span>
-                  </div>
-                  <div style={{ display:'flex', alignItems:'center', gap:11 }}>
-                    <div onClick={()=>{ muteRef.current[focused]=!muteRef.current[focused]; reapplyLevels(); forceOrb(x=>x+1); }}
-                      style={{ width:26, height:26, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
-                        background: muteRef.current[focused]?'rgba(255,120,90,0.3)':'transparent', border:`1px solid ${muteRef.current[focused]?'rgba(255,120,90,0.8)':'rgba(255,120,90,0.45)'}`, color: muteRef.current[focused]?'#ff8c6e':'rgba(255,140,110,0.85)' }}>M</div>
-                    <div onClick={()=>{ soloSetRef.current[focused]=!soloSetRef.current[focused]; reapplyLevels(); forceOrb(x=>x+1); }}
-                      style={{ width:26, height:26, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
-                        background: soloSetRef.current[focused]?'rgba(122,245,200,0.3)':'transparent', border:`1px solid ${soloSetRef.current[focused]?'rgba(122,245,200,0.8)':'rgba(122,245,200,0.45)'}`, color: soloSetRef.current[focused]?'#a6fff2':'rgba(122,245,200,0.85)' }}>S</div>
-                    <input type="range" min={0} max={1} step={0.01} value={volRef.current[focused] ?? 0.7}
-                      onChange={(e)=>{ const v=parseFloat(e.target.value); volRef.current[focused]=v; microcosmEngineLevel(focused, orbLevel(focused)); forceOrb(x=>x+1); }}
-                      style={{ flex:1, accentColor:'#d8a6ff' }} />
+              {/* LEVEL */}
+              <div>
+                <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:9 }}>LEVEL</div>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:7 }}>
+                  <span style={{ fontSize:10, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>VOLUME</span>
+                  <span style={{ fontSize:10, color:'#d8a6ff' }}>{Math.round((volRef.current[focused] ?? 0.7)*100)}%</span>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:9 }}>
+                  <div onClick={()=>{ muteRef.current[focused]=!muteRef.current[focused]; reapplyLevels(); forceOrb(x=>x+1); }}
+                    style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                      background: muteRef.current[focused]?'rgba(255,120,90,0.3)':'transparent', border:`1px solid ${muteRef.current[focused]?'rgba(255,120,90,0.8)':'rgba(255,120,90,0.45)'}`, color: muteRef.current[focused]?'#ff8c6e':'rgba(255,140,110,0.85)' }}>M</div>
+                  <div onClick={()=>{ soloSetRef.current[focused]=!soloSetRef.current[focused]; reapplyLevels(); forceOrb(x=>x+1); }}
+                    style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                      background: soloSetRef.current[focused]?'rgba(122,245,200,0.3)':'transparent', border:`1px solid ${soloSetRef.current[focused]?'rgba(122,245,200,0.8)':'rgba(122,245,200,0.45)'}`, color: soloSetRef.current[focused]?'#a6fff2':'rgba(122,245,200,0.85)' }}>S</div>
+                  <input type="range" min={0} max={1} step={0.01} value={volRef.current[focused] ?? 0.7}
+                    onChange={(e)=>{ const v=parseFloat(e.target.value); volRef.current[focused]=v; microcosmEngineLevel(focused, orbLevel(focused)); forceOrb(x=>x+1); }}
+                    style={{ flex:1, accentColor:'#d8a6ff' }} />
+                </div>
+              </div>
+
+              {/* VOICES — orbs + selected voice's sliders (UI ready; engine later) */}
+              <div>
+                <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:11 }}>VOICES</div>
+                <div style={{ display:'flex', gap:14, alignItems:'center', marginBottom:13, flexWrap:'wrap' }}>
+                  {getVoices(focused).map(v => {
+                    const sel = selVoice === v.id;
+                    return (
+                      <div key={v.id} onClick={()=>setSelVoice(sel?null:v.id)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:5, cursor:'pointer', opacity: v.on?1:0.4 }}>
+                        <div style={{ width:34, height:34, borderRadius:'50%',
+                          background:`radial-gradient(circle, rgba(216,166,255,${v.on?0.9:0.4}), rgba(138,61,245,0.3) 55%, transparent 78%)`,
+                          boxShadow: v.on?`0 0 ${sel?16:12}px ${sel?3:2}px rgba(216,166,255,${sel?0.7:0.5})`:'none',
+                          border: sel?'2px solid #e0bfff':'2px solid transparent' }} />
+                        <div style={{ fontSize:8, color: v.on?'#e0bfff':'rgba(255,255,255,0.5)' }}>{v.type}{sel?' ✦':''}</div>
+                      </div>
+                    );
+                  })}
+                  <div onClick={()=>{ const vs=getVoices(focused); vs.push({ id:'v_'+Date.now(), type:'Sine', on:true, oct:0, level:0.7, detune:0 }); forceOrb(x=>x+1); }}
+                    style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:5, cursor:'pointer' }}>
+                    <div style={{ width:30, height:30, borderRadius:'50%', border:'1px dashed rgba(255,255,255,0.4)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.55)', fontSize:13 }}>+</div>
+                    <div style={{ fontSize:7, color:'rgba(255,255,255,0.4)' }}>add</div>
                   </div>
                 </div>
+                {(() => {
+                  const v = getVoices(focused).find(x => x.id === selVoice);
+                  if (!v) return <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)' }}>tap a voice to edit</div>;
+                  const setV = (k: 'oct'|'level'|'detune', val: number) => { (v as any)[k] = val; forceOrb(x=>x+1); };
+                  return (
+                    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                      <div style={{ fontSize:7.5, color:'#e0bfff', letterSpacing:'0.08em' }}>{v.type.toUpperCase()}</div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                        <span style={{ fontSize:7, color:'rgba(255,255,255,0.45)', width:42 }}>OCTAVE</span>
+                        <input type="range" min={-2} max={2} step={1} value={v.oct} onChange={(e)=>setV('oct', parseInt(e.target.value))} style={{ flex:1, accentColor:'#d8a6ff' }} />
+                        <span style={{ fontSize:7, color:'#cdb4ff', width:18 }}>{v.oct}</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                        <span style={{ fontSize:7, color:'rgba(255,255,255,0.45)', width:42 }}>LEVEL</span>
+                        <input type="range" min={0} max={1} step={0.01} value={v.level} onChange={(e)=>setV('level', parseFloat(e.target.value))} style={{ flex:1, accentColor:'#d8a6ff' }} />
+                        <span style={{ fontSize:7, color:'#cdb4ff', width:18 }}>{Math.round(v.level*100)}</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                        <span style={{ fontSize:7, color:'rgba(255,255,255,0.45)', width:42 }}>DETUNE</span>
+                        <input type="range" min={-50} max={50} step={1} value={v.detune} onChange={(e)=>setV('detune', parseInt(e.target.value))} style={{ flex:1, accentColor:'#d8a6ff' }} />
+                        <span style={{ fontSize:7, color:'#cdb4ff', width:18 }}>{v.detune}</span>
+                      </div>
+                      <div onClick={()=>{ v.on=!v.on; forceOrb(x=>x+1); }} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', marginTop:2 }}>
+                        <div style={{ width:30, height:16, borderRadius:9, background: v.on?'rgba(122,245,200,0.25)':'rgba(255,255,255,0.1)', border:`1px solid ${v.on?'#7af5c8':'rgba(255,255,255,0.3)'}`, position:'relative' }}>
+                          <div style={{ position:'absolute', top:1.5, left: v.on?14:2, width:11, height:11, borderRadius:'50%', background: v.on?'#a6fff2':'rgba(255,255,255,0.5)', transition:'left 0.15s' }} />
+                        </div>
+                        <span style={{ fontSize:7, color:'rgba(255,255,255,0.5)' }}>{v.on?'voice ON':'muted'}</span>
+                      </div>
+                      <div style={{ fontSize:7, color:'rgba(255,255,255,0.25)' }}>UI ready · not yet audible</div>
+                    </div>
+                  );
+                })()}
+              </div>
 
-                {/* DENSITY */}
-                <div>
-                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
-                    <span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.6)' }}>DENSITY</span>
-                    <span style={{ fontSize:11, color:'#d8a6ff' }}>{Math.round((densRef.current[focused] ?? 0.5)*100)}%</span>
+            </div>
+
+            {/* RIGHT COLUMN — signal path + flavour (distributed) */}
+            <div style={{ position:'absolute', right:'3%', top:64, bottom: dim.h*0.30 + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
+
+              {/* SIGNAL PATH (stub — wired later) */}
+              <div>
+                <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:10 }}>SIGNAL PATH</div>
+                <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)' }}>signal path coming next</div>
+              </div>
+
+              {/* FLAVOUR — density + amount (real) */}
+              <div>
+                <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:10 }}>FLAVOUR</div>
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                    <span style={{ fontSize:10, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>DENSITY</span>
+                    <span style={{ fontSize:10, color:'#d8a6ff' }}>{Math.round((densRef.current[focused] ?? 0.5)*100)}%</span>
                   </div>
                   <input type="range" min={0} max={1} step={0.01} value={densRef.current[focused] ?? 0.5}
                     onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; microcosmGrainDensity(d); forceOrb(x=>x+1); }}
                     style={{ width:'100%', accentColor:'#d8a6ff' }} />
-                  <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)', marginTop:5 }}>sparse · single notes &nbsp;→&nbsp; dense · cluster</div>
                 </div>
-
-                {/* FLAVOUR AMOUNT */}
                 <div>
-                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
-                    <span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.6)' }}>FLAVOUR AMOUNT</span>
-                    <span style={{ fontSize:11, color:'#ffcf6b' }}>{Math.round((amountRef.current[focused] ?? 0)*100)}%</span>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                    <span style={{ fontSize:10, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>FLAVOUR AMOUNT</span>
+                    <span style={{ fontSize:10, color:'#ffcf6b' }}>{Math.round((amountRef.current[focused] ?? 0)*100)}%</span>
                   </div>
                   <input type="range" min={0} max={1} step={0.01} value={amountRef.current[focused] ?? 0}
                     onChange={(e)=>{ const a=parseFloat(e.target.value); amountRef.current[focused]=a; microcosmEngineAmount(focused, a); forceOrb(x=>x+1); }}
                     style={{ width:'100%', accentColor:'#ffcf6b' }} />
-                  <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)', marginTop:5 }}>pure open &nbsp;→&nbsp; full armed-palette colour</div>
                 </div>
-
               </div>
+
             </div>
           </div>
         );
