@@ -320,17 +320,17 @@ export default function FieldPage() {
         const fo = ALL_ORBS.find(o => o.id === focused);
         const fc = '#d8a6ff';  // breadcrumb tint (Orb resolves its own colour)
         return (
-          <div style={{ position:'absolute', inset:0, zIndex:150 }}>
-            {/* dim scrim so the field reads as 'faint behind' */}
+          <div style={{ position:'absolute', inset:0, zIndex:150, pointerEvents:'none' }}>
+            {/* dim scrim — visual only, stops above the keyboard so it stays playable */}
             <div style={{ position:'absolute', left:0, right:0, top:0, bottom: dim.h*0.30, background:'rgba(6,4,12,0.82)', backdropFilter:'blur(5px)', opacity: focusShown?1:0, transition:'opacity 0.42s ease' }} />
 
             {/* breadcrumb + close */}
-            <div style={{ position:'absolute', top:18, left:24, zIndex:3, display:'flex', alignItems:'center', gap:9, opacity: focusShown?1:0, transition:'opacity 0.42s ease' }}>
+            <div style={{ position:'absolute', top:18, left:24, zIndex:3, display:'flex', alignItems:'center', gap:9, opacity: focusShown?1:0, transition:'opacity 0.42s ease', pointerEvents:'auto' }}>
               <span onClick={exitFocus} style={{ fontSize:11, letterSpacing:'0.1em', color:'rgba(255,255,255,0.45)', cursor:'pointer' }}>FIELD</span>
               <span style={{ fontSize:11, color:'rgba(255,255,255,0.3)' }}>›</span>
               <span style={{ fontSize:11, letterSpacing:'0.1em', color:fc }}>{(fo?.label || focused).toUpperCase()}</span>
             </div>
-            <div onClick={exitFocus} style={{ position:'absolute', top:14, right:22, zIndex:3, width:30, height:30, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:15, cursor:'pointer', opacity: focusShown?1:0, transition:'opacity 0.42s ease' }}>×</div>
+            <div onClick={exitFocus} style={{ position:'absolute', top:14, right:22, zIndex:3, width:30, height:30, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:15, cursor:'pointer', opacity: focusShown?1:0, transition:'opacity 0.42s ease', pointerEvents:'auto' }}>×</div>
 
             {/* THE ORB — centred-left, large, alive + XY-playable. x,y = CENTRE in px. */}
             <Orb id={focused} label={fo?.label || focused} colorKey={fo?.colorKey || 'mosaic'}
@@ -343,19 +343,27 @@ export default function FieldPage() {
             <div style={{ position:'absolute', left:0, width:dim.w*0.54, top:fh*0.44 + 226, textAlign:'center', fontSize:9, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
 
             {/* CONTROLS — right, translucent glass (empty shell for now, filled in 1b) */}
-            <div style={{ position:'absolute', right:'6%', top:90, bottom: fh*0.30 + 30, width:'40%', maxWidth:560, borderRadius:20, background:'rgba(22,20,36,0.78)', backdropFilter:'blur(12px)', border:'0.5px solid rgba(255,255,255,0.16)', padding:'26px 30px', boxSizing:'border-box', overflow:'auto', zIndex:2, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(40px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)' }}>
+            <div style={{ position:'absolute', right:'3%', top:64, bottom: dim.h*0.30 + 16, width:'52%', maxWidth:640, borderRadius:20, background:'rgba(22,20,36,0.55)', backdropFilter:'blur(10px)', border:'0.5px solid rgba(255,255,255,0.12)', padding:'22px 30px', boxSizing:'border-box', overflow:'auto', zIndex:2, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(40px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
               <div style={{ fontSize:9, letterSpacing:'0.22em', color:'rgba(255,255,255,0.4)' }}>THIS ORB</div>
               <div style={{ display:'flex', flexDirection:'column', gap:20, marginTop:20 }}>
 
-                {/* VOLUME */}
+                {/* VOLUME + MUTE + SOLO (shared state with mixer) */}
                 <div>
                   <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
                     <span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.6)' }}>VOLUME</span>
                     <span style={{ fontSize:11, color:'#d8a6ff' }}>{Math.round((volRef.current[focused] ?? 0.7)*100)}%</span>
                   </div>
-                  <input type="range" min={0} max={1} step={0.01} value={volRef.current[focused] ?? 0.7}
-                    onChange={(e)=>{ const v=parseFloat(e.target.value); volRef.current[focused]=v; microcosmEngineLevel(focused, mutedRef.current?0:v); forceOrb(x=>x+1); }}
-                    style={{ width:'100%', accentColor:'#d8a6ff' }} />
+                  <div style={{ display:'flex', alignItems:'center', gap:11 }}>
+                    <div onClick={()=>{ muteRef.current[focused]=!muteRef.current[focused]; reapplyLevels(); forceOrb(x=>x+1); }}
+                      style={{ width:26, height:26, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                        background: muteRef.current[focused]?'rgba(255,120,90,0.3)':'transparent', border:`1px solid ${muteRef.current[focused]?'rgba(255,120,90,0.8)':'rgba(255,120,90,0.45)'}`, color: muteRef.current[focused]?'#ff8c6e':'rgba(255,140,110,0.85)' }}>M</div>
+                    <div onClick={()=>{ soloSetRef.current[focused]=!soloSetRef.current[focused]; reapplyLevels(); forceOrb(x=>x+1); }}
+                      style={{ width:26, height:26, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:8,
+                        background: soloSetRef.current[focused]?'rgba(122,245,200,0.3)':'transparent', border:`1px solid ${soloSetRef.current[focused]?'rgba(122,245,200,0.8)':'rgba(122,245,200,0.45)'}`, color: soloSetRef.current[focused]?'#a6fff2':'rgba(122,245,200,0.85)' }}>S</div>
+                    <input type="range" min={0} max={1} step={0.01} value={volRef.current[focused] ?? 0.7}
+                      onChange={(e)=>{ const v=parseFloat(e.target.value); volRef.current[focused]=v; microcosmEngineLevel(focused, orbLevel(focused)); forceOrb(x=>x+1); }}
+                      style={{ flex:1, accentColor:'#d8a6ff' }} />
+                  </div>
                 </div>
 
                 {/* DENSITY */}
