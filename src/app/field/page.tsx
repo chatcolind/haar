@@ -130,30 +130,32 @@ export default function FieldPage() {
   type VoiceDef = { id: string; type: string; on: boolean; oct: number; level: number; detune: number };
   const voicesRef = useRef<Record<string, VoiceDef[]>>({});   // per-orb voice list
   const [selVoice, setSelVoice] = useState<string | null>(null); // selected voice id (this orb)
+  function defaultVoices(): VoiceDef[] {
+    return [
+      { id:'v_tri',   type:'Tri',   on:true,  oct:0, level:0.75, detune:0 },
+      { id:'v_sine',  type:'Sine',  on:true,  oct:0, level:0.7,  detune:0 },
+      { id:'v_noise', type:'Noise', on:false, oct:0, level:0.5,  detune:0 },
+    ];
+  }
   function getVoices(orbId: string): VoiceDef[] {
-    if (!voicesRef.current[orbId]) {
-      voicesRef.current[orbId] = [
-        { id:'v_tri',   type:'Tri',   on:true,  oct:0, level:0.75, detune:0 },
-        { id:'v_sine',  type:'Sine',  on:true,  oct:0, level:0.7,  detune:0 },
-        { id:'v_noise', type:'Noise', on:false, oct:0, level:0.5,  detune:0 },
-      ];
-    }
+    if (!voicesRef.current[orbId]) voicesRef.current[orbId] = defaultVoices();
     return voicesRef.current[orbId];
   }
   // ---- per-orb FX chain (signal path) — UI ready, not yet audible ----
   type FxDef = { id: string; type: string; on: boolean; fixed?: boolean; params: Record<string, number> };
   const fxRef = useRef<Record<string, FxDef[]>>({});   // per-orb effect chain
   const [selFx, setSelFx] = useState<string | null>(null); // selected effect id (this orb)
+  function defaultFx(): FxDef[] {
+    return [
+      { id:'fx_grain',  type:'Grain',  on:true, fixed:true,  params:{ size:0.5, spread:0.4, density:0.5 } },
+      { id:'fx_filter', type:'Filter', on:true,              params:{ cutoff:0.7, res:0.2, type:0 } },
+      { id:'fx_reverb', type:'Reverb', on:true,              params:{ size:0.5, decay:0.5, mix:0.3 } },
+      { id:'fx_delay',  type:'Delay',  on:true,              params:{ time:0.3, feedback:0.3, mix:0.25 } },
+      { id:'fx_out',    type:'Out',    on:true, fixed:true,  params:{ level:0.8 } },
+    ];
+  }
   function getFx(orbId: string): FxDef[] {
-    if (!fxRef.current[orbId]) {
-      fxRef.current[orbId] = [
-        { id:'fx_grain',  type:'Grain',  on:true, fixed:true,  params:{ size:0.5, spread:0.4, density:0.5 } },
-        { id:'fx_filter', type:'Filter', on:true,              params:{ cutoff:0.7, res:0.2, type:0 } },
-        { id:'fx_reverb', type:'Reverb', on:true,              params:{ size:0.5, decay:0.5, mix:0.3 } },
-        { id:'fx_delay',  type:'Delay',  on:true,              params:{ time:0.3, feedback:0.3, mix:0.25 } },
-        { id:'fx_out',    type:'Out',    on:true, fixed:true,  params:{ level:0.8 } },
-      ];
-    }
+    if (!fxRef.current[orbId]) fxRef.current[orbId] = defaultFx();
     return fxRef.current[orbId];
   }
   const flavourRef = useRef<Record<string, string>>({});  // per-orb palette id (UI per-orb; engine still global)
@@ -257,6 +259,16 @@ export default function FieldPage() {
   }
   function enterFocus(id: string) { setSelected(id); setFocused(id); requestAnimationFrame(()=>setFocusShown(true)); }
   function exitFocus() { setFocusShown(false); setTimeout(()=>setFocused(null), 920); }
+  const lastBackTap = useRef<{ id:string; t:number }>({ id:'', t:0 });
+  function handleBackTap(id: string) {   // double-tap the focused orb -> exit back to field (mirrors enter)
+    const now = Date.now();
+    if (lastBackTap.current.id === id && now - lastBackTap.current.t < 320) {
+      lastBackTap.current = { id:'', t:0 };
+      exitFocus();
+      return;
+    }
+    lastBackTap.current = { id, t: now };
+  }
   function openMix() { setMixOpen(true); requestAnimationFrame(()=>setMixShown(true)); }
   function closeMix() { setMixShown(false); setTimeout(()=>setMixOpen(false), 420); }
   async function handleSelect(id: string) {
@@ -371,7 +383,7 @@ export default function FieldPage() {
               y={focusShown ? fh*0.42 : centrePos.y}
               size={focusShown ? 240 : centrePos.size}
               volume={0.7}
-              selected={true} xy={xyMap[focused]} onSelect={()=>{}} onXY={handleXY} hideLabel />
+              selected={true} xy={xyMap[focused]} onSelect={handleBackTap} onXY={handleXY} hideLabel />
             <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 150, textAlign:'center', fontSize:14, letterSpacing:'0.16em', color:'#f4ecff', zIndex:3 }}>{(fo?.label || focused).toUpperCase()}</div>
             <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 174, textAlign:'center', fontSize:8.5, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
 
@@ -400,7 +412,11 @@ export default function FieldPage() {
 
               {/* VOICES — orbs + selected voice's sliders (UI ready; engine later) */}
               <div>
-                <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:11 }}>VOICES</div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:11 }}>
+                  <span style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)' }}>VOICES</span>
+                  <span onClick={()=>{ voicesRef.current[focused]=defaultVoices(); setSelVoice(null); forceOrb(x=>x+1); }}
+                    style={{ fontSize:7, letterSpacing:'0.08em', color:'rgba(255,255,255,0.35)', cursor:'pointer' }}>reset</span>
+                </div>
                 <div style={{ display:'flex', gap:14, alignItems:'center', marginBottom:13, flexWrap:'wrap' }}>
                   {getVoices(focused).map(v => {
                     const sel = selVoice === v.id;
@@ -462,7 +478,11 @@ export default function FieldPage() {
 
               {/* SIGNAL PATH — effect-orbs on a thread of light; tap to edit (UI ready, not yet audible) */}
               <div>
-                <div style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:11 }}>SIGNAL PATH</div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:11 }}>
+                  <span style={{ fontSize:8, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)' }}>SIGNAL PATH</span>
+                  <span onClick={()=>{ fxRef.current[focused]=defaultFx(); setSelFx(null); forceOrb(x=>x+1); }}
+                    style={{ fontSize:7, letterSpacing:'0.08em', color:'rgba(255,255,255,0.35)', cursor:'pointer' }}>reset</span>
+                </div>
                 <div style={{ position:'relative', display:'inline-flex', width:'fit-content', maxWidth:'100%', alignItems:'center', gap:8, marginBottom:13, flexWrap:'wrap' }}>
                   {/* thread of light behind the orbs */}
                   <div style={{ position:'absolute', left:6, right:6, top:17, height:1, background:'linear-gradient(90deg, rgba(216,166,255,0.05), rgba(216,166,255,0.45), rgba(216,166,255,0.05))', zIndex:0 }} />
