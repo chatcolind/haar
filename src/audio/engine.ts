@@ -625,6 +625,8 @@ export function microcosmStopEngine(): void {
   microcosmCore?.stopEngine();
 }
 export function microcosmEngineActive(id: string, on: boolean): void { microcosmCore?.setEngineActive(id, on); }
+export function microcosmAddOrb(orbId: string, engineType: string, level: number = 0.8): void { (microcosmCore as any)?.addOrb(orbId, engineType, level); }
+export function microcosmRemoveOrb(orbId: string): void { (microcosmCore as any)?.removeOrb(orbId); }
 export function microcosmEngineLevel(id: string, level: number): void { microcosmCore?.setEngineLevel(id, level); }
 export function microcosmMasterLevel(v: number): void { (microcosmCore as any)?.setMasterGain(v); }
 export function microcosmEnginePan(id: string, pan: number): void { (microcosmCore as any)?.setPan(id, pan); }

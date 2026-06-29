@@ -5,23 +5,26 @@ import Orb, { ORB_COLORS } from '../../components/field/Orb';
 import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
+  microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq,
   microcosmGrainDensity, microcosmArmedPalette, microcosmEngineAmount,
 } from '../../audio/engine';
 
-type OrbDef = { id: string; label: string; colorKey: any };
+type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
+// id is the orb INSTANCE id (unique); engineType is which scattering recipe it runs.
+// For these defaults id === engineType; once orbs are user-created, ids diverge.
 const ALL_ORBS: OrbDef[] = [
   // TEST BHAIRAV: Bhairav-capable engines first (mosaic/shimmer/warp/glitch use tiers)
-  { id: 'mosaic',  label: 'Mosaic',  colorKey: 'tunnel'  },
-  { id: 'shimmer', label: 'Shimmer', colorKey: 'shimmer' },
-  { id: 'warp',    label: 'Warp',    colorKey: 'warp'    },
-  { id: 'glitch',  label: 'Glitch',  colorKey: 'glitch'  },
-  { id: 'bubbles', label: 'Bubbles', colorKey: 'bubbles' },
-  { id: 'tunnel',  label: 'Tunnel',  colorKey: 'tunnel'  },
-  { id: 'strum',   label: 'Strum',   colorKey: 'strum'   },
-  { id: 'haze',    label: 'Haze',    colorKey: 'haze'    },
-  { id: 'swarm',   label: 'Swarm',   colorKey: 'swarm'   },
-  { id: 'reverse', label: 'Reverse', colorKey: 'shimmer' },
+  { id: 'mosaic',  label: 'Mosaic',  colorKey: 'tunnel',  engineType: 'mosaic'  },
+  { id: 'shimmer', label: 'Shimmer', colorKey: 'shimmer', engineType: 'shimmer' },
+  { id: 'warp',    label: 'Warp',    colorKey: 'warp',    engineType: 'warp'    },
+  { id: 'glitch',  label: 'Glitch',  colorKey: 'glitch',  engineType: 'glitch'  },
+  { id: 'bubbles', label: 'Bubbles', colorKey: 'bubbles', engineType: 'bubbles' },
+  { id: 'tunnel',  label: 'Tunnel',  colorKey: 'tunnel',  engineType: 'tunnel'  },
+  { id: 'strum',   label: 'Strum',   colorKey: 'strum',   engineType: 'strum'   },
+  { id: 'haze',    label: 'Haze',    colorKey: 'haze',    engineType: 'haze'    },
+  { id: 'swarm',   label: 'Swarm',   colorKey: 'swarm',   engineType: 'swarm'   },
+  { id: 'reverse', label: 'Reverse', colorKey: 'shimmer', engineType: 'reverse' },
 ];
 
 const FIELD_H = 0.70;
@@ -192,6 +195,7 @@ export default function FieldPage() {
     if (!started.current) return;
     ALL_ORBS.forEach(o => {
       const on = orbs.some(v => v.id === o.id);
+      if (on) microcosmAddOrb(o.id, o.engineType, orbLevel(o.id));  // register instance (id carries engineType)
       microcosmEngineActive(o.id, on);
       if (on) microcosmEngineLevel(o.id, orbLevel(o.id));
     });

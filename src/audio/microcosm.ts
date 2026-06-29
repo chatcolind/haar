@@ -32,19 +32,21 @@ export class Microcosm {
   private pitchSpread = 0.5;  // Y: 0 = unison, 1 = full octave-stack
   private density = 0.5;      // TEST: 0 = sparse single notes, 1 = dense cluster
   // Engine rack — each independently on/off with its own fader level
-  private rack: Record<string, { active: boolean; level: number }> = {
-    mosaic:  { active: false, level: 0.8 },
-    haze:    { active: false, level: 0.8 },
-    tunnel:  { active: false, level: 0.8 },
-    strum:   { active: false, level: 0.8 },
-    reverse: { active: false, level: 0.8 },
-    shimmer: { active: false, level: 0.8 },
-    glitch:  { active: false, level: 0.8 },
-    warp:    { active: false, level: 0.8 },
-    swarm:   { active: false, level: 0.8 },
-    swell:   { active: false, level: 0.8 },
-    bubbles: { active: false, level: 0.8 },
-    chop:    { active: false, level: 0.8 },
+  // rack now keyed by ORB ID (still =engine-type for the 12 defaults until page.tsx mints ids).
+  // Each entry carries engineType = which recipe to run. Dispatch reads engineType, not the key.
+  private rack: Record<string, { engineType: string; active: boolean; level: number }> = {
+    mosaic:  { engineType: 'mosaic',  active: false, level: 0.8 },
+    haze:    { engineType: 'haze',    active: false, level: 0.8 },
+    tunnel:  { engineType: 'tunnel',  active: false, level: 0.8 },
+    strum:   { engineType: 'strum',   active: false, level: 0.8 },
+    reverse: { engineType: 'reverse', active: false, level: 0.8 },
+    shimmer: { engineType: 'shimmer', active: false, level: 0.8 },
+    glitch:  { engineType: 'glitch',  active: false, level: 0.8 },
+    warp:    { engineType: 'warp',    active: false, level: 0.8 },
+    swarm:   { engineType: 'swarm',   active: false, level: 0.8 },
+    swell:   { engineType: 'swell',   active: false, level: 0.8 },
+    bubbles: { engineType: 'bubbles', active: false, level: 0.8 },
+    chop:    { engineType: 'chop',    active: false, level: 0.8 },
   };
   private engineTickAccum: Record<string, number> = {
     mosaic: 0, haze: 0, tunnel: 0, strum: 0,
@@ -206,6 +208,23 @@ export class Microcosm {
   setEngineLevel(id: string, level: number): void {
     if (this.rack[id]) this.rack[id].level = Math.max(0, Math.min(1, level));
   }
+  // ---- dynamic rack (rack-by-orb-id) ----
+  // Create a rack entry for an orb instance running a given engine recipe.
+  // Idempotent: re-adding an existing orbId updates its engineType, keeps level/active.
+  addOrb(orbId: string, engineType: string, level: number = 0.8): void {
+    const existing = this.rack[orbId];
+    this.rack[orbId] = {
+      engineType,
+      active: existing ? existing.active : false,
+      level: existing ? existing.level : Math.max(0, Math.min(1, level)),
+    };
+    if (this.engineTickAccum[orbId] === undefined) this.engineTickAccum[orbId] = 0;
+  }
+  // Remove an orb instance from the rack entirely.
+  removeOrb(orbId: string): void {
+    delete this.rack[orbId];
+    delete this.engineTickAccum[orbId];
+  }
   anyEngineActive(): boolean {
     return Object.values(this.rack).some(e => e.active);
   }
@@ -216,26 +235,31 @@ export class Microcosm {
   startEngine(): void {
     if (this.mosaicTimer !== null) return;
     const STEP = 10;
+    // engine catalogue: engine-type -> its tick recipe. Dispatch is now a lookup,
+    // not a 12-branch if. (Step 1 of rack-by-orb-id: behaviour identical.)
+    const tickFns: Record<string, (lvl: number) => number> = {
+      mosaic:  (l) => this.tickMosaic(l),
+      haze:    (l) => this.tickHaze(l),
+      tunnel:  (l) => this.tickTunnel(l),
+      strum:   (l) => this.tickStrum(l),
+      reverse: (l) => this.tickReverse(l),
+      shimmer: (l) => this.tickShimmer(l),
+      glitch:  (l) => this.tickGlitch(l),
+      warp:    (l) => this.tickWarp(l),
+      swarm:   (l) => this.tickSwarm(l),
+      swell:   (l) => this.tickSwell(l),
+      bubbles: (l) => this.tickBubbles(l),
+      chop:    (l) => this.tickChop(l),
+    };
     const tick = () => {
       for (const id of Object.keys(this.rack)) {
         const e = this.rack[id];
         if (!e.active) continue;
         this.engineTickAccum[id] -= STEP;
         if (this.engineTickAccum[id] <= 0) {
-          this._currentEngine = id;   // tag grains spawned in this tick
-          let next = 100;
-          if (id === 'mosaic') next = this.tickMosaic(e.level);
-          else if (id === 'haze') next = this.tickHaze(e.level);
-          else if (id === 'tunnel') next = this.tickTunnel(e.level);
-          else if (id === 'strum') next = this.tickStrum(e.level);
-          else if (id === 'reverse') next = this.tickReverse(e.level);
-          else if (id === 'shimmer') next = this.tickShimmer(e.level);
-          else if (id === 'glitch') next = this.tickGlitch(e.level);
-          else if (id === 'warp') next = this.tickWarp(e.level);
-          else if (id === 'swarm') next = this.tickSwarm(e.level);
-          else if (id === 'swell') next = this.tickSwell(e.level);
-          else if (id === 'bubbles') next = this.tickBubbles(e.level);
-          else if (id === 'chop') next = this.tickChop(e.level);
+          this._currentEngine = id;   // tag grains with the ORB ID (the rack key)
+          const fn = tickFns[e.engineType];   // recipe chosen by engineType, decoupled from id
+          const next = fn ? fn(e.level) : 100;
           this.engineTickAccum[id] = next;
         }
       }
