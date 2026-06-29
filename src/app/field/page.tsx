@@ -148,6 +148,16 @@ export default function FieldPage() {
   const lastTap = useRef<{ key:string; t:number }>({ key:'', t:0 });
   const [palette, setPalette] = useState('open');     // armed flavour palette (global)
   const [pickerOpen, setPickerOpen] = useState(false);  // flavour picker visible
+  const [createOpen, setCreateOpen] = useState(false);          // orb creation bloom
+  const [createSrc, setCreateSrc] = useState<'synth'|'sample'|'livein'>('synth');
+  const [createEngine, setCreateEngine] = useState<string | null>(null);  // selected engine type
+  function doCreateOrb() {
+    if (!createEngine) return;
+    const cat = ALL_ORBS.find(o => o.engineType === createEngine);
+    const id = addFieldOrb(createEngine, cat?.label || createEngine, cat?.colorKey || 'tunnel');
+    if (started.current && state==='playing') { microcosmAddOrb(id, createEngine, orbLevel(id)); microcosmEngineActive(id, true); microcosmEngineLevel(id, orbLevel(id)); }
+    setCreateEngine(null);   // engine resets; source stays sticky for fast repeat-add
+  }
   const [life, setLife] = useState(0.32);
   const [solo, setSolo] = useState(false);      // TEST SOLO
   const soloRef = useRef(false);                // TEST SOLO
@@ -379,9 +389,8 @@ export default function FieldPage() {
 
       {/* TEST: add/remove field orbs (top-left). +=add Mosaic instance, −=remove last. */}
       <div style={{ position:'absolute', top:62, left:32, zIndex:100, display:'flex', alignItems:'center', gap:14, background:'rgba(255,255,255,0.08)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:20, padding:'7px 16px' }}>
-        <span onClick={()=>{ if (fieldOrbs.length>1) removeFieldOrb(fieldOrbs[fieldOrbs.length-1].id); }} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>−</span>
         <span style={{ fontSize:11, color:'rgba(255,255,255,0.7)', minWidth:54, textAlign:'center' }}>{count} orbs</span>
-        <span onClick={()=>{ const e=ALL_ORBS[fieldOrbs.length % ALL_ORBS.length]; const id=addFieldOrb(e.engineType, e.label, e.colorKey); if (started.current && state==='playing'){ microcosmAddOrb(id,e.engineType,orbLevel(id)); microcosmEngineActive(id,true); microcosmEngineLevel(id,orbLevel(id)); } }} style={{ cursor:'pointer', fontSize:18, color:'#fff', userSelect:'none' }}>+</span>
+        <span onClick={()=>setCreateOpen(true)} style={{ cursor:'pointer', fontSize:18, color:'#a6fff2', userSelect:'none' }}>+</span>
       </div>
 
       {orbs.map((o) => {
@@ -918,6 +927,43 @@ export default function FieldPage() {
               })}
             </div>
             <div style={{ fontSize:9, color:'rgba(255,255,255,0.3)', marginTop:20, textAlign:'center' }}>arms the palette · turn an orb's amount up to hear it</div>
+          </div>
+        </div>
+      )}
+      {/* ORB CREATION — full-screen source x engine */}
+      {createOpen && (
+        <div style={{ position:'fixed', inset:0, zIndex:300, background:'radial-gradient(ellipse at 50% 32%, #0c1018 0%, #06070d 60%, #030409 100%)', display:'flex', flexDirection:'column', fontFamily:'Rajdhani, sans-serif' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'34px 56px 0' }}>
+            <span style={{ fontSize:15, letterSpacing:'0.32em', color:'#d8a6ff', fontFamily:'monospace' }}>NEW ORB</span>
+            <div onClick={()=>setCreateOpen(false)} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
+          </div>
+          <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 56px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
+            <div style={{ fontSize:11, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:24, fontFamily:'monospace', textAlign:'center' }}>SOURCE</div>
+            <div style={{ display:'flex', gap:24, marginBottom:72, justifyContent:'center' }}>
+              {(['synth','sample','livein'] as const).map(src => {
+                const lbl = src==='synth'?'Synth':src==='sample'?'Sample':'Live in';
+                const sel = createSrc===src;
+                const soon = src!=='synth';
+                return <div key={src} onClick={()=>setCreateSrc(src)} style={{ width:280, textAlign:'center', padding:'22px 0', borderRadius:16, cursor:'pointer', border: sel?'1px solid #d8a6ff':'0.5px solid rgba(255,255,255,0.16)', background: sel?'rgba(216,166,255,0.1)':'rgba(255,255,255,0.02)', color: sel?'#e0bfff':'rgba(255,255,255,0.6)', fontSize:19, letterSpacing:'0.04em' }}>{lbl}{soon?'  ·  soon':''}</div>;
+              })}
+            </div>
+            <div style={{ fontSize:11, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:30, fontFamily:'monospace' }}>ENGINE — tap to select</div>
+            <div style={{ display:'flex', gap:40, flexWrap:'wrap', rowGap:40 }}>
+              {ALL_ORBS.map(e => {
+                const sel = createEngine===e.engineType;
+                const col = ORB_COLORS[e.colorKey] || ORB_COLORS['tunnel'];
+                return (
+                  <div key={e.engineType} onClick={()=>setCreateEngine(e.engineType)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12, width:104, cursor:'pointer', opacity: sel?1:0.82, transition:'opacity 0.2s, transform 0.2s', transform: sel?'scale(1.08)':'scale(1)' }}>
+                    <div style={{ width: sel?66:58, height: sel?66:58, borderRadius:'50%', background:`radial-gradient(circle, ${col.core}, ${col.mid}55 52%, transparent 76%)`, boxShadow: sel?`0 0 30px 6px ${col.mid}99`:`0 0 12px 2px ${col.mid}33`, border: sel?`2px solid ${col.core}`:'2px solid transparent' }} />
+                    <div style={{ fontSize:15, letterSpacing:'0.06em', color: sel?col.core:'rgba(255,255,255,0.82)' }}>{e.label}{sel?' ✦':''}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 56px 44px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
+            <span style={{ fontSize:12, letterSpacing:'0.06em', color:'rgba(255,255,255,0.3)', fontFamily:'monospace' }}>source stays selected · add as many as you like</span>
+            <div onClick={()=>doCreateOrb()} style={{ padding:'15px 52px', borderRadius:28, cursor: createEngine?'pointer':'default', border:`1px solid ${createEngine?'#7af5c8':'rgba(255,255,255,0.15)'}`, background: createEngine?'rgba(122,245,200,0.14)':'transparent', color: createEngine?'#a6fff2':'rgba(255,255,255,0.3)', fontSize:16, letterSpacing:'0.16em' }}>ADD ORB</div>
           </div>
         </div>
       )}
