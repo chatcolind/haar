@@ -231,7 +231,7 @@ export default function FieldPage() {
       xy: xyRef.current[o.id] ?? {x:0.5,y:0.5},
       offset: offsetRef.current[o.id] ?? 0,
     }));
-    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs }));
+    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog }));
     const idx = listSongs().filter(s=>s.name!==name); idx.push({name, ts:Date.now()});
     localStorage.setItem('haar_songs_index', JSON.stringify(idx));
     setSongMenu(null); setSongName('');
@@ -254,6 +254,7 @@ export default function FieldPage() {
       microcosmGrainDensity(o.id, o.dens); microcosmEngineAmount(o.id, o.amount); microcosmOrbPalette(o.id, o.flavour);
       microcosmOrbHome(o.id, o.offset ?? 0);
     }
+    stopProg(); setProg(data.prog ?? []);  // restore progression (stop any running one first)
     setFieldOrbs(restored); setSongMenu(null);
   }
   const [life, setLife] = useState(0.32);
