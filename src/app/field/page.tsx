@@ -185,6 +185,7 @@ export default function FieldPage() {
       mute: !!muteRef.current[o.id], solo: !!soloSetRef.current[o.id],
       pan: panRef.current[o.id] ?? 0, eq: eqRef.current[o.id] ?? {lo:0,mid:0,hi:0},
       xy: xyRef.current[o.id] ?? {x:0.5,y:0.5},
+      offset: offsetRef.current[o.id] ?? 0,
     }));
     localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs }));
     const idx = listSongs().filter(s=>s.name!==name); idx.push({name, ts:Date.now()});
@@ -200,13 +201,14 @@ export default function FieldPage() {
     for (const o of data.orbs) {
       volRef.current[o.id]=o.vol; densRef.current[o.id]=o.dens; amountRef.current[o.id]=o.amount;
       flavourRef.current[o.id]=o.flavour; muteRef.current[o.id]=o.mute; soloSetRef.current[o.id]=o.solo;
-      panRef.current[o.id]=o.pan; eqRef.current[o.id]=o.eq; xyRef.current[o.id]=o.xy;
+      panRef.current[o.id]=o.pan; eqRef.current[o.id]=o.eq; xyRef.current[o.id]=o.xy; offsetRef.current[o.id]=o.offset ?? 0;
       const n = parseInt((o.id.split('_')[1]||'0')); orbCounter.current[o.engineType]=Math.max(orbCounter.current[o.engineType]||0, n);
       restored.push({ id:o.id, engineType:o.engineType, label:o.label, colorKey:o.colorKey });
       microcosmAddOrb(o.id, o.engineType, o.vol);
       microcosmEngineActive(o.id, true); microcosmEngineLevel(o.id, o.vol);
       microcosmEnginePan(o.id, o.pan); microcosmEngineEQ(o.id, o.eq.lo, o.eq.mid, o.eq.hi);
       microcosmGrainDensity(o.id, o.dens); microcosmEngineAmount(o.id, o.amount); microcosmOrbPalette(o.id, o.flavour);
+      microcosmOrbHome(o.id, o.offset ?? 0);
     }
     setFieldOrbs(restored); setSongMenu(null);
   }
