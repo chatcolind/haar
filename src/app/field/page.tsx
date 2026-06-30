@@ -150,10 +150,6 @@ export default function FieldPage() {
     // transpose = semitones from locked root (at oct 4) to this step's note+oct
     return (NOTES.indexOf(st.note) - NOTES.indexOf(lockKey)) + (st.oct - 4) * 12;
   }
-  function INTERVAL_LABEL(sm: number): string {
-    const m: Record<number,string> = {[-24]:'-2 oct',[-12]:'-oct',[-7]:'-5th',[-5]:'-4th',0:'root',5:'+4th',7:'+5th',12:'+oct',24:'+2 oct'};
-    return m[sm] ?? (sm>0?`+${sm}`:`${sm}`);
-  }
   const [chordsOpen, setChordsOpen] = useState(false);
   const [prog, setProg] = useState<ProgStep[]>([]);     // the sequence
   const [progRunning, setProgRunning] = useState(false);
