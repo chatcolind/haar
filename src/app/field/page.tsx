@@ -144,6 +144,50 @@ export default function FieldPage() {
   const [playNote, setPlayNote] = useState('C'); // current note being played (white)
   const [playSemi, setPlaySemi] = useState(0); // semitones from locked root      // octave offset of the played note from lock
   const [octave, setOctave] = useState(0);        // whole-keyboard register shift
+  // ---- PROGRESSIONS (Chords): conductor steps through interval offsets on a bar clock ----
+  type ProgStep = { semis:number; bars:number };
+  function INTERVAL_LABEL(sm: number): string {
+    const m: Record<number,string> = {[-24]:'-2 oct',[-12]:'-oct',[-7]:'-5th',[-5]:'-4th',0:'root',5:'+4th',7:'+5th',12:'+oct',24:'+2 oct'};
+    return m[sm] ?? (sm>0?`+${sm}`:`${sm}`);
+  }
+  const [chordsOpen, setChordsOpen] = useState(false);
+  const [prog, setProg] = useState<ProgStep[]>([]);     // the sequence
+  const [progRunning, setProgRunning] = useState(false);
+  const [progStepIdx, setProgStepIdx] = useState(0);    // which step is active (for UI highlight)
+  const progTransposeRef = useRef(0);                   // current progression transpose (semitones), read by freq calc
+  const progTimer = useRef<any>(null);
+  const progRAF = useRef<any>(null);
+  const [progProgress, setProgProgress] = useState(0);  // 0..1 fill target within active step
+  const [progStepDur, setProgStepDur] = useState(0);    // ms duration of active step (drives CSS transition)
+  // re-apply source frequency with current progression transpose folded in (no note re-trigger needed)
+  function reapplySourceFreq() {
+    const rootHz = NOTE_BASE[lockKey] ?? 261.63;
+    microcosmSourceFreq(rootHz * Math.pow(2, (playSemi/12) + octave + (progTransposeRef.current/12)));
+  }
+  function stopProg() {
+    if (progTimer.current) { clearTimeout(progTimer.current); progTimer.current = null; }
+    setProgRunning(false); setProgProgress(0); setProgStepDur(0);
+    progTransposeRef.current = 0; setProgStepIdx(0); reapplySourceFreq();
+  }
+  function runProg() {
+    if (prog.length === 0) return;
+    setProgRunning(true);
+    const barMs = (60 / 92) * 4 * 1000;  // one 4/4 bar in ms at 92 BPM (BPM is fixed display today)
+    let i = 0;
+    const step = () => {
+      const st = prog[i];
+      const dur = barMs * st.bars;
+      progTransposeRef.current = st.semis;
+      reapplySourceFreq();
+      // reset fill to 0 instantly, then on next frame animate to 1 over `dur` via CSS transition
+      setProgProgress(0);
+      setProgStepIdx(i);
+      setProgStepDur(0);
+      requestAnimationFrame(() => requestAnimationFrame(() => { setProgStepDur(dur); setProgProgress(1); }));
+      progTimer.current = setTimeout(() => { i = (i + 1) % prog.length; step(); }, dur);
+    };
+    step();
+  }
   const lastTap = useRef<{ key:string; t:number }>({ key:'', t:0 });
   const [palette, setPalette] = useState('open');     // armed flavour palette (global)
   const [createOpen, setCreateOpen] = useState(false);          // orb creation bloom
@@ -327,7 +371,7 @@ export default function FieldPage() {
   // play a note `semis` semitones from the locked root (negative = down, positive = up)
   function playAt(note: string, semis: number) {
     const rootHz = NOTE_BASE[lockKey] ?? 261.63;
-    const hz = rootHz * Math.pow(2, (semis / 12) + octave);
+    const hz = rootHz * Math.pow(2, (semis / 12) + octave + (progTransposeRef.current/12));
     microcosmSourceFreq(hz);
     setPlayNote(note); setPlaySemi(semis);
   }
@@ -956,11 +1000,11 @@ export default function FieldPage() {
             <div style={{ display:'flex', alignItems:'flex-end', gap:26 }}>
               {[
                 { k:'Source', col:'rgba(255,216,107,0.5)', bg:'rgba(255,216,107,0.06)', dot:'#ffd86b' },
-                { k:'Scenes', col:'rgba(180,200,230,0.5)', bg:'rgba(180,200,230,0.05)', dot:'#8aa0d0' },
+                { k:'Chords', col:'rgba(180,200,230,0.5)', bg:'rgba(180,200,230,0.05)', dot:'#8aa0d0' },
                 { k:'Rec',    col:'rgba(224,80,58,0.5)',   bg:'rgba(224,80,58,0.06)',   dot:'#ff7a5a' },
                 { k:'Mix',    col:'rgba(170,196,255,0.5)', bg:'rgba(170,196,255,0.06)', dot:'#aac4ff' },
               ].map(u => (
-                <div key={u.k} onClick={()=>{ if(u.k==='Mix') openMix(); }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                <div key={u.k} onClick={()=>{ if(u.k==='Mix') openMix(); if(u.k==='Chords') setChordsOpen(true); }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                   <div style={{ width:44, height:44, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, boxShadow:`0 0 16px 3px ${u.dot}55, inset 0 0 12px ${u.dot}22`, display:'flex', alignItems:'center', justifyContent:'center' }}>
                     <div style={{ width:7, height:7, borderRadius:'50%', background:u.dot }} />
                   </div>
@@ -1066,6 +1110,64 @@ export default function FieldPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+      {/* CHORDS — progression editor (bottom pop-up). Build a sequence of interval steps + bars; play loops it. */}
+      {chordsOpen && (
+        <div onClick={()=>setChordsOpen(false)} style={{ position:'fixed', inset:0, zIndex:320, background:'rgba(4,5,10,0.72)', backdropFilter:'blur(6px)', display:'flex', alignItems:'flex-end', justifyContent:'center', fontFamily:'Rajdhani, sans-serif' }}>
+          <div onClick={(e)=>e.stopPropagation()} style={{ width:'100%', maxWidth:1000, background:'rgba(14,16,26,0.97)', borderTop:'0.5px solid rgba(255,255,255,0.14)', borderRadius:'20px 20px 0 0', padding:'26px 40px 40px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+              <span style={{ fontSize:12, letterSpacing:'0.24em', color:'#8aa0d0', fontFamily:'monospace' }}>CHORDS — PROGRESSION</span>
+              <span onClick={()=>setChordsOpen(false)} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:18 }}>×</span>
+            </div>
+
+            {/* current sequence */}
+            <div style={{ fontSize:10, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:12, fontFamily:'monospace' }}>SEQUENCE</div>
+            {prog.length===0 ? (
+              <div style={{ fontSize:14, color:'rgba(255,255,255,0.35)', marginBottom:22 }}>empty — add steps below</div>
+            ) : (
+              <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:24 }}>
+                {prog.map((st, idx) => {
+                  const lbl = INTERVAL_LABEL(st.semis);
+                  const active = progRunning && progStepIdx===idx;
+                  return (
+                    <div key={idx} style={{ position:'relative', overflow:'hidden', display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'12px 14px', borderRadius:12, border:`1px solid ${active?'#a6c4ff':'rgba(255,255,255,0.15)'}`, background: active?'rgba(140,160,210,0.12)':'rgba(255,255,255,0.03)' }}>
+                      {active && <div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${progProgress*100}%`, background:'linear-gradient(90deg, rgba(166,196,255,0.4), rgba(166,196,255,0.7))', pointerEvents:'none', transition:`width ${progStepDur}ms linear` }} />}
+                      <div style={{ position:'relative', display:'flex', flexDirection:'column', alignItems:'center', gap:6 }}>
+                      <span style={{ fontSize:16, color: active?'#cfe0ff':'#e0e6ff' }}>{lbl}</span>
+                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                        <span onClick={()=>setProg(p=>p.map((x,i)=>i===idx?{...x,bars:Math.max(1,x.bars-1)}:x))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:15 }}>−</span>
+                        <span style={{ fontSize:13, color:'rgba(255,255,255,0.7)', minWidth:42, textAlign:'center' }}>{st.bars} bar{st.bars>1?'s':''}</span>
+                        <span onClick={()=>setProg(p=>p.map((x,i)=>i===idx?{...x,bars:x.bars+1}:x))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:15 }}>+</span>
+                      </div>
+                      <span onClick={()=>setProg(p=>p.filter((_,i)=>i!==idx))} style={{ cursor:'pointer', fontSize:10, color:'rgba(255,120,90,0.7)' }}>remove</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* add a step — interval picker (same consonant set as orbs) */}
+            <div style={{ fontSize:10, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:12, fontFamily:'monospace' }}>ADD STEP</div>
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:28 }}>
+              {[-24,-12,-7,-5,0,5,7,12,24].map(sm => (
+                <div key={sm} onClick={()=>setProg(p=>[...p,{semis:sm, bars:4}])}
+                  style={{ padding:'10px 16px', borderRadius:20, cursor:'pointer', border:'0.5px solid rgba(255,255,255,0.18)', background:'rgba(255,255,255,0.03)', fontSize:14, color:'rgba(255,255,255,0.8)' }}>
+                  {INTERVAL_LABEL(sm)}
+                </div>
+              ))}
+            </div>
+
+            {/* transport */}
+            <div style={{ display:'flex', justifyContent:'center', gap:20 }}>
+              {!progRunning ? (
+                <div onClick={()=>runProg()} style={{ padding:'13px 44px', borderRadius:26, cursor: prog.length?'pointer':'default', border:`1px solid ${prog.length?'#7af5c8':'rgba(255,255,255,0.15)'}`, background: prog.length?'rgba(122,245,200,0.14)':'transparent', color: prog.length?'#a6fff2':'rgba(255,255,255,0.3)', fontSize:15, letterSpacing:'0.14em' }}>PLAY ▸</div>
+              ) : (
+                <div onClick={()=>stopProg()} style={{ padding:'13px 44px', borderRadius:26, cursor:'pointer', border:'1px solid rgba(255,140,110,0.6)', background:'rgba(255,140,110,0.14)', color:'#ff8c6e', fontSize:15, letterSpacing:'0.14em' }}>STOP ■</div>
+              )}
+            </div>
           </div>
         </div>
       )}
