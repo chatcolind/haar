@@ -145,7 +145,11 @@ export default function FieldPage() {
   const [playSemi, setPlaySemi] = useState(0); // semitones from locked root      // octave offset of the played note from lock
   const [octave, setOctave] = useState(0);        // whole-keyboard register shift
   // ---- PROGRESSIONS (Chords): conductor steps through interval offsets on a bar clock ----
-  type ProgStep = { semis:number; bars:number };
+  type ProgStep = { note:string; oct:number; bars:number };
+  function stepSemis(st: {note:string; oct:number}): number {
+    // transpose = semitones from locked root (at oct 4) to this step's note+oct
+    return (NOTES.indexOf(st.note) - NOTES.indexOf(lockKey)) + (st.oct - 4) * 12;
+  }
   function INTERVAL_LABEL(sm: number): string {
     const m: Record<number,string> = {[-24]:'-2 oct',[-12]:'-oct',[-7]:'-5th',[-5]:'-4th',0:'root',5:'+4th',7:'+5th',12:'+oct',24:'+2 oct'};
     return m[sm] ?? (sm>0?`+${sm}`:`${sm}`);
@@ -159,6 +163,7 @@ export default function FieldPage() {
   const progRAF = useRef<any>(null);
   const [progProgress, setProgProgress] = useState(0);  // 0..1 fill target within active step
   const [progStepDur, setProgStepDur] = useState(0);    // ms duration of active step (drives CSS transition)
+  const [progPickOct, setProgPickOct] = useState(4);    // octave for newly added chord steps
   // re-apply source frequency with current progression transpose folded in (no note re-trigger needed)
   function reapplySourceFreq() {
     const rootHz = NOTE_BASE[lockKey] ?? 261.63;
@@ -177,7 +182,7 @@ export default function FieldPage() {
     const step = () => {
       const st = prog[i];
       const dur = barMs * st.bars;
-      progTransposeRef.current = st.semis;
+      progTransposeRef.current = stepSemis(st);
       reapplySourceFreq();
       // reset fill to 0 instantly, then on next frame animate to 1 over `dur` via CSS transition
       setProgProgress(0);
@@ -1130,7 +1135,7 @@ export default function FieldPage() {
             ) : (
               <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:24 }}>
                 {prog.map((st, idx) => {
-                  const lbl = INTERVAL_LABEL(st.semis);
+                  const lbl = st.note + st.oct;
                   const active = progRunning && progStepIdx===idx;
                   return (
                     <div key={idx} style={{ position:'relative', overflow:'hidden', display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'12px 14px', borderRadius:12, border:`1px solid ${active?'#a6c4ff':'rgba(255,255,255,0.15)'}`, background: active?'rgba(140,160,210,0.12)':'rgba(255,255,255,0.03)' }}>
@@ -1150,17 +1155,29 @@ export default function FieldPage() {
               </div>
             )}
 
-            {/* add a step — interval picker (same consonant set as orbs) */}
-            <div style={{ fontSize:10, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:12, fontFamily:'monospace' }}>ADD STEP</div>
-            <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:28 }}>
-              {[-24,-12,-7,-5,0,5,7,12,24].map(sm => (
-                <div key={sm} onClick={()=>setProg(p=>[...p,{semis:sm, bars:4}])}
-                  style={{ padding:'10px 16px', borderRadius:20, cursor:'pointer', border:'0.5px solid rgba(255,255,255,0.18)', background:'rgba(255,255,255,0.03)', fontSize:14, color:'rgba(255,255,255,0.8)' }}>
-                  {INTERVAL_LABEL(sm)}
-                </div>
-              ))}
+            {/* add a step — pick a NOTE (chromatic) at the chosen OCTAVE, like the conductor keyboard */}
+            <div style={{ display:'flex', alignItems:'center', gap:16, marginBottom:12 }}>
+              <span style={{ fontSize:10, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', fontFamily:'monospace' }}>ADD STEP</span>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <span onClick={()=>setProgPickOct(o=>Math.max(2,o-1))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:15, userSelect:'none' }}>◂</span>
+                <span style={{ fontSize:12, color:'rgba(255,255,255,0.65)', minWidth:54, textAlign:'center' }}>oct {progPickOct}</span>
+                <span onClick={()=>setProgPickOct(o=>Math.min(6,o+1))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:15, userSelect:'none' }}>▸</span>
+              </div>
             </div>
-
+            <div style={{ display:'flex', gap:7, flexWrap:'wrap', marginBottom:28 }}>
+              {NOTES.map(n => {
+                const sharp = n.includes('#');
+                return (
+                  <div key={n} onClick={()=>setProg(p=>[...p,{note:n, oct:progPickOct, bars:4}])}
+                    style={{ minWidth: sharp?34:38, textAlign:'center', padding:'10px 10px', borderRadius:18, cursor:'pointer',
+                      border:`0.5px solid ${sharp?'rgba(255,255,255,0.12)':'rgba(255,255,255,0.22)'}`,
+                      background: sharp?'rgba(255,255,255,0.02)':'rgba(255,255,255,0.05)',
+                      fontSize:14, color: sharp?'rgba(255,255,255,0.55)':'rgba(255,255,255,0.85)' }}>
+                    {n}{progPickOct}
+                  </div>
+                );
+              })}
+            </div>
             {/* transport — Engage starts chord movement, Release stops it (drone continues via master) */}
             <div style={{ display:'flex', justifyContent:'center', gap:18 }}>
               <div onClick={()=>{ if(prog.length && !progRunning) runProg(); }}
