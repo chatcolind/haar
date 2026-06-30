@@ -1160,13 +1160,19 @@ export default function FieldPage() {
               ))}
             </div>
 
-            {/* transport */}
-            <div style={{ display:'flex', justifyContent:'center', gap:20 }}>
-              {!progRunning ? (
-                <div onClick={()=>runProg()} style={{ padding:'13px 44px', borderRadius:26, cursor: prog.length?'pointer':'default', border:`1px solid ${prog.length?'#7af5c8':'rgba(255,255,255,0.15)'}`, background: prog.length?'rgba(122,245,200,0.14)':'transparent', color: prog.length?'#a6fff2':'rgba(255,255,255,0.3)', fontSize:15, letterSpacing:'0.14em' }}>PLAY ▸</div>
-              ) : (
-                <div onClick={()=>stopProg()} style={{ padding:'13px 44px', borderRadius:26, cursor:'pointer', border:'1px solid rgba(255,140,110,0.6)', background:'rgba(255,140,110,0.14)', color:'#ff8c6e', fontSize:15, letterSpacing:'0.14em' }}>STOP ■</div>
-              )}
+            {/* transport — Engage starts chord movement, Release stops it (drone continues via master) */}
+            <div style={{ display:'flex', justifyContent:'center', gap:18 }}>
+              <div onClick={()=>{ if(prog.length && !progRunning) runProg(); }}
+                style={{ padding:'13px 40px', borderRadius:26, cursor: (prog.length && !progRunning)?'pointer':'default',
+                  border:`1px solid ${progRunning?'#7af5c8':(prog.length?'rgba(122,245,200,0.7)':'rgba(255,255,255,0.15)')}`,
+                  background: progRunning?'rgba(122,245,200,0.22)':(prog.length?'rgba(122,245,200,0.1)':'transparent'),
+                  color: progRunning?'#a6fff2':(prog.length?'#a6fff2':'rgba(255,255,255,0.3)'), fontSize:15, letterSpacing:'0.14em',
+                  boxShadow: progRunning?'0 0 18px 2px rgba(122,245,200,0.4)':'none' }}>ENGAGE</div>
+              <div onClick={()=>{ if(progRunning) stopProg(); }}
+                style={{ padding:'13px 40px', borderRadius:26, cursor: progRunning?'pointer':'default',
+                  border:`1px solid ${progRunning?'rgba(255,140,110,0.7)':'rgba(255,255,255,0.12)'}`,
+                  background: progRunning?'rgba(255,140,110,0.12)':'transparent',
+                  color: progRunning?'#ff8c6e':'rgba(255,255,255,0.25)', fontSize:15, letterSpacing:'0.14em' }}>RELEASE</div>
             </div>
           </div>
         </div>
