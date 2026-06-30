@@ -103,10 +103,8 @@ export default function FieldPage() {
   // ---- field instances (rack-by-orb-id): the live orbs on the field ----
   // Each is { id (unique instance), engineType (recipe), label, colorKey }. Starts with one default Mosaic.
   type FieldOrb = { id: string; engineType: string; label: string; colorKey: any };
-  const [fieldOrbs, setFieldOrbs] = useState<FieldOrb[]>([
-    { id: 'mosaic_1', engineType: 'mosaic', label: 'Mosaic', colorKey: 'tunnel' },
-  ]);
-  const orbCounter = useRef<Record<string, number>>({ mosaic: 1 });
+  const [fieldOrbs, setFieldOrbs] = useState<FieldOrb[]>([]);  // blank field — add orbs to begin
+  const orbCounter = useRef<Record<string, number>>({});
   function mintOrbId(engineType: string): string {
     const n = (orbCounter.current[engineType] || 0) + 1;
     orbCounter.current[engineType] = n;
@@ -130,7 +128,7 @@ export default function FieldPage() {
     microcosmRemoveOrb(id);
     setFieldOrbs(prev => prev.filter(o => o.id !== id));
   }
-  const [selected, setSelected] = useState<string>('mosaic'); // TEST BHAIRAV
+  const [selected, setSelected] = useState<string>('');
   const [focused, setFocused] = useState<string | null>(null); // orb in focused (controls-beside) view
   const [focusShown, setFocusShown] = useState(false); // drives the in/out transition (lags focused)
   const [mixOpen, setMixOpen] = useState(false);   // mix desk visible
@@ -147,7 +145,6 @@ export default function FieldPage() {
   const [octave, setOctave] = useState(0);        // whole-keyboard register shift
   const lastTap = useRef<{ key:string; t:number }>({ key:'', t:0 });
   const [palette, setPalette] = useState('open');     // armed flavour palette (global)
-  const [pickerOpen, setPickerOpen] = useState(false);  // flavour picker visible
   const [createOpen, setCreateOpen] = useState(false);          // orb creation bloom
   const [createSrc, setCreateSrc] = useState<'synth'|'sample'|'livein'>('synth');
   const [createEngine, setCreateEngine] = useState<string | null>(null);  // selected engine type
@@ -156,7 +153,22 @@ export default function FieldPage() {
     const cat = ALL_ORBS.find(o => o.engineType === createEngine);
     const id = addFieldOrb(createEngine, cat?.label || createEngine, cat?.colorKey || 'tunnel');
     if (started.current && state==='playing') { microcosmAddOrb(id, createEngine, orbLevel(id)); microcosmEngineActive(id, true); microcosmEngineLevel(id, orbLevel(id)); }
-    setCreateEngine(null);   // engine resets; source stays sticky for fast repeat-add
+    setCreateEngine(null);
+    stopPreview();
+    setCreateOpen(false);   // auto-exit to field after adding
+  }
+  const PREVIEW_ID = 'preview_temp';
+  async function previewEngine(engineType: string) {
+    setCreateEngine(engineType);
+    await ensureStarted();
+    microcosmRemoveOrb(PREVIEW_ID);
+    microcosmAddOrb(PREVIEW_ID, engineType, 0.8);
+    microcosmEngineActive(PREVIEW_ID, true);
+    microcosmEngineLevel(PREVIEW_ID, 0.8);
+  }
+  function stopPreview() {
+    microcosmEngineActive(PREVIEW_ID, false);
+    microcosmRemoveOrb(PREVIEW_ID);
   }
   const [life, setLife] = useState(0.32);
   const [solo, setSolo] = useState(false);      // TEST SOLO
@@ -373,25 +385,11 @@ export default function FieldPage() {
     <main style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'radial-gradient(ellipse at 50% 28%, #10131f 0%, #070810 66%, #04050a 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
       <div style={{ position:'absolute', inset:0, opacity:0.6, pointerEvents:'none', backgroundImage:'radial-gradient(1px 1px at 20% 14%, rgba(255,255,255,0.5), transparent), radial-gradient(1px 1px at 88% 9%, rgba(255,255,255,0.45), transparent), radial-gradient(1px 1px at 94% 42%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 8% 46%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 50% 8%, rgba(255,255,255,0.3), transparent)' }} />
       <div style={{ position:'absolute', top:24, left:32, fontSize:21, letterSpacing:'0.6em', fontWeight:500 }}>H A A R</div>
-      <div style={{ position:'absolute', top:28, right:32, fontSize:13, fontWeight:500, color:'rgba(255,255,255,0.55)' }}>
-        {state==='playing' ? `${muted?'muted':'playing'} · ${count} active` : state==='stopped' ? 'stopped' : `field · ${count} active`}
-      </div>
 
 
-      {/* TEST SOLO: hear only selected orb (temporary, removable) */}
-      <div onClick={()=>{ const v=!soloRef.current; soloRef.current=v; setSolo(v); activateRack(); }}
-        style={{ position:'absolute', top:108, left:'50%', transform:'translateX(-50%)', zIndex:100, padding:'7px 16px', fontSize:13, cursor:'pointer', userSelect:'none', borderRadius:18,
-          background: solo ? 'rgba(122,245,200,0.25)' : 'rgba(255,255,255,0.06)', border:'0.5px solid rgba(255,255,255,0.2)',
-          color: solo ? '#fff' : 'rgba(255,255,255,0.5)' }}>
-        {solo ? 'SOLO on · only selected' : 'Solo off · all play'}
-      </div>
 
 
-      {/* TEST: add/remove field orbs (top-left). +=add Mosaic instance, −=remove last. */}
-      <div style={{ position:'absolute', top:62, left:32, zIndex:100, display:'flex', alignItems:'center', gap:14, background:'rgba(255,255,255,0.08)', border:'0.5px solid rgba(255,255,255,0.2)', borderRadius:20, padding:'7px 16px' }}>
-        <span style={{ fontSize:13, color:'rgba(255,255,255,0.7)', minWidth:54, textAlign:'center' }}>{count} orbs</span>
-        <span onClick={()=>setCreateOpen(true)} style={{ cursor:'pointer', fontSize:18, color:'#a6fff2', userSelect:'none' }}>+</span>
-      </div>
+
 
       {orbs.map((o) => {
         if (focused === o.id) return null;   // hide the focused orb in the field — it lives in the back
@@ -638,11 +636,9 @@ export default function FieldPage() {
         );
       })()}
 
-      <div style={{ position:'absolute', top: fh - 12, left:'50%', transform:'translateX(-50%)', display:'flex', alignItems:'center', gap:8, opacity:0.4, cursor:'pointer' }}>
-        <div style={{ width:24, height:24, borderRadius:'50%', border:'0.5px dashed rgba(255,255,255,0.4)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:200 }}>+</div>
-        <span style={{ fontSize:13, color:'rgba(255,255,255,0.5)' }}>add machine</span>
-      </div>
-
+      <div onClick={()=>setCreateOpen(true)} title="add orb" style={{ position:'absolute', top: fh - 30, left:'50%', transform:'translateX(-50%)', width:18, height:18, borderRadius:'50%', cursor:'pointer', background:'radial-gradient(circle, #ffffff 0%, #e6d2ff 35%, rgba(216,166,255,0.5) 60%, transparent 75%)', boxShadow:'0 0 16px 5px rgba(216,166,255,0.9), 0 0 36px 12px rgba(216,166,255,0.5), 0 0 60px 20px rgba(216,166,255,0.25)', transition:'transform 0.25s, box-shadow 0.25s' }}
+        onMouseEnter={(e)=>{ (e.currentTarget as HTMLElement).style.transform='translateX(-50%) scale(1.4)'; (e.currentTarget as HTMLElement).style.boxShadow='0 0 24px 8px rgba(216,166,255,1), 0 0 50px 18px rgba(216,166,255,0.7), 0 0 80px 28px rgba(216,166,255,0.35)'; }}
+        onMouseLeave={(e)=>{ (e.currentTarget as HTMLElement).style.transform='translateX(-50%) scale(1)'; (e.currentTarget as HTMLElement).style.boxShadow='0 0 16px 5px rgba(216,166,255,0.9), 0 0 36px 12px rgba(216,166,255,0.5), 0 0 60px 20px rgba(216,166,255,0.25)'; }} />
       {/* MIX DESK — slides up over the lower portion; orbs stay faint above */}
       {mixOpen && (
         <div style={{ position:'absolute', inset:0, zIndex:170 }}>
@@ -847,20 +843,6 @@ export default function FieldPage() {
             </div>
           </div>
 
-          {/* FLAVOUR chip (centre) */}
-          <div style={{ display:'flex', flexDirection:'column', alignItems:'center', paddingBottom:6 }}>
-            <div onClick={()=>setPickerOpen(true)}
-              style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 18px', cursor:'pointer',
-                border:`0.5px solid ${palette==='open'?'rgba(255,255,255,0.22)':flavourOf(palette).col+'77'}`,
-                borderRadius:20, background: palette==='open'?'rgba(255,255,255,0.04)':flavourOf(palette).col+'12' }}>
-              {palette!=='open' && <div style={{ width:7, height:7, borderRadius:'50%', background:flavourOf(palette).col }} />}
-              <span style={{ fontSize:13, letterSpacing:'0.04em', color: palette==='open'?'rgba(255,255,255,0.7)':flavourOf(palette).col }}>
-                {palette==='open' ? 'Flavour' : `Flavour · ${flavourOf(palette).name}`}
-              </span>
-              <span style={{ fontSize:11.5, color:'rgba(255,255,255,0.35)' }}>▾</span>
-            </div>
-          </div>
-
           {/* SYSTEM */}
           <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end' }}>
             <div style={{ ...zlabel, alignSelf:'flex-end' }}>SYSTEM</div>
@@ -905,40 +887,12 @@ export default function FieldPage() {
         </div>
         )}
       </div>
-      {/* FLAVOUR PICKER — blooms up from the chip */}
-      {pickerOpen && (
-        <div onClick={()=>setPickerOpen(false)}
-          style={{ position:'absolute', inset:0, zIndex:200, background:'rgba(2,3,8,0.55)', backdropFilter:'blur(4px)',
-            display:'flex', alignItems:'flex-end', justifyContent:'center', paddingBottom:'32vh' }}>
-          <div onClick={(e)=>e.stopPropagation()}
-            style={{ background:'rgba(14,16,26,0.94)', border:'0.5px solid rgba(255,255,255,0.16)', borderRadius:22,
-              padding:'24px 30px', backdropFilter:'blur(10px)' }}>
-            <div style={{ fontSize:12.5, letterSpacing:'0.26em', color:'rgba(255,255,255,0.35)', marginBottom:22, textAlign:'center' }}>FLAVOUR — THE FIELD'S TONAL WORLD</div>
-            <div style={{ display:'flex', gap:26 }}>
-              {FLAVOURS.map(f => {
-                const sel = f.id===palette;
-                return (
-                  <div key={f.id} onClick={()=>{ setPalette(f.id); microcosmArmedPalette(f.id); setTimeout(()=>setPickerOpen(false),200); }}
-                    style={{ width:100, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:10, textAlign:'center' }}>
-                    <div style={{ width:60, height:60, borderRadius:'50%',
-                      background:`radial-gradient(circle, ${f.col} 0%, ${f.col}66 50%, transparent 74%)`,
-                      boxShadow: sel ? `0 0 0 2px rgba(255,255,255,0.45)` : 'none', transition:'transform 0.18s' }} />
-                    <div style={{ fontSize:12, color: sel?'#fff':'rgba(255,255,255,0.8)' }}>{f.name}</div>
-                    <div style={{ fontSize:13, color:'rgba(255,255,255,0.4)', lineHeight:1.3 }}>{f.desc}</div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.3)', marginTop:20, textAlign:'center' }}>arms the palette · turn an orb's amount up to hear it</div>
-          </div>
-        </div>
-      )}
       {/* ORB CREATION — full-screen source x engine */}
       {createOpen && (
         <div style={{ position:'fixed', inset:0, zIndex:300, background:'radial-gradient(ellipse at 50% 32%, #0c1018 0%, #06070d 60%, #030409 100%)', display:'flex', flexDirection:'column', fontFamily:'Rajdhani, sans-serif' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'34px 56px 0' }}>
             <span style={{ fontSize:15, letterSpacing:'0.32em', color:'#d8a6ff', fontFamily:'monospace' }}>NEW ORB</span>
-            <div onClick={()=>setCreateOpen(false)} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
+            <div onClick={()=>{ stopPreview(); setCreateEngine(null); setCreateOpen(false); }} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
           </div>
           <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 56px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
             <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:24, fontFamily:'monospace', textAlign:'center' }}>SOURCE</div>
@@ -956,7 +910,7 @@ export default function FieldPage() {
                 const sel = createEngine===e.engineType;
                 const col = ORB_COLORS[e.colorKey] || ORB_COLORS['tunnel'];
                 return (
-                  <div key={e.engineType} onClick={()=>setCreateEngine(e.engineType)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12, width:104, cursor:'pointer', opacity: sel?1:0.82, transition:'opacity 0.2s, transform 0.2s', transform: sel?'scale(1.08)':'scale(1)' }}>
+                  <div key={e.engineType} onClick={()=>previewEngine(e.engineType)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12, width:104, cursor:'pointer', opacity: sel?1:0.82, transition:'opacity 0.2s, transform 0.2s', transform: sel?'scale(1.08)':'scale(1)' }}>
                     <div style={{ width: sel?66:58, height: sel?66:58, borderRadius:'50%', background:`radial-gradient(circle, ${col.core}, ${col.mid}55 52%, transparent 76%)`, boxShadow: sel?`0 0 30px 6px ${col.mid}99`:`0 0 12px 2px ${col.mid}33`, border: sel?`2px solid ${col.core}`:'2px solid transparent' }} />
                     <div style={{ fontSize:15, letterSpacing:'0.06em', color: sel?col.core:'rgba(255,255,255,0.82)' }}>{e.label}{sel?' ✦':''}</div>
                   </div>
