@@ -824,16 +824,22 @@ export default function FieldPage() {
             {(() => {
               const li = NOTES.indexOf(lockKey);
               const cells = [];
+              const cIdx = NOTES.indexOf('C');
               for (let off = -12; off <= 12; off++) {
-                let idx = li + off;
-                idx = ((idx % 12) + 12) % 12;
+                let raw = li + off;
+                let idx = ((raw % 12) + 12) % 12;
                 const n = NOTES[idx];
                 const sharp = n.includes('#');
+                // absolute octave number: base octave 4 at register 0, locked root.
+                // semitone position of this cell relative to a fixed C4 = (li - cIdx) + off + octave*12
+                const semisFromC4 = (li - cIdx) + off + octave * 12;
+                const octNum = 4 + Math.floor(semisFromC4 / 12);
+                const noteLabel = n + octNum;
                 const isLock = off === 0;
                 const isPlay = (off === playSemi);   // off IS the semitone distance from root
                 const sz = isLock ? 34 : sharp ? 17 : 26;
                 cells.push(
-                  <div key={off} onClick={()=>tapNote(n, off)} title={n}
+                  <div key={off} onClick={()=>tapNote(n, off)} title={noteLabel}
                     style={{ width:sz, height:sz, borderRadius:'50%', cursor:'pointer', flexShrink:0,
                       display:'flex', alignItems:'center', justifyContent:'center',
                       fontSize: isLock?12:sharp?8:10, fontWeight: (isLock||isPlay)?700:500,
@@ -846,7 +852,7 @@ export default function FieldPage() {
                             ? 'radial-gradient(circle, rgba(120,130,160,0.5) 0%, rgba(60,68,92,0.22) 55%, transparent 80%)'
                             : 'radial-gradient(circle, rgba(234,240,255,0.42) 0%, rgba(170,192,232,0.14) 55%, transparent 80%)',
                       color: isLock?'#2a2008':isPlay?'#1a2030':sharp?'rgba(215,222,238,0.6)':'#e8eeff' }}>
-                    {(isLock||isPlay||!sharp) ? n : ''}
+                    {(isLock||isPlay||!sharp) ? noteLabel : ''}
                   </div>
                 );
               }
