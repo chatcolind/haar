@@ -170,6 +170,45 @@ export default function FieldPage() {
     microcosmEngineActive(PREVIEW_ID, false);
     microcosmRemoveOrb(PREVIEW_ID);
   }
+  // ---- SAVE / RECALL songs (Universe) — localStorage ----
+  const [songMenu, setSongMenu] = useState<null | 'save' | 'open'>(null);
+  const [songName, setSongName] = useState('');
+  function listSongs(): {name:string;ts:number}[] {
+    try { return JSON.parse(localStorage.getItem('haar_songs_index') || '[]'); } catch { return []; }
+  }
+  function saveSong(name: string) {
+    const orbs = fieldOrbs.map(o => ({
+      id:o.id, engineType:o.engineType, label:o.label, colorKey:o.colorKey,
+      vol: volRef.current[o.id] ?? 0.7, dens: densRef.current[o.id] ?? 0.5,
+      amount: amountRef.current[o.id] ?? 0, flavour: flavourRef.current[o.id] ?? 'open',
+      mute: !!muteRef.current[o.id], solo: !!soloSetRef.current[o.id],
+      pan: panRef.current[o.id] ?? 0, eq: eqRef.current[o.id] ?? {lo:0,mid:0,hi:0},
+      xy: xyRef.current[o.id] ?? {x:0.5,y:0.5},
+    }));
+    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs }));
+    const idx = listSongs().filter(s=>s.name!==name); idx.push({name, ts:Date.now()});
+    localStorage.setItem('haar_songs_index', JSON.stringify(idx));
+    setSongMenu(null); setSongName('');
+  }
+  async function loadSong(name: string) {
+    let data; try { data = JSON.parse(localStorage.getItem('haar_song_'+name) || ''); } catch { return; }
+    if (!data?.orbs) return;
+    fieldOrbs.forEach(o => removeFieldOrb(o.id));
+    await ensureStarted();
+    const restored: FieldOrb[] = [];
+    for (const o of data.orbs) {
+      volRef.current[o.id]=o.vol; densRef.current[o.id]=o.dens; amountRef.current[o.id]=o.amount;
+      flavourRef.current[o.id]=o.flavour; muteRef.current[o.id]=o.mute; soloSetRef.current[o.id]=o.solo;
+      panRef.current[o.id]=o.pan; eqRef.current[o.id]=o.eq; xyRef.current[o.id]=o.xy;
+      const n = parseInt((o.id.split('_')[1]||'0')); orbCounter.current[o.engineType]=Math.max(orbCounter.current[o.engineType]||0, n);
+      restored.push({ id:o.id, engineType:o.engineType, label:o.label, colorKey:o.colorKey });
+      microcosmAddOrb(o.id, o.engineType, o.vol);
+      microcosmEngineActive(o.id, true); microcosmEngineLevel(o.id, o.vol);
+      microcosmEnginePan(o.id, o.pan); microcosmEngineEQ(o.id, o.eq.lo, o.eq.mid, o.eq.hi);
+      microcosmGrainDensity(o.id, o.dens); microcosmEngineAmount(o.id, o.amount); microcosmOrbPalette(o.id, o.flavour);
+    }
+    setFieldOrbs(restored); setSongMenu(null);
+  }
   const [life, setLife] = useState(0.32);
   const [solo, setSolo] = useState(false);      // TEST SOLO
   const soloRef = useRef(false);                // TEST SOLO
@@ -383,6 +422,12 @@ export default function FieldPage() {
 
   return (
     <main style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'radial-gradient(ellipse at 50% 28%, #10131f 0%, #070810 66%, #04050a 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
+      <style>{`
+        .haar-lbl { opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
+        .haar-hover:hover .haar-lbl { opacity: 0.85; }
+        .haar-sectionlbl { opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
+        .haar-section:hover .haar-sectionlbl { opacity: 1; }
+      `}</style>
       <div style={{ position:'absolute', inset:0, opacity:0.6, pointerEvents:'none', backgroundImage:'radial-gradient(1px 1px at 20% 14%, rgba(255,255,255,0.5), transparent), radial-gradient(1px 1px at 88% 9%, rgba(255,255,255,0.45), transparent), radial-gradient(1px 1px at 94% 42%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 8% 46%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 50% 8%, rgba(255,255,255,0.3), transparent)' }} />
       <div style={{ position:'absolute', top:24, left:32, fontSize:21, letterSpacing:'0.6em', fontWeight:500 }}>H A A R</div>
 
@@ -773,7 +818,6 @@ export default function FieldPage() {
 
         {/* TIER 1 — full-width keyboard */}
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
-          <div style={{ ...zlabel, marginBottom:10 }}>KEY · double-tap to lock root · tap to play</div>
           <div style={{ display:'flex', alignItems:'center', gap:4, maxWidth:'100%' }}>
             <div onClick={()=>{ const o=Math.max(-3,octave-1); setOctave(o); playAt(playNote, playSemi); }}
               style={{ fontSize:15, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none', padding:'0 6px' }}>◂</div>
@@ -818,34 +862,52 @@ export default function FieldPage() {
         <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:20 }}>
 
           {/* FIELD */}
-          <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-start' }}>
-            <div style={zlabel}>FIELD</div>
+          <div className="haar-section" style={{ display:'flex', flexDirection:'column', alignItems:'flex-start' }}>
+            <div className="haar-sectionlbl" style={zlabel}>FIELD</div>
             <div style={{ display:'flex', alignItems:'flex-end', gap:30 }}>
-              <div style={{ textAlign:'center', cursor:'pointer' }}>
-                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(174,240,255,0.5)', background:'rgba(174,240,255,0.06)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <div className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(174,240,255,0.5)', background:'rgba(174,240,255,0.06)', boxShadow:'0 0 18px 3px rgba(174,240,255,0.4), inset 0 0 14px rgba(174,240,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="24" height="24" viewBox="0 0 20 20"><g stroke="#cdf5ff" strokeWidth="1.3" opacity="0.85"><line x1="10" y1="2" x2="10" y2="18"/><line x1="3" y1="6" x2="17" y2="14"/><line x1="3" y1="14" x2="17" y2="6"/></g></svg>
                 </div>
-                <div style={{ fontSize:12.5, color:'#bfe8f5', marginTop:8, opacity:0.85 }}>Freeze</div>
+                <div className="haar-lbl" style={{ fontSize:12.5, color:'#bfe8f5', marginTop:8 }}>Freeze</div>
               </div>
-              <div style={{ textAlign:'center', cursor:'pointer' }}>
-                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(255,214,166,0.5)', background:'rgba(255,214,166,0.06)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <div className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(255,214,166,0.5)', background:'rgba(255,214,166,0.06)', boxShadow:'0 0 18px 3px rgba(255,214,166,0.4), inset 0 0 14px rgba(255,214,166,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="24" height="24" viewBox="0 0 20 20"><g fill="#ffe6c4"><circle cx="7" cy="6" r="1.7"/><circle cx="13" cy="7" r="1.7"/><circle cx="8" cy="13" r="1.7"/><circle cx="13" cy="13" r="1.7"/><circle cx="10" cy="10" r="1.7"/></g></svg>
                 </div>
-                <div style={{ fontSize:12.5, color:'#ffdcb0', marginTop:8, opacity:0.85 }}>Perturb</div>
+                <div className="haar-lbl" style={{ fontSize:12.5, color:'#ffdcb0', marginTop:8 }}>Perturb</div>
               </div>
-              <div style={{ textAlign:'center', cursor:'pointer' }}>
+              <div className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ position:'relative', width:62, height:62 }}>
                   <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:`radial-gradient(circle, rgba(216,166,255,${0.4+life*0.5}) 0%, rgba(138,61,245,${0.15+life*0.3}) 50%, transparent 72%)`, filter:'blur(2px)' }} />
                   <div style={{ position:'absolute', inset:16, borderRadius:'50%', background:'#fff', opacity:0.9, filter:'blur(1px)' }} />
                 </div>
-                <div style={{ fontSize:12.5, color:'#e0c4ff', marginTop:4 }}>Life · {Math.round(life*100)}%</div>
+                <div className="haar-lbl" style={{ fontSize:12.5, color:'#e0c4ff', marginTop:4 }}>Life · {Math.round(life*100)}%</div>
               </div>
             </div>
           </div>
 
+          {/* UNIVERSES — absolutely centred under middle C */}
+          <div className="haar-section" style={{ position:'absolute', left:'50%', bottom:0, transform:'translateX(-50%)', display:'flex', flexDirection:'column', alignItems:'center' }}>
+            <div className="haar-sectionlbl" style={{ ...zlabel, alignSelf:'center' }}>UNIVERSES</div>
+            <div style={{ display:'flex', alignItems:'flex-end', gap:30 }}>
+              <div onClick={()=>setSongMenu('save')} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(122,245,200,0.5)', background:'rgba(122,245,200,0.06)', boxShadow:'0 0 18px 3px rgba(122,245,200,0.4), inset 0 0 14px rgba(122,245,200,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#7af5c8" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M4 4h9l3 3v9H4z"/><path d="M7 4v4h6V4M7 16v-5h6v5" /></g></svg>
+                </div>
+                <div className="haar-lbl" style={{ fontSize:12.5, color:'#a6fff2', marginTop:8 }}>Save</div>
+              </div>
+              <div onClick={()=>setSongMenu('open')} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(216,166,255,0.5)', background:'rgba(216,166,255,0.06)', boxShadow:'0 0 18px 3px rgba(216,166,255,0.4), inset 0 0 14px rgba(216,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#d8a6ff" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M3 5h5l2 2h7v9H3z"/></g></svg>
+                </div>
+                <div className="haar-lbl" style={{ fontSize:12.5, color:'#e0bfff', marginTop:8 }}>Open</div>
+              </div>
+            </div>
+          </div>
           {/* SYSTEM */}
-          <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end' }}>
-            <div style={{ ...zlabel, alignSelf:'flex-end' }}>SYSTEM</div>
+          <div className="haar-section" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end' }}>
+            <div className="haar-sectionlbl" style={{ ...zlabel, alignSelf:'flex-end' }}>SYSTEM</div>
             <div style={{ display:'flex', alignItems:'flex-end', gap:26 }}>
               {[
                 { k:'Source', col:'rgba(255,216,107,0.5)', bg:'rgba(255,216,107,0.06)', dot:'#ffd86b' },
@@ -853,22 +915,22 @@ export default function FieldPage() {
                 { k:'Rec',    col:'rgba(224,80,58,0.5)',   bg:'rgba(224,80,58,0.06)',   dot:'#ff7a5a' },
                 { k:'Mix',    col:'rgba(170,196,255,0.5)', bg:'rgba(170,196,255,0.06)', dot:'#aac4ff' },
               ].map(u => (
-                <div key={u.k} onClick={()=>{ if(u.k==='Mix') openMix(); }} style={{ textAlign:'center', cursor:'pointer' }}>
-                  <div style={{ width:44, height:44, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                <div key={u.k} onClick={()=>{ if(u.k==='Mix') openMix(); }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                  <div style={{ width:44, height:44, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, boxShadow:`0 0 16px 3px ${u.dot}55, inset 0 0 12px ${u.dot}22`, display:'flex', alignItems:'center', justifyContent:'center' }}>
                     <div style={{ width:7, height:7, borderRadius:'50%', background:u.dot }} />
                   </div>
-                  <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.6)', marginTop:8 }}>{u.k}</div>
+                  <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.6)', marginTop:8 }}>{u.k}</div>
                 </div>
               ))}
               <div style={{ width:1, height:44, background:'rgba(255,255,255,0.1)' }} />
-              <div style={{ textAlign:'center' }}>
+              <div className="haar-hover" style={{ textAlign:'center' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'2px solid rgba(122,245,200,0.4)', background:'radial-gradient(circle, rgba(122,245,200,0.45) 0%, transparent 70%)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
                   <div style={{ fontSize:14, fontWeight:700 }}>92</div>
                   <div style={{ fontSize:10, color:'#9affc8' }}>BPM</div>
                 </div>
-                <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.5)', marginTop:8 }}>Tempo</div>
+                <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.5)', marginTop:8 }}>Tempo</div>
               </div>
-              <div style={{ textAlign:'center' }}>
+              <div className="haar-hover" style={{ textAlign:'center' }}>
                 <div onClick={()=>{ if(state==='playing') doStop(); else doStart(); }}
                   title="Start / Stop  (spacebar)"
                   style={{ width:56, height:56, borderRadius:'50%', cursor:'pointer',
@@ -880,7 +942,7 @@ export default function FieldPage() {
                     : <div style={{ width:0, height:0, borderLeft:'15px solid #fff', borderTop:'9px solid transparent', borderBottom:'9px solid transparent', marginLeft:4 }} /> /* play triangle */
                   }
                 </div>
-                <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.55)', marginTop:8, letterSpacing:'0.05em' }}>{state==='playing' ? 'Stop' : 'Start'}</div>
+                <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.55)', marginTop:8, letterSpacing:'0.05em' }}>{state==='playing' ? 'Stop' : 'Start'}</div>
               </div>
             </div>
           </div>
@@ -921,6 +983,44 @@ export default function FieldPage() {
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 56px 44px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
             <span style={{ fontSize:12, letterSpacing:'0.06em', color:'rgba(255,255,255,0.3)', fontFamily:'monospace' }}>source stays selected · add as many as you like</span>
             <div onClick={()=>doCreateOrb()} style={{ padding:'15px 52px', borderRadius:28, cursor: createEngine?'pointer':'default', border:`1px solid ${createEngine?'#7af5c8':'rgba(255,255,255,0.15)'}`, background: createEngine?'rgba(122,245,200,0.14)':'transparent', color: createEngine?'#a6fff2':'rgba(255,255,255,0.3)', fontSize:16, letterSpacing:'0.16em' }}>ADD ORB</div>
+          </div>
+        </div>
+      )}
+      {/* SAVE / OPEN song dialogs */}
+      {songMenu && (
+        <div onClick={()=>setSongMenu(null)} style={{ position:'fixed', inset:0, zIndex:320, background:'rgba(4,5,10,0.7)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'Rajdhani, sans-serif' }}>
+          <div onClick={(e)=>e.stopPropagation()} style={{ width:440, maxWidth:'90vw', background:'rgba(14,16,26,0.97)', border:'0.5px solid rgba(255,255,255,0.14)', borderRadius:18, padding:'28px 30px' }}>
+            {songMenu==='save' ? (
+              <>
+                <div style={{ fontSize:12, letterSpacing:'0.2em', color:'#7af5c8', fontFamily:'monospace', marginBottom:20 }}>SAVE UNIVERSE</div>
+                <input autoFocus value={songName} onChange={(e)=>setSongName(e.target.value)} placeholder="name this universe"
+                  onKeyDown={(e)=>{ if(e.key==='Enter' && songName.trim()) saveSong(songName.trim()); }}
+                  style={{ width:'100%', boxSizing:'border-box', padding:'13px 16px', borderRadius:10, background:'rgba(255,255,255,0.05)', border:'0.5px solid rgba(255,255,255,0.2)', color:'#fff', fontSize:16, outline:'none', marginBottom:22 }} />
+                <div style={{ display:'flex', justifyContent:'flex-end', gap:16 }}>
+                  <span onClick={()=>setSongMenu(null)} style={{ fontSize:14, color:'rgba(255,255,255,0.4)', cursor:'pointer', padding:'8px 0' }}>cancel</span>
+                  <span onClick={()=>{ if(songName.trim()) saveSong(songName.trim()); }} style={{ fontSize:14, letterSpacing:'0.08em', color: songName.trim()?'#a6fff2':'rgba(255,255,255,0.3)', cursor: songName.trim()?'pointer':'default', border:`1px solid ${songName.trim()?'#7af5c8':'rgba(255,255,255,0.15)'}`, borderRadius:20, padding:'8px 24px' }}>SAVE</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize:12, letterSpacing:'0.2em', color:'#d8a6ff', fontFamily:'monospace', marginBottom:20 }}>OPEN UNIVERSE</div>
+                {listSongs().length===0 ? (
+                  <div style={{ fontSize:14, color:'rgba(255,255,255,0.4)', padding:'10px 0 20px' }}>no saved universes yet</div>
+                ) : (
+                  <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:'46vh', overflowY:'auto', marginBottom:18 }}>
+                    {listSongs().sort((a,b)=>b.ts-a.ts).map(sg => (
+                      <div key={sg.name} onClick={()=>loadSong(sg.name)} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'13px 16px', borderRadius:10, cursor:'pointer', background:'rgba(255,255,255,0.03)', border:'0.5px solid rgba(255,255,255,0.1)' }}>
+                        <span style={{ fontSize:16, color:'#e0bfff' }}>{sg.name}</span>
+                        <span style={{ fontSize:11, color:'rgba(255,255,255,0.35)' }}>{new Date(sg.ts).toLocaleDateString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display:'flex', justifyContent:'flex-end' }}>
+                  <span onClick={()=>setSongMenu(null)} style={{ fontSize:14, color:'rgba(255,255,255,0.4)', cursor:'pointer', padding:'8px 0' }}>close</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
