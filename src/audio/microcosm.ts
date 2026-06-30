@@ -178,11 +178,22 @@ export class Microcosm {
 
   private _currentEngine: string = '';
   spawnGrain(spec: GrainSpec): void {
-    // safety: clamp |rate| so high notes * up-pitched grains can't alias into crackle
-    const r = spec.rate;
-    const capped = Math.sign(r || 1) * Math.min(Math.abs(r), 2.2);
+    // per-orb HOME PITCH: transpose this orb's grains by its home semitone offset.
+    // home ratio is an EXACT consonant interval (octave/fifth/etc) - never clamp it, that detunes.
+    // detune (spec.rate's deviation from 1) is a small wobble; clamp only that to avoid alias.
+    const home = this.engineHome[this._currentEngine] ?? 0;
+    const homeRatio = Math.pow(2, home / 12);
+    // separate the detune wobble from unity, clamp the wobble modestly, then apply exact home
+    const detune = spec.rate;                       // e.g. ~0.94..1.06 normally
+    const detuneClamped = Math.sign(detune || 1) * Math.min(Math.abs(detune), 1.5);
+    const r = detuneClamped * homeRatio;            // exact interval * gentle wobble
+    // final safety only for extreme up-stacks (e.g. +2oct * wide detune): cap high but generous
+    const capped = Math.sign(r || 1) * Math.min(Math.abs(r), 4.2);
     this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine });
   }
+  // per-orb home pitch (semitones, absolute home; conductor transpose added later)
+  private engineHome: Record<string, number> = {};
+  setOrbHome(id: string, semis: number): void { this.engineHome[id] = semis; }
   setFreeze(on: boolean): void { this.node?.port.postMessage({ type: 'freeze', value: on }); }
   clearGrains(): void { this.node?.port.postMessage({ type: 'clearGrains' }); }
 
@@ -227,6 +238,7 @@ export class Microcosm {
     if (this.engineTickAccum[orbId] === undefined) this.engineTickAccum[orbId] = 0;
     if (this.engineDensity[orbId] === undefined) this.engineDensity[orbId] = 0.5;  // seed per-orb density
     if (this.enginePalette[orbId] === undefined) this.enginePalette[orbId] = 'open';  // seed per-orb palette
+    if (this.engineHome[orbId] === undefined) this.engineHome[orbId] = 0;  // seed per-orb home pitch (0 = no transpose)
   }
   // Remove an orb instance from the rack entirely.
   removeOrb(orbId: string): void {

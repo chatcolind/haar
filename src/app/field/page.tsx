@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq,
-  microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmEngineAmount,
+  microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount,
 } from '../../audio/engine';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
@@ -120,6 +120,7 @@ export default function FieldPage() {
     soloSetRef.current[id] = false;
     panRef.current[id] = 0;
     eqRef.current[id] = { lo:0, mid:0, hi:0 };
+    offsetRef.current[id] = 0;  // born at root (no transpose)
     setFieldOrbs(prev => [...prev, { id, engineType, label, colorKey }]);
     return id;
   }
@@ -252,6 +253,11 @@ export default function FieldPage() {
     return fxRef.current[orbId];
   }
   const flavourRef = useRef<Record<string, string>>({});  // per-orb palette id (UI per-orb; engine still global)
+  // per-orb REGISTER: interval offset in semitones from the root (consonant set). Default 0 = root.
+  const offsetRef = useRef<Record<string, number>>({});
+  function applyHome(id: string) {
+    microcosmOrbHome(id, offsetRef.current[id] ?? 0);
+  }
   const panRef = useRef<Record<string, number>>({});    // per-channel pan (-1..1, 0=centre)
   const eqRef = useRef<Record<string, {lo:number;mid:number;hi:number}>>({}); // per-channel EQ dB (-12..12, 0=flat)
   const [expandedChannel, setExpandedChannel] = useState<string|null>(null); // mixer channel expanded sideways
@@ -472,6 +478,37 @@ export default function FieldPage() {
               selected={true} xy={xyMap[focused]} onSelect={handleBackTap} onXY={handleXY} hideLabel />
             <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 150, textAlign:'center', fontSize:14, letterSpacing:'0.16em', color:'#f4ecff', zIndex:3 }}>{(fo?.label || focused).toUpperCase()}</div>
             <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 174, textAlign:'center', fontSize:13, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
+            {/* ORB REGISTER — interval offset from root (consonant set). Orb-tinted. */}
+            {(() => {
+              const oc = ORB_COLORS[fo?.colorKey || 'tunnel'] || ORB_COLORS['tunnel'];
+              const cur = offsetRef.current[focused] ?? 0;
+              const INTERVALS = [
+                { semis:-24, lbl:'-2 oct' }, { semis:-12, lbl:'-oct' },
+                { semis:-7, lbl:'-5th' }, { semis:-5, lbl:'-4th' },
+                { semis:0, lbl:'root' },
+                { semis:5, lbl:'+4th' }, { semis:7, lbl:'+5th' },
+                { semis:12, lbl:'+oct' }, { semis:24, lbl:'+2 oct' },
+              ];
+              return (
+                <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 206, display:'flex', justifyContent:'center', alignItems:'center', flexWrap:'wrap', gap:10, maxWidth:620, margin:'0 auto', zIndex:50, pointerEvents:'auto' }}>
+                  {INTERVALS.map(iv => {
+                    const sel = cur === iv.semis;
+                    return (
+                      <div key={iv.semis} onClick={()=>{ offsetRef.current[focused]=iv.semis; applyHome(focused); forceOrb(x=>x+1); }}
+                        title={iv.lbl}
+                        style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:5, cursor:'pointer', opacity: sel?1:0.5, transition:'opacity 0.2s, transform 0.2s', transform: sel?'scale(1.12)':'scale(1)' }}>
+                        <div style={{ width: sel?30:22, height: sel?30:22, borderRadius:'50%',
+                          boxShadow: sel?`0 0 16px 3px ${oc.mid}aa`:`0 0 8px 1px ${oc.mid}33`,
+                          background: sel
+                            ? `radial-gradient(circle, ${oc.core} 0%, ${oc.mid}77 55%, transparent 80%)`
+                            : `radial-gradient(circle, ${oc.mid}44 0%, transparent 74%)` }} />
+                        <div style={{ fontSize:10.5, letterSpacing:'0.04em', color: sel?oc.core:'rgba(255,255,255,0.55)' }}>{iv.lbl}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {/* LEFT COLUMN — level + voices (distributed) */}
             <div style={{ position:'absolute', left:'3%', top:64, bottom: dim.h*0.30 + 16, width:'26%', maxWidth:340, boxSizing:'border-box', paddingLeft:18, overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
