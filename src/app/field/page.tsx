@@ -8,7 +8,7 @@ import {
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
   microcosmClick, microcosmMetroLevel, microcosmAudioTime,
-  microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount,
+  microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
 
@@ -539,6 +539,54 @@ export default function FieldPage() {
     });
     const v = xyRef.current[id] ?? { x:0.5, y:0.5 };
     microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
+  }
+  const [swelling, setSwelling] = useState(false);
+  const swellRAF = useRef<number>(0);
+  // SWELL: one-shot gust — ramp grain+pitch spread up fast, then ease back to the current XY baseline.
+  function doSwell() {
+    const id = focused ?? selected;
+    const base = (id && xyRef.current[id]) ? xyRef.current[id] : { x: 0.5, y: 0.5 };
+    const densBase = (id && densRef.current[id] != null) ? densRef.current[id] : 0.5;
+    // capture per-orb level baselines so we can crescendo the WHOLE field and restore
+    const orbs = fieldOrbs.map(o => o.id);
+    const levBase: Record<string, number> = {};
+    orbs.forEach(oid => { levBase[oid] = orbLevel(oid); });
+    cancelAnimationFrame(swellRAF.current);
+    setSwelling(true);
+    const t0 = performance.now();
+    // FILTER WAVE — slow deep dive, upward overshoot past normal, slow settle home. ~6.5s.
+    // Phase 1 (dive):     from resting cutoff, glide slowly DOWN to a deep low (Q sings). ~2.6s
+    // Phase 2 (surge):    upward force sweeps UP and OVERSHOOTS past normal to wide open. ~1.4s
+    // Phase 3 (return):   slow glide back DOWN from the overshoot to the resting cutoff. ~2.4s
+    const NEUTRAL = 8000;     // resting cutoff
+    const LOW = 70;           // deep low point of the dive (much lower)
+    const HIGH = 5000;        // overshoot ceiling (lower)
+    const dive = 2600, surge = 1400, ret = 2400, total = dive + surge + ret;
+    const Qbase = 1, Qpeak = 13;
+    const step = () => {
+      const e = performance.now() - t0;
+      let hz: number, q: number;
+      if (e < dive) {
+        const k = e / dive;
+        const ec = k * k;                                  // slow start, accelerating down
+        hz = NEUTRAL * Math.pow(LOW / NEUTRAL, ec);        // NEUTRAL -> LOW
+        q = Qbase + (Qpeak - Qbase) * k;                   // resonance builds into the dive
+      } else if (e < dive + surge) {
+        const k = (e - dive) / surge;
+        const ec = 1 - Math.pow(1 - k, 3);                 // strong ease-out = upward force
+        hz = LOW * Math.pow(HIGH / LOW, ec);               // LOW -> HIGH (overshoots past NEUTRAL)
+        q = Qpeak + (Qbase - Qpeak) * ec;                  // resonance releases as it opens
+      } else {
+        const k = Math.min(1, (e - dive - surge) / ret);
+        const ec = 1 - Math.pow(1 - k, 2);                 // slow glide back
+        hz = HIGH * Math.pow(NEUTRAL / HIGH, ec);          // HIGH -> NEUTRAL (settle home)
+        q = Qbase;
+      }
+      microcosmSweep(hz, q);
+      if (e < total) { swellRAF.current = requestAnimationFrame(step); }
+      else { microcosmResetFilter(); setSwelling(false); }
+    };
+    swellRAF.current = requestAnimationFrame(step);
   }
   function handleXY(nx: number, ny: number) {
     const id = selected;
@@ -1116,11 +1164,11 @@ export default function FieldPage() {
                 </div>
                 <div className="haar-lbl" style={{ fontSize:12.5, color:'#f0d0a0', marginTop:8 }}>Tape</div>
               </div>
-              <div className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
-                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(255,214,166,0.5)', background:'rgba(255,214,166,0.06)', boxShadow:'0 0 18px 3px rgba(255,214,166,0.4), inset 0 0 14px rgba(255,214,166,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  <svg width="24" height="24" viewBox="0 0 20 20"><g fill="#ffe6c4"><circle cx="7" cy="6" r="1.7"/><circle cx="13" cy="7" r="1.7"/><circle cx="8" cy="13" r="1.7"/><circle cx="13" cy="13" r="1.7"/><circle cx="10" cy="10" r="1.7"/></g></svg>
+              <div className="haar-hover" onClick={doSwell} title="swell — one-shot gust" style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:`1px solid ${swelling?'#ffce8a':'rgba(255,214,166,0.5)'}`, background: swelling?'rgba(255,214,166,0.28)':'rgba(255,214,166,0.06)', boxShadow: swelling?'0 0 30px 8px rgba(255,206,138,0.7), inset 0 0 14px rgba(255,214,166,0.3)':'0 0 18px 3px rgba(255,214,166,0.4), inset 0 0 14px rgba(255,214,166,0.15)', display:'flex', alignItems:'center', justifyContent:'center', transition:'box-shadow 0.2s, background 0.2s' }}>
+                  <svg width="24" height="24" viewBox="0 0 20 20" fill="none" stroke="#ffe6c4" strokeWidth="1.4" strokeLinecap="round"><path d="M3 12 Q10 3 17 12"/><path d="M5 15 Q10 9 15 15" opacity="0.6"/></svg>
                 </div>
-                <div className="haar-lbl" style={{ fontSize:12.5, color:'#ffdcb0', marginTop:8 }}>Perturb</div>
+                <div className="haar-lbl" style={{ fontSize:12.5, color:'#ffdcb0', marginTop:8 }}>Swell</div>
               </div>
               <div className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ position:'relative', width:62, height:62 }}>

@@ -652,6 +652,8 @@ export function microcosmActivity(a: number): void { microcosmCore?.setActivity(
 export function microcosmGrainSpread(x: number): void { microcosmCore?.setGrainSpread(x); }
 export function microcosmPitchSpread(y: number): void { microcosmCore?.setPitchSpread(y); }
 export function microcosmSetFilter(hz: number): void { microcosmCore?.setFilter(hz); }
+export function microcosmSweep(hz: number, q: number): void { (microcosmCore as any)?.setSweep(hz, q); }
+export function microcosmResetFilter(): void { (microcosmCore as any)?.resetFilter(); }
 export function microcosmSetSpace(w: number): void { microcosmCore?.setSpace(w); }
 export function microcosmFreeze(on: boolean, samples?: number): void { microcosmCore?.setFreeze(on, samples); }
 export function microcosmFreezeReverse(on: boolean): void { (microcosmCore as any)?.setFreezeReverse(on); }

@@ -323,6 +323,21 @@ export class Microcosm {
   setFilter(hz: number): void {
     try { this.filter.frequency.setTargetAtTime(Math.max(80, Math.min(18000, hz)), this.ctx.currentTime, 0.02); } catch {}
   }
+  // Direct sweep for the SWELL: sets cutoff + resonance immediately (no smoothing) so a
+  // slow, deliberate sweep is heard as motion. Q rising into the sweep gives the physical 'wahh'.
+  setSweep(hz: number, q: number): void {
+    try {
+      const f = Math.max(50, Math.min(18000, hz));
+      this.filter.frequency.setValueAtTime(f, this.ctx.currentTime);
+      this.filter.Q.setValueAtTime(Math.max(0.5, Math.min(18, q)), this.ctx.currentTime);
+    } catch {}
+  }
+  resetFilter(): void {
+    try {
+      this.filter.frequency.setTargetAtTime(8000, this.ctx.currentTime, 0.05);
+      this.filter.Q.setTargetAtTime(1, this.ctx.currentTime, 0.05);
+    } catch {}
+  }
   setSpace(wet: number): void {
     try {
       this.reverbWet.gain.setTargetAtTime(Math.max(0, Math.min(1, wet)), this.ctx.currentTime, 0.05);
