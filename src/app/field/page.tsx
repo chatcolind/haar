@@ -150,6 +150,8 @@ export default function FieldPage() {
     // transpose = semitones from locked root (at oct 4) to this step's note+oct
     return (NOTES.indexOf(st.note) - NOTES.indexOf(lockKey)) + (st.oct - 4) * 12;
   }
+  const [bpm, setBpm] = useState(92);   // master tempo — reference frame for progression clock + locked orbs
+  const [bpmEditing, setBpmEditing] = useState(false);   // double-click Tempo to type a value
   const [chordsOpen, setChordsOpen] = useState(false);
   const [prog, setProg] = useState<ProgStep[]>([]);     // the sequence
   const [progRunning, setProgRunning] = useState(false);
@@ -173,7 +175,7 @@ export default function FieldPage() {
   function runProg() {
     if (prog.length === 0) return;
     setProgRunning(true);
-    const barMs = (60 / 92) * 4 * 1000;  // one 4/4 bar in ms at 92 BPM (BPM is fixed display today)
+    const barMs = (60 / bpm) * 4 * 1000;  // one 4/4 bar in ms at current BPM
     let i = 0;
     const step = () => {
       const st = prog[i];
@@ -1015,8 +1017,21 @@ export default function FieldPage() {
               ))}
               <div style={{ width:1, height:44, background:'rgba(255,255,255,0.1)' }} />
               <div className="haar-hover" style={{ textAlign:'center' }}>
-                <div style={{ width:52, height:52, borderRadius:'50%', border:'2px solid rgba(122,245,200,0.4)', background:'radial-gradient(circle, rgba(122,245,200,0.45) 0%, transparent 70%)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
-                  <div style={{ fontSize:14, fontWeight:700 }}>92</div>
+                <div
+                  onWheel={(e)=>{ setBpm(b=>Math.max(40, Math.min(200, b - Math.sign(e.deltaY)))); }}
+                  onPointerDown={(e)=>{ const startY=e.clientY; const startB=bpm; const el=e.currentTarget as HTMLElement; el.setPointerCapture(e.pointerId); const mv=(ev:PointerEvent)=>{ setBpm(Math.max(40, Math.min(200, Math.round(startB + (startY-ev.clientY)/3)))); }; const up=()=>{ window.removeEventListener('pointermove',mv); window.removeEventListener('pointerup',up); }; window.addEventListener('pointermove',mv); window.addEventListener('pointerup',up); }}
+                  onDoubleClick={()=>setBpmEditing(true)}
+                  title="drag up/down or scroll · double-click to type"
+                  style={{ width:52, height:52, borderRadius:'50%', border:'2px solid rgba(122,245,200,0.4)', background:'radial-gradient(circle, rgba(122,245,200,0.45) 0%, transparent 70%)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:'ns-resize', touchAction:'none' }}>
+                  {bpmEditing ? (
+                    <input autoFocus type="number" defaultValue={bpm}
+                      onPointerDown={(e)=>e.stopPropagation()}
+                      onBlur={(e)=>{ const v=parseInt(e.target.value); if(!isNaN(v)) setBpm(Math.max(40,Math.min(200,v))); setBpmEditing(false); }}
+                      onKeyDown={(e)=>{ if(e.key==='Enter'){ const v=parseInt((e.target as HTMLInputElement).value); if(!isNaN(v)) setBpm(Math.max(40,Math.min(200,v))); setBpmEditing(false); } if(e.key==='Escape') setBpmEditing(false); }}
+                      style={{ width:38, textAlign:'center', fontSize:14, fontWeight:700, background:'transparent', border:'none', color:'#fff', outline:'none' }} />
+                  ) : (
+                    <div style={{ fontSize:14, fontWeight:700 }}>{bpm}</div>
+                  )}
                   <div style={{ fontSize:10, color:'#9affc8' }}>BPM</div>
                 </div>
                 <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.5)', marginTop:8 }}>Tempo</div>
