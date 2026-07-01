@@ -239,8 +239,10 @@ export default function FieldPage() {
       pan: panRef.current[o.id] ?? 0, eq: eqRef.current[o.id] ?? {lo:0,mid:0,hi:0},
       xy: xyRef.current[o.id] ?? {x:0.5,y:0.5},
       offset: offsetRef.current[o.id] ?? 0,
+      locked: !!lockRef.current[o.id], subdiv: subdivRef.current[o.id] ?? 2,
+      fill: fillRef.current[o.id] ?? 1, seed: seedRef.current[o.id] ?? 1,
     }));
-    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog }));
+    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm }));
     const idx = listSongs().filter(s=>s.name!==name); idx.push({name, ts:Date.now()});
     localStorage.setItem('haar_songs_index', JSON.stringify(idx));
     setSongMenu(null); setSongName('');
@@ -255,6 +257,7 @@ export default function FieldPage() {
       volRef.current[o.id]=o.vol; densRef.current[o.id]=o.dens; amountRef.current[o.id]=o.amount;
       flavourRef.current[o.id]=o.flavour; muteRef.current[o.id]=o.mute; soloSetRef.current[o.id]=o.solo;
       panRef.current[o.id]=o.pan; eqRef.current[o.id]=o.eq; xyRef.current[o.id]=o.xy; offsetRef.current[o.id]=o.offset ?? 0;
+      lockRef.current[o.id]=!!o.locked; subdivRef.current[o.id]=o.subdiv ?? 2; fillRef.current[o.id]=o.fill ?? 1; seedRef.current[o.id]=o.seed ?? 1;
       const n = parseInt((o.id.split('_')[1]||'0')); orbCounter.current[o.engineType]=Math.max(orbCounter.current[o.engineType]||0, n);
       restored.push({ id:o.id, engineType:o.engineType, label:o.label, colorKey:o.colorKey });
       microcosmAddOrb(o.id, o.engineType, o.vol);
@@ -262,8 +265,10 @@ export default function FieldPage() {
       microcosmEnginePan(o.id, o.pan); microcosmEngineEQ(o.id, o.eq.lo, o.eq.mid, o.eq.hi);
       microcosmGrainDensity(o.id, o.dens); microcosmEngineAmount(o.id, o.amount); microcosmOrbPalette(o.id, o.flavour);
       microcosmOrbHome(o.id, o.offset ?? 0);
+      microcosmOrbLock(o.id, !!o.locked); microcosmOrbSubdiv(o.id, o.subdiv ?? 2); microcosmOrbFill(o.id, o.fill ?? 1); microcosmOrbSeed(o.id, o.seed ?? 1);
     }
     stopProg(); setProg(data.prog ?? []);  // restore progression (stop any running one first)
+    if (data.bpm) { setBpm(data.bpm); microcosmBpm(data.bpm); }  // restore tempo
     setFieldOrbs(restored); setSongMenu(null);
   }
   const [life, setLife] = useState(0.32);
