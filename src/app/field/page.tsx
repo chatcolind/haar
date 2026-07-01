@@ -6,7 +6,7 @@ import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
-  microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmFreeze, microcosmFreezeReverse,
+  microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -267,7 +267,7 @@ export default function FieldPage() {
       locked: !!lockRef.current[o.id], subdiv: subdivRef.current[o.id] ?? 2,
       fill: fillRef.current[o.id] ?? 1, seed: seedRef.current[o.id] ?? 1,
     }));
-    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm }));
+    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted } }));
     const idx = listSongs().filter(s=>s.name!==name); idx.push({name, ts:Date.now()});
     localStorage.setItem('haar_songs_index', JSON.stringify(idx));
     setSongMenu(null); setSongName('');
@@ -294,10 +294,24 @@ export default function FieldPage() {
     }
     stopProg(); setProg(data.prog ?? []);  // restore progression (stop any running one first)
     if (data.bpm) { setBpm(data.bpm); microcosmBpm(data.bpm); }  // restore tempo
+    // restore tape settings (master, four ingredients, mute) and apply to the engine
+    if (data.tape) {
+      const tp = data.tape;
+      const bal = tp.bal ?? { hiss:0, sat:0, wow:0, roll:0 };
+      setTapeBal(bal); setTapeMaster(tp.master ?? 0); setTapeMuted(!!tp.muted);
+      (['hiss','sat','wow','roll'] as const).forEach(k => microcosmTapeBalance(k, (bal as any)[k] ?? 0));
+      microcosmTape(tp.master ?? 0);
+      microcosmTapeMute(!!tp.muted);
+    }
     setFieldOrbs(restored); setSongMenu(null);
   }
   const [life, setLife] = useState(0.32);
-  const [freezeOn, setFreezeOn] = useState(false);   // Freeze: hold the grain buffer
+  const [tapeAmt, setTapeAmt] = useState(0);   // Tape character amount 0..1 (drag the button)
+  const [tapeOpen, setTapeOpen] = useState(false);   // tape breakout panel
+  const [tapeBal, setTapeBal] = useState({ hiss: 0, sat: 0, wow: 0, roll: 0 });   // four tape ingredients 0..1
+  const tapeActive = tapeBal.hiss>0.01 || tapeBal.sat>0.01 || tapeBal.wow>0.01 || tapeBal.roll>0.01;
+  const [tapeMaster, setTapeMaster] = useState(0);   // master multiplier (starts at 0 = tape off)
+  const [tapeMuted, setTapeMuted] = useState(false);   // tape bypass toggle
   const [solo, setSolo] = useState(false);      // TEST SOLO
   const soloRef = useRef(false);                // TEST SOLO
   const [density, setDensity] = useState(0.5);  // TEST DENSITY
@@ -470,6 +484,8 @@ export default function FieldPage() {
   }
   function openMix() { setMixOpen(true); requestAnimationFrame(()=>setMixShown(true)); }
   function closeMix() { setMixShown(false); setTimeout(()=>setMixOpen(false), 420); }
+  // tap empty field to dismiss any open panel (tape / chords / mixer)
+  function closePanels() { if (tapeOpen) setTapeOpen(false); if (chordsOpen) setChordsOpen(false); if (mixOpen) closeMix(); }
   async function handleSelect(id: string) {
     // double-tap the same orb -> enter focused view
     const now = Date.now();
@@ -526,7 +542,14 @@ export default function FieldPage() {
 
   return (
     <main style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'radial-gradient(ellipse at 50% 28%, #10131f 0%, #070810 66%, #04050a 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
+      {/* tap-out backdrop: when a panel is open, a click on empty field dismisses it */}
+      {(tapeOpen || chordsOpen || mixOpen) && (
+        <div onClick={closePanels} style={{ position:'absolute', inset:0, zIndex:200, background:'transparent' }} />
+      )}
       <style>{`
+        @keyframes tapeRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        input[type=range] { -webkit-appearance: none; appearance: none; background: rgba(232,226,214,0.12); border-radius: 2px; outline: none; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 13px; height: 13px; border-radius: 50%; background: currentColor; cursor: pointer; box-shadow: 0 0 8px rgba(232,176,112,0.5); }
         .haar-lbl { opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
         .haar-hover:hover .haar-lbl { opacity: 0.85; }
         .haar-sectionlbl { opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
@@ -1051,21 +1074,12 @@ export default function FieldPage() {
           <div className="haar-section" style={{ display:'flex', flexDirection:'column', alignItems:'flex-start' }}>
             <div className="haar-sectionlbl" style={zlabel}>FIELD</div>
             <div style={{ display:'flex', alignItems:'flex-end', gap:30 }}>
-              <div className="haar-hover" onClick={()=>{
-                const n=!freezeOn; setFreezeOn(n);
-                if (freezeArmRef.current) { clearTimeout(freezeArmRef.current); freezeArmRef.current=null; }
-                if (n) {
-                  const barSamples = Math.floor((60/bpm)*4*48000);   // full-bar loop length
-                  const wait = msToNextHalfBar();
-                  freezeArmRef.current = setTimeout(() => { microcosmFreeze(true, barSamples); pauseProg(); freezeArmRef.current=null; }, wait);
-                } else {
-                  microcosmFreeze(false); resumeProg();
-                }
-              }} style={{ textAlign:'center', cursor:'pointer' }}>
-                <div style={{ width:52, height:52, borderRadius:'50%', border:`1px solid ${freezeOn?'#7ce9ff':'rgba(174,240,255,0.5)'}`, background: freezeOn?'rgba(174,240,255,0.22)':'rgba(174,240,255,0.06)', boxShadow: freezeOn?'0 0 26px 6px rgba(124,233,255,0.7), inset 0 0 14px rgba(174,240,255,0.3)':'0 0 18px 3px rgba(174,240,255,0.4), inset 0 0 14px rgba(174,240,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  <svg width="24" height="24" viewBox="0 0 20 20"><g stroke="#cdf5ff" strokeWidth="1.3" opacity="0.85"><line x1="10" y1="2" x2="10" y2="18"/><line x1="3" y1="6" x2="17" y2="14"/><line x1="3" y1="14" x2="17" y2="6"/></g></svg>
+              <div className="haar-hover" onClick={()=>setTapeOpen(o=>!o)} title="tape character"
+                style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:`1px solid ${tapeActive?'#e8b070':'rgba(232,176,112,0.5)'}`, background: `rgba(232,176,112,${0.06 + (tapeActive?0.16:0)})`, boxShadow: tapeActive?'0 0 24px 5px rgba(232,176,112,0.6), inset 0 0 14px rgba(232,176,112,0.2)':'0 0 18px 3px rgba(232,176,112,0.4), inset 0 0 14px rgba(232,176,112,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <svg width="24" height="24" viewBox="0 0 20 20"><g stroke="#f0d0a0" strokeWidth="1.2" fill="none" opacity="0.9"><circle cx="6.5" cy="10" r="3.2"/><circle cx="13.5" cy="10" r="3.2"/><line x1="6.5" y1="13.2" x2="13.5" y2="13.2"/></g></svg>
                 </div>
-                <div className="haar-lbl" style={{ fontSize:12.5, color:'#bfe8f5', marginTop:8 }}>Freeze</div>
+                <div className="haar-lbl" style={{ fontSize:12.5, color:'#f0d0a0', marginTop:8 }}>Tape</div>
               </div>
               <div className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(255,214,166,0.5)', background:'rgba(255,214,166,0.06)', boxShadow:'0 0 18px 3px rgba(255,214,166,0.4), inset 0 0 14px rgba(255,214,166,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -1321,6 +1335,47 @@ export default function FieldPage() {
             </div>
             </div>
           </div>
+        </div>
+      )}
+      {/* TAPE — expands upward from the Tape button (FIELD row, bottom-left) */}
+      {tapeOpen && (
+        <div style={{ position:'fixed', left:40, bottom:132, zIndex:340, width:288,
+          background:'linear-gradient(180deg, rgba(20,16,12,0.97), rgba(12,10,9,0.97))',
+          backdropFilter:'blur(16px)', border:'1px solid rgba(232,176,112,0.28)', borderRadius:14,
+          padding:'18px 20px 20px', fontFamily:'Rajdhani, sans-serif',
+          boxShadow:'0 8px 44px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(232,176,112,0.1), inset 0 1px 0 rgba(232,176,112,0.08)',
+          animation:'tapeRise 0.18s ease-out' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
+            <span style={{ fontSize:10.5, letterSpacing:'0.32em', color:'#e8b070', fontFamily:'"Space Mono", monospace', fontWeight:400 }}>TAPE</span>
+            <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+              <span onClick={()=>{ const m=!tapeMuted; setTapeMuted(m); microcosmTapeMute(m); }}
+                style={{ cursor:'pointer', fontSize:9.5, letterSpacing:'0.18em', fontFamily:'"Space Mono", monospace', padding:'3px 8px', borderRadius:5, border:`1px solid ${tapeMuted?'rgba(212,96,80,0.7)':'rgba(122,245,200,0.7)'}`, color: tapeMuted?'#d46050':'#7af5c8', background: tapeMuted?'rgba(212,96,80,0.12)':'rgba(122,245,200,0.12)' }}>{tapeMuted?'OFF':'ON'}</span>
+              <span onClick={()=>setTapeOpen(false)} style={{ cursor:'pointer', color:'rgba(232,226,214,0.35)', fontSize:15, lineHeight:1, padding:'2px 4px' }}>×</span>
+            </div>
+          </div>
+          {/* MASTER */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:7, alignItems:'baseline' }}>
+              <span style={{ fontSize:11, letterSpacing:'0.16em', color:'#E8E2D6', fontFamily:'"Space Mono", monospace' }}>MASTER</span>
+              <span style={{ fontSize:12, color:'#e8b070', fontFamily:'"Space Mono", monospace' }}>{Math.round(tapeMaster*100)}</span>
+            </div>
+            <input type="range" min={0} max={1} step={0.01} value={tapeMaster}
+              onChange={(e)=>{ const v=parseFloat(e.target.value); setTapeMaster(v); microcosmTape(v); }}
+              style={{ width:'100%', height:3, accentColor:'#E8E2D6', cursor:'pointer' }} />
+          </div>
+          <div style={{ height:1, background:'rgba(232,176,112,0.14)', margin:'0 -20px 16px' }} />
+          {/* INGREDIENTS */}
+          {([['hiss','HISS'],['sat','SATURATION'],['wow','WOW · FLUTTER'],['roll','ROLLOFF']] as const).map(([k,lbl],idx)=>(
+            <div key={k} style={{ marginBottom: idx===3?0:13 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, alignItems:'baseline' }}>
+                <span style={{ fontSize:10.5, letterSpacing:'0.14em', color:'rgba(232,226,214,0.55)', fontFamily:'Rajdhani, sans-serif', fontWeight:500 }}>{lbl}</span>
+                <span style={{ fontSize:11, color:'rgba(232,176,112,0.85)', fontFamily:'"Space Mono", monospace' }}>{Math.round((tapeBal as any)[k]*100)}</span>
+              </div>
+              <input type="range" min={0} max={1} step={0.01} value={(tapeBal as any)[k]}
+                onChange={(e)=>{ const v=parseFloat(e.target.value); setTapeBal(b=>({...b,[k]:v})); microcosmTapeBalance(k, v); }}
+                style={{ width:'100%', height:3, accentColor:'#e8b070', cursor:'pointer' }} />
+            </div>
+          ))}
         </div>
       )}
     </main>

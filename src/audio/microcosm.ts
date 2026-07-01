@@ -173,8 +173,78 @@ export class Microcosm {
   get destination(): AudioDestinationNode { return this.ctx.destination; }
   get isReady(): boolean { return this.ready; }
 
+  // ── TAPE character (native nodes in the Microcosm's own context) ──
+  private tapeWobbleDelay: DelayNode | null = null;   // modulated delay = wow/flutter
+  private tapeWobbleLFO: OscillatorNode | null = null;
+  private tapeWobbleDepth: GainNode | null = null;
+  private tapeSat: WaveShaperNode | null = null;      // saturation
+  private tapeRolloff: BiquadFilterNode | null = null; // HF loss
+  private tapeHissGain: GainNode | null = null;       // hiss level
+  private tapeBuilt = false;
+  private buildTape(): void {
+    if (this.tapeBuilt) return;
+    const c = this.ctx;
+    this.tapeWobbleDelay = c.createDelay(0.05);
+    this.tapeWobbleDelay.delayTime.value = 0.004;   // base delay ~4ms
+    this.tapeWobbleLFO = c.createOscillator();
+    this.tapeWobbleLFO.frequency.value = 0.7;
+    this.tapeWobbleDepth = c.createGain();
+    this.tapeWobbleDepth.gain.value = 0;            // 0 = no wobble
+    this.tapeWobbleLFO.connect(this.tapeWobbleDepth);
+    this.tapeWobbleDepth.connect(this.tapeWobbleDelay.delayTime);
+    this.tapeWobbleLFO.start();
+    this.tapeSat = c.createWaveShaper();
+    this.tapeSat.curve = this._satCurve(0);         // identity at 0
+    this.tapeRolloff = c.createBiquadFilter();
+    this.tapeRolloff.type = 'lowpass';
+    this.tapeRolloff.frequency.value = 20000;
+    // hiss: looping noise buffer
+    const hb = c.createBuffer(1, c.sampleRate * 2, c.sampleRate);
+    const hd = hb.getChannelData(0);
+    for (let i = 0; i < hd.length; i++) hd[i] = (Math.random() * 2 - 1) * 0.5;
+    const hn = c.createBufferSource(); hn.buffer = hb; hn.loop = true;
+    this.tapeHissGain = c.createGain(); this.tapeHissGain.gain.value = 0;
+    hn.connect(this.tapeHissGain);
+    this.tapeHissGain.connect(this.tapeRolloff);
+    // makeup gain compensates for saturation boost so level stays constant
+    this.tapeMakeup = c.createGain(); this.tapeMakeup.gain.value = 1;
+    // chain: wobbleDelay -> sat -> rolloff -> makeup (makeup is the tape output)
+    this.tapeWobbleDelay.connect(this.tapeSat);
+    this.tapeSat.connect(this.tapeRolloff);
+    this.tapeRolloff.connect(this.tapeMakeup);
+    hn.start();
+    this.tapeBuilt = true;
+  }
+  private tapeMakeup: GainNode | null = null;
+  private _satCurve(amt: number): Float32Array {
+    const n = 1024, curve = new Float32Array(n), k = amt * 40;
+    for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; curve[i] = k > 0 ? ((1 + k) * x) / (1 + k * Math.abs(x)) : x; }
+    return curve;
+  }
+  // four independent tape ingredients (0..1) scaled by a master (0..1)
+  private tape = { hiss: 0, sat: 0, wow: 0, roll: 0 };
+  private tapeMaster = 1;
+  setTapeBalance(k: 'hiss'|'sat'|'wow'|'roll', v: number): void { this.buildTape(); this.tape[k] = Math.max(0, Math.min(1, v)); this._applyTape(); }
+  setTape(a: number): void { this.buildTape(); this.tapeMaster = Math.max(0, Math.min(1, a)); this._applyTape(); }   // master
+  private tapeMuted = false;
+  setTapeMute(on: boolean): void { this.buildTape(); this.tapeMuted = on; this._applyTape(); }
+  private _applyTape(): void {
+    const m = this.tapeMuted ? 0 : this.tapeMaster;
+    const t = { hiss: this.tape.hiss*m, sat: this.tape.sat*m, wow: this.tape.wow*m, roll: this.tape.roll*m };
+    if (this.tapeWobbleDepth) this.tapeWobbleDepth.gain.value = t.wow * 0.0025;              // wow/flutter
+    if (this.tapeSat) this.tapeSat.curve = this._satCurve(t.sat * 0.5);                      // saturation (gentler)
+    if (this.tapeMakeup) this.tapeMakeup.gain.value = 1 / (1 + t.sat * 1.2);                 // compensate sat boost
+    if (this.tapeRolloff) this.tapeRolloff.frequency.value = 20000 - t.roll * 17000;         // HF rolloff
+    if (this.tapeHissGain) this.tapeHissGain.gain.value = t.hiss * 0.03;                     // hiss
+  }
   // Connect the Microcosm output somewhere (native node, e.g. ctx.destination)
-  connectOut(dest: AudioNode): void { this.nativeOut.connect(this.limiter); this.limiter.connect(dest); }
+  // Splice the tape chain between limiter and the destination.
+  connectOut(dest: AudioNode): void {
+    this.buildTape();
+    this.nativeOut.connect(this.limiter);
+    this.limiter.connect(this.tapeWobbleDelay as DelayNode);   // into tape
+    (this.tapeMakeup as GainNode).connect(dest);      // tape out (post makeup) -> destination
+  }
 
   private _currentEngine: string = '';
   spawnGrain(spec: GrainSpec): void {

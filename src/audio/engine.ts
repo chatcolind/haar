@@ -539,6 +539,13 @@ export function stopGranular(): void { try { granular?.stop(); } catch {} setDry
 let scatter: GrainScatter | null = null;
 let scatterReady = false;
 let microMaster: Tone.Gain | null = null;
+// TAPE character chain (wow/flutter + HF rolloff + saturation + hiss), driven by one amount 0..1
+let tapeWobble: Tone.Vibrato | null = null;   // wow/flutter (pitch wobble)
+let tapeRolloff: Tone.Filter | null = null;   // HF rolloff (worn tape loses highs)
+let tapeSat: Tone.Distortion | null = null;   // gentle saturation
+let tapeHiss: Tone.Noise | null = null;       // tape hiss
+let tapeHissGain: Tone.Gain | null = null;
+let tapeAmount = 0;
 
 async function ensureMicrocosm(): Promise<void> {
   // Start audio context if the synth never initialised it
@@ -549,7 +556,17 @@ async function ensureMicrocosm(): Promise<void> {
     // The Microcosm has its own output to destination, independent of the synth chain,
     // via a limiter for safety.
     const limiter = new Tone.Limiter(-1).toDestination();
-    microMaster = new Tone.Gain(1).connect(limiter);
+    // TAPE chain: microMaster -> wobble -> saturation -> HF rolloff -> limiter.
+    // All params start at their CLEAN values (amount 0); microcosmTape() scales them in.
+    tapeWobble = new Tone.Vibrato({ frequency: 0.8, depth: 0, type: 'sine' });   // depth 0 = no wobble
+    tapeSat = new Tone.Distortion({ distortion: 0, wet: 0 });                     // wet 0 = clean
+    tapeRolloff = new Tone.Filter({ frequency: 20000, type: 'lowpass', rolloff: -12 });  // open = no rolloff
+    tapeWobble.connect(tapeSat); tapeSat.connect(tapeRolloff); tapeRolloff.connect(limiter);
+    // hiss runs in parallel into the rolloff so it's coloured by the same filter
+    tapeHiss = new Tone.Noise({ type: 'pink', volume: -60 });
+    tapeHissGain = new Tone.Gain(0);   // silent until amount raised
+    tapeHiss.connect(tapeHissGain); tapeHissGain.connect(tapeRolloff);
+    microMaster = new Tone.Gain(1).connect(tapeWobble);
     scatter = new GrainScatter();
     scatter.output.connect(microMaster);
     const buf = await renderPulseSource('sine', 220);
@@ -638,6 +655,12 @@ export function microcosmSetFilter(hz: number): void { microcosmCore?.setFilter(
 export function microcosmSetSpace(w: number): void { microcosmCore?.setSpace(w); }
 export function microcosmFreeze(on: boolean, samples?: number): void { microcosmCore?.setFreeze(on, samples); }
 export function microcosmFreezeReverse(on: boolean): void { (microcosmCore as any)?.setFreezeReverse(on); }
+// TAPE: one amount (0..1) dials in the full worn-tape character. 0 = clean/bypass, 1 = heavily degraded.
+export function microcosmTape(amount: number): void {
+  (microcosmCore as any)?.setTape(amount);
+}
+export function microcosmTapeBalance(k: string, v: number): void { (microcosmCore as any)?.setTapeBalance(k, v); }
+export function microcosmTapeMute(on: boolean): void { (microcosmCore as any)?.setTapeMute(on); }
 export function microcosmArmedPalette(name: string): void { (microcosmCore as any)?.setArmedPalette(name); }
 export function microcosmOrbPalette(id: string, name: string): void { (microcosmCore as any)?.setOrbPalette(id, name); }
 export function microcosmOrbHome(id: string, semis: number): void { (microcosmCore as any)?.setOrbHome(id, semis); }
