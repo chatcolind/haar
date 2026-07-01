@@ -193,6 +193,25 @@ export class Microcosm {
   }
   // per-orb home pitch (semitones, absolute home; conductor transpose added later)
   private engineHome: Record<string, number> = {};
+  // ── TEMPO LOCK (per orb) ──────────────────────────────────────────────
+  // locked orbs fire on the tempo grid instead of their organic density rate.
+  private bpm = 92;
+  setBpm(n: number): void { this.bpm = Math.max(40, Math.min(200, n)); }
+  private engineLocked: Record<string, boolean> = {};   // free (false) vs tempo-locked (true)
+  private engineSubdiv: Record<string, number> = {};    // grid: 1=quarter,2=eighth,4=sixteenth,3=triplet
+  private engineFill: Record<string, number> = {};      // 0..1 probability a grid point fires
+  private engineSeed: Record<string, number> = {};      // seeds the fill dice (stable, re-rollable)
+  private engineGridN: Record<string, number> = {};     // running grid-point counter per orb
+  setOrbLock(id: string, on: boolean): void { this.engineLocked[id] = on; }
+  setOrbSubdiv(id: string, n: number): void { this.engineSubdiv[id] = n; }
+  setOrbFill(id: string, f: number): void { this.engineFill[id] = Math.max(0, Math.min(1, f)); }
+  setOrbSeed(id: string, seed: number): void { this.engineSeed[id] = seed; this.engineGridN[id] = 0; }
+  // deterministic hash -> 0..1 from (seed, grid index). Same seed+index = same result.
+  private fillRoll(seed: number, n: number): number {
+    let x = (seed * 2654435761 + n * 40503) >>> 0;
+    x ^= x >>> 15; x = (x * 2246822519) >>> 0; x ^= x >>> 13;
+    return (x >>> 0) / 4294967295;
+  }
   setOrbHome(id: string, semis: number): void { this.engineHome[id] = semis; }
   setFreeze(on: boolean): void { this.node?.port.postMessage({ type: 'freeze', value: on }); }
   clearGrains(): void { this.node?.port.postMessage({ type: 'clearGrains' }); }
@@ -239,6 +258,10 @@ export class Microcosm {
     if (this.engineDensity[orbId] === undefined) this.engineDensity[orbId] = 0.5;  // seed per-orb density
     if (this.enginePalette[orbId] === undefined) this.enginePalette[orbId] = 'open';  // seed per-orb palette
     if (this.engineHome[orbId] === undefined) this.engineHome[orbId] = 0;  // seed per-orb home pitch (0 = no transpose)
+    if (this.engineLocked[orbId] === undefined) this.engineLocked[orbId] = false;  // born FREE
+    if (this.engineSubdiv[orbId] === undefined) this.engineSubdiv[orbId] = 2;       // eighth notes
+    if (this.engineFill[orbId] === undefined) this.engineFill[orbId] = 1;           // full fill
+    if (this.engineSeed[orbId] === undefined) { this.engineSeed[orbId] = 1; this.engineGridN[orbId] = 0; }
   }
   // Remove an orb instance from the rack entirely.
   removeOrb(orbId: string): void {
@@ -279,8 +302,23 @@ export class Microcosm {
         if (this.engineTickAccum[id] <= 0) {
           this._currentEngine = id;   // tag grains with the ORB ID (the rack key)
           const fn = tickFns[e.engineType];   // recipe chosen by engineType, decoupled from id
-          const next = fn ? fn(e.level) : 100;
-          this.engineTickAccum[id] = next;
+          if (this.engineLocked[id]) {
+            // TEMPO-LOCKED: grid delay from BPM+subdivision; fill dice decides fire vs rest.
+            const subdiv = this.engineSubdiv[id] || 2;                 // default eighth notes
+            const gridMs = (60 / this.bpm) * 1000 / subdiv;            // one grid step in ms
+            const n = (this.engineGridN[id] || 0);
+            const fill = this.engineFill[id] ?? 1;
+            const seed = this.engineSeed[id] ?? 1;
+            if (fill >= 1 || this.fillRoll(seed, n) < fill) {
+              if (fn) fn(e.level);   // fire the grains (density still drives thickness)
+            }
+            this.engineGridN[id] = n + 1;
+            this.engineTickAccum[id] = gridMs;
+          } else {
+            // FREE: organic density-driven rate (the fn returns its own next delay).
+            const next = fn ? fn(e.level) : 100;
+            this.engineTickAccum[id] = next;
+          }
         }
       }
       this.mosaicTimer = window.setTimeout(tick, STEP);

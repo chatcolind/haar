@@ -8,6 +8,7 @@ import {
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount,
+  microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
@@ -121,6 +122,10 @@ export default function FieldPage() {
     panRef.current[id] = 0;
     eqRef.current[id] = { lo:0, mid:0, hi:0 };
     offsetRef.current[id] = 0;  // born at root (no transpose)
+    lockRef.current[id] = false;   // born FREE
+    subdivRef.current[id] = 2;     // eighth notes
+    fillRef.current[id] = 1;       // full fill
+    seedRef.current[id] = 1;       // stable starting seed
     setFieldOrbs(prev => [...prev, { id, engineType, label, colorKey }]);
     return id;
   }
@@ -151,6 +156,7 @@ export default function FieldPage() {
     return (NOTES.indexOf(st.note) - NOTES.indexOf(lockKey)) + (st.oct - 4) * 12;
   }
   const [bpm, setBpm] = useState(92);   // master tempo — reference frame for progression clock + locked orbs
+  useEffect(() => { microcosmBpm(bpm); }, [bpm]);   // push tempo to engine for locked-orb grid
   const [bpmEditing, setBpmEditing] = useState(false);   // double-click Tempo to type a value
   const [chordsOpen, setChordsOpen] = useState(false);
   const [prog, setProg] = useState<ProgStep[]>([]);     // the sequence
@@ -305,6 +311,17 @@ export default function FieldPage() {
   const flavourRef = useRef<Record<string, string>>({});  // per-orb palette id (UI per-orb; engine still global)
   // per-orb REGISTER: interval offset in semitones from the root (consonant set). Default 0 = root.
   const offsetRef = useRef<Record<string, number>>({});
+  // per-orb TEMPO LOCK state (free vs locked; subdivision, fill, seed)
+  const lockRef = useRef<Record<string, boolean>>({});
+  const subdivRef = useRef<Record<string, number>>({});
+  const fillRef = useRef<Record<string, number>>({});
+  const seedRef = useRef<Record<string, number>>({});
+  function applyLock(id: string) {
+    microcosmOrbLock(id, !!lockRef.current[id]);
+    microcosmOrbSubdiv(id, subdivRef.current[id] ?? 2);
+    microcosmOrbFill(id, fillRef.current[id] ?? 1);
+    microcosmOrbSeed(id, seedRef.current[id] ?? 1);
+  }
   function applyHome(id: string) {
     microcosmOrbHome(id, offsetRef.current[id] ?? 0);
   }
@@ -743,15 +760,6 @@ export default function FieldPage() {
                   })}
                 </div>
                 <div style={{ fontSize:10, color:'rgba(255,255,255,0.25)', marginBottom:14 }}>palette is global today · per-orb later</div>
-                <div style={{ marginBottom:14 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                    <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>DENSITY</span>
-                    <span style={{ fontSize:12.5, color:'#d8a6ff' }}>{Math.round((densRef.current[focused] ?? 0.5)*100)}%</span>
-                  </div>
-                  <input type="range" min={0} max={1} step={0.01} value={densRef.current[focused] ?? 0.5}
-                    onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; microcosmGrainDensity(focused, d); forceOrb(x=>x+1); }}
-                    style={{ width:'100%', accentColor:'#d8a6ff' }} />
-                </div>
                 <div>
                   <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
                     <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>FLAVOUR AMOUNT</span>
@@ -760,6 +768,60 @@ export default function FieldPage() {
                   <input type="range" min={0} max={1} step={0.01} value={amountRef.current[focused] ?? 0}
                     onChange={(e)=>{ const a=parseFloat(e.target.value); amountRef.current[focused]=a; microcosmEngineAmount(focused, a); forceOrb(x=>x+1); }}
                     style={{ width:'100%', accentColor:'#ffcf6b' }} />
+                </div>
+                {/* TIMING — free-floating vs tempo-locked (per orb) */}
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                    <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>TIMING</span>
+                    <div style={{ display:'flex', gap:6 }}>
+                      {[['free','FREE'],['lock','LOCK']].map(([k,lbl])=>{
+                        const on = (k==='lock') === !!lockRef.current[focused];
+                        return <span key={k} onClick={()=>{ lockRef.current[focused]=(k==='lock'); applyLock(focused); forceOrb(x=>x+1); }}
+                          style={{ fontSize:11, letterSpacing:'0.08em', padding:'4px 12px', borderRadius:12, cursor:'pointer',
+                            border:`0.5px solid ${on?'#7af5c8':'rgba(255,255,255,0.18)'}`,
+                            background: on?'rgba(122,245,200,0.15)':'transparent',
+                            color: on?'#a6fff2':'rgba(255,255,255,0.5)' }}>{lbl}</span>;
+                      })}
+                    </div>
+                  </div>
+                  {lockRef.current[focused] && (
+                    <div style={{ padding:'10px 0 4px' }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                        <span style={{ fontSize:11, color:'rgba(255,255,255,0.45)' }}>GRID</span>
+                        <div style={{ display:'flex', gap:5 }}>
+                          {[[1,'1/4'],[2,'1/8'],[3,'1/8T'],[4,'1/16']].map(([v,lbl])=>{
+                            const sel = (subdivRef.current[focused] ?? 2) === v;
+                            return <span key={v as number} onClick={()=>{ subdivRef.current[focused]=v as number; applyLock(focused); forceOrb(x=>x+1); }}
+                              style={{ fontSize:10.5, padding:'3px 9px', borderRadius:10, cursor:'pointer',
+                                border:`0.5px solid ${sel?'#7af5c8':'rgba(255,255,255,0.15)'}`,
+                                background: sel?'rgba(122,245,200,0.12)':'transparent',
+                                color: sel?'#a6fff2':'rgba(255,255,255,0.5)' }}>{lbl}</span>;
+                          })}
+                        </div>
+                      </div>
+                      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                        <span style={{ fontSize:11, color:'rgba(255,255,255,0.45)' }}>FILL</span>
+                        <span style={{ fontSize:11, color:'#a6fff2' }}>{Math.round((fillRef.current[focused] ?? 1)*100)}%</span>
+                      </div>
+                      <input type="range" min={0} max={1} step={0.01} value={fillRef.current[focused] ?? 1}
+                        onChange={(e)=>{ const f=parseFloat(e.target.value); fillRef.current[focused]=f; microcosmOrbFill(focused, f); forceOrb(x=>x+1); }}
+                        style={{ width:'100%', accentColor:'#7af5c8', marginBottom:10 }} />
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <span style={{ fontSize:11, color:'rgba(255,255,255,0.45)' }}>PATTERN · seed {seedRef.current[focused] ?? 1}</span>
+                        <span onClick={()=>{ const ns=Math.floor(Math.random()*9999)+1; seedRef.current[focused]=ns; microcosmOrbSeed(focused, ns); forceOrb(x=>x+1); }}
+                          style={{ fontSize:10.5, padding:'3px 12px', borderRadius:10, cursor:'pointer', border:'0.5px solid rgba(216,166,255,0.5)', color:'#d8a6ff' }}>re-roll ↻</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                    <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>DENSITY</span>
+                    <span style={{ fontSize:12.5, color:'#d8a6ff' }}>{Math.round((densRef.current[focused] ?? 0.5)*100)}%</span>
+                  </div>
+                  <input type="range" min={0} max={1} step={0.01} value={densRef.current[focused] ?? 0.5}
+                    onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; microcosmGrainDensity(focused, d); forceOrb(x=>x+1); }}
+                    style={{ width:'100%', accentColor:'#d8a6ff' }} />
                 </div>
               </div>
 

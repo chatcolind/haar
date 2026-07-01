@@ -640,6 +640,11 @@ export function microcosmFreeze(on: boolean): void { microcosmCore?.setFreeze(on
 export function microcosmArmedPalette(name: string): void { (microcosmCore as any)?.setArmedPalette(name); }
 export function microcosmOrbPalette(id: string, name: string): void { (microcosmCore as any)?.setOrbPalette(id, name); }
 export function microcosmOrbHome(id: string, semis: number): void { (microcosmCore as any)?.setOrbHome(id, semis); }
+export function microcosmBpm(n: number): void { (microcosmCore as any)?.setBpm(n); }
+export function microcosmOrbLock(id: string, on: boolean): void { (microcosmCore as any)?.setOrbLock(id, on); }
+export function microcosmOrbSubdiv(id: string, n: number): void { (microcosmCore as any)?.setOrbSubdiv(id, n); }
+export function microcosmOrbFill(id: string, f: number): void { (microcosmCore as any)?.setOrbFill(id, f); }
+export function microcosmOrbSeed(id: string, seed: number): void { (microcosmCore as any)?.setOrbSeed(id, seed); }
 export function microcosmEngineAmount(id: string, amt: number): void { (microcosmCore as any)?.setEngineAmount(id, amt); }
 export function microcosmGrainDensity(id: string, d: number): void { (microcosmCore as any)?.setDensity(id, d); }
 // glide time for root changes (seconds). Slow = smooth tape-slide, no pop.
