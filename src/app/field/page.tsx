@@ -7,6 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -157,6 +158,7 @@ export default function FieldPage() {
   }
   const [bpm, setBpm] = useState(92);   // master tempo — reference frame for progression clock + locked orbs
   const barAnchorRef = useRef(0);   // performance.now() timestamp of a known bar boundary (free-running clock)
+  const barAudioAnchorRef = useRef(0);   // audio-clock time of the same bar boundary (for sample-accurate metro sync)
   const freezeArmRef = useRef<any>(null);   // pending quantized-freeze timer
   // time in ms until the next HALF-BAR boundary from now, given current bpm
   function msToNextHalfBar(): number {
@@ -175,6 +177,35 @@ export default function FieldPage() {
   const [dragIdx, setDragIdx] = useState<number|null>(null);   // chord block being dragged
   useEffect(() => { const up=()=>setDragIdx(null); window.addEventListener('pointerup',up); return ()=>window.removeEventListener('pointerup',up); }, []);
   useEffect(() => { progRef.current = prog; }, [prog]);
+  const [metroOn, setMetroOn] = useState(false);   // metronome click on/off
+  const [metroLevel, setMetroLevel] = useState(0.5);   // metronome click volume 0..1
+  const metroBeatRef = useRef(0);
+  const metroNextRef = useRef(0);
+  // METRONOME look-ahead scheduler — beats derived from the SHARED audio bar anchor,
+  // so beat 1 (accent) always coincides with the progression's bar boundary.
+  useEffect(() => {
+    if (!metroOn) return;
+    let scheduledUntil = microcosmAudioTime();   // audio-time up to which we've already scheduled
+    const tick = () => {
+      const beatSec = 60 / bpm;
+      const anchor = barAudioAnchorRef.current || microcosmAudioTime();   // read LIVE (re-anchors when chords engage)
+      const now = microcosmAudioTime();
+      const horizon = now + 0.12;
+      // first un-scheduled beat index from the (possibly updated) anchor
+      let idx = Math.ceil((Math.max(scheduledUntil, now) - anchor) / beatSec);
+      if (idx < 0) idx = 0;
+      let when = anchor + idx * beatSec;
+      while (when < horizon) {
+        if (when > now) microcosmClick((idx % 4) === 0, when);   // accent on the bar downbeat (idx 0 from anchor)
+        idx += 1;
+        when = anchor + idx * beatSec;
+      }
+      scheduledUntil = horizon;
+    };
+    tick();
+    const id = setInterval(tick, 25);
+    return () => clearInterval(id);
+  }, [metroOn, bpm]);
   const [progRunning, setProgRunning] = useState(false);
   const [progStepIdx, setProgStepIdx] = useState(0);    // which step is active (for UI highlight)
   const progTransposeRef = useRef(0);                   // current progression transpose (semitones), read by freq calc
@@ -220,6 +251,10 @@ export default function FieldPage() {
     if (prog.length === 0) return;
     setProgRunning(true);
     progIdxRef.current = 0;
+    // anchor the shared bar clock to the progression's downbeat so the metronome's
+    // pulse 1 lines up with chord bar 1
+    barAudioAnchorRef.current = microcosmAudioTime();
+    barAnchorRef.current = performance.now();
     progStep();
   }
   const lastTap = useRef<{ key:string; t:number }>({ key:'', t:0 });
@@ -513,7 +548,7 @@ export default function FieldPage() {
   }
   async function doStart() {
     if (!started.current) { await ensureStarted(); return; }
-    await microcosmStart(); activateRack(); setState('playing'); barAnchorRef.current = performance.now();
+    await microcosmStart(); activateRack(); setState('playing'); barAnchorRef.current = performance.now(); barAudioAnchorRef.current = microcosmAudioTime();
   }
   function doStop() { microcosmStopEngine(); setState('stopped'); }
   function toggleMute() {
@@ -1152,6 +1187,19 @@ export default function FieldPage() {
                   <div style={{ fontSize:10, color:'#9affc8' }}>BPM</div>
                 </div>
                 <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.5)', marginTop:8 }}>Tempo</div>
+              </div>
+              {/* METRONOME toggle — warm click, tight to the grid */}
+              <div className="haar-hover" style={{ textAlign:'center' }}>
+                <div
+                  onWheel={(e)=>{ const v=Math.max(0,Math.min(1, metroLevel - Math.sign(e.deltaY)*0.05)); setMetroLevel(v); microcosmMetroLevel(v); }}
+                  onPointerDown={(e)=>{ const startY=e.clientY; const startV=metroLevel; let moved=false; const el=e.currentTarget as HTMLElement; el.setPointerCapture(e.pointerId); const mv=(ev:PointerEvent)=>{ if(Math.abs(ev.clientY-startY)>3) moved=true; const v=Math.max(0,Math.min(1, startV + (startY-ev.clientY)/160)); setMetroLevel(v); microcosmMetroLevel(v); }; const up=()=>{ if(!moved){ const n=!metroOn; setMetroOn(n); microcosmMetroLevel(metroLevel); } window.removeEventListener('pointermove',mv); window.removeEventListener('pointerup',up); }; window.addEventListener('pointermove',mv); window.addEventListener('pointerup',up); }}
+                  title="tap: on/off · drag up/down: volume"
+                  style={{ width:52, height:52, borderRadius:'50%', border:`2px solid ${metroOn?'#7af5c8':'rgba(122,245,200,0.3)'}`, background: metroOn?`radial-gradient(circle, rgba(122,245,200,${0.2+metroLevel*0.35}) 0%, transparent 70%)`:'transparent', display:'flex', alignItems:'center', justifyContent:'center', cursor:'ns-resize', touchAction:'none', boxShadow: metroOn?`0 0 20px 3px rgba(122,245,200,${0.25+metroLevel*0.3})`:'none' }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={metroOn?'#7af5c8':'rgba(122,245,200,0.5)'} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 21h8l-2-16h-4z"/><line x1="12" y1="5" x2="14" y2="14"/>
+                  </svg>
+                </div>
+                <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.5)', marginTop:8 }}>{metroOn?`Click · ${Math.round(metroLevel*100)}%`:'Click'}</div>
               </div>
               <div className="haar-hover" style={{ textAlign:'center' }}>
                 <div onClick={()=>{ if(state==='playing') doStop(); else doStart(); }}

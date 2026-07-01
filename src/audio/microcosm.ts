@@ -245,6 +245,39 @@ export class Microcosm {
     this.limiter.connect(this.tapeWobbleDelay as DelayNode);   // into tape
     (this.tapeMakeup as GainNode).connect(dest);      // tape out (post makeup) -> destination
   }
+  // ── METRONOME: warm, round woodblock/rim knock, on its own gain bus ──
+  // Kept separate from the main chain so it can later route to a distinct output (cue/click bus).
+  private metroGain: GainNode | null = null;
+  private metroLevel = 0.5;
+  private buildMetro(): void {
+    if (this.metroGain) return;
+    this.metroGain = this.ctx.createGain();
+    this.metroGain.gain.value = this.metroLevel;
+    this.metroGain.connect(this.ctx.destination);   // straight out (splittable later)
+  }
+  setMetroLevel(v: number): void { this.buildMetro(); this.metroLevel = Math.max(0, Math.min(1, v)); if (this.metroGain) this.metroGain.gain.value = this.metroLevel; }
+  // Return the metro bus so the main thread can later re-route it to another output.
+  getMetroBus(): GainNode | null { this.buildMetro(); return this.metroGain; }
+  // Play one warm knock at audio-clock time `when` (seconds). accent = beat 1 (higher + louder).
+  click(accent: boolean, when?: number): void {
+    this.buildMetro();
+    const c = this.ctx;
+    const t = (when != null && when > c.currentTime) ? when : c.currentTime;
+    const osc = c.createOscillator();
+    osc.type = 'triangle';
+    const f0 = accent ? 340 : 250;      // accent a bit higher
+    osc.frequency.setValueAtTime(f0, t);
+    osc.frequency.exponentialRampToValueAtTime(f0 * 0.55, t + 0.05);   // fast pitch drop = knock body
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = accent ? 1600 : 1300;    // round off the top (warm)
+    const g = c.createGain();
+    const peak = accent ? 0.9 : 0.6;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.006);              // gentle attack (not clicky)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);            // short round decay
+    osc.connect(lp); lp.connect(g); g.connect(this.metroGain as GainNode);
+    osc.start(t); osc.stop(t + 0.14);
+  }
 
   private _currentEngine: string = '';
   spawnGrain(spec: GrainSpec): void {

@@ -661,6 +661,9 @@ export function microcosmTape(amount: number): void {
 }
 export function microcosmTapeBalance(k: string, v: number): void { (microcosmCore as any)?.setTapeBalance(k, v); }
 export function microcosmTapeMute(on: boolean): void { (microcosmCore as any)?.setTapeMute(on); }
+export function microcosmClick(accent: boolean, when?: number): void { (microcosmCore as any)?.click(accent, when); }
+export function microcosmMetroLevel(v: number): void { (microcosmCore as any)?.setMetroLevel(v); }
+export function microcosmAudioTime(): number { return (microcosmCore as any)?.context?.currentTime ?? 0; }
 export function microcosmArmedPalette(name: string): void { (microcosmCore as any)?.setArmedPalette(name); }
 export function microcosmOrbPalette(id: string, name: string): void { (microcosmCore as any)?.setOrbPalette(id, name); }
 export function microcosmOrbHome(id: string, semis: number): void { (microcosmCore as any)?.setOrbHome(id, semis); }
