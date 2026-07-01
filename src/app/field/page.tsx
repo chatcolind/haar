@@ -160,6 +160,10 @@ export default function FieldPage() {
   const [bpmEditing, setBpmEditing] = useState(false);   // double-click Tempo to type a value
   const [chordsOpen, setChordsOpen] = useState(false);
   const [prog, setProg] = useState<ProgStep[]>([]);     // the sequence
+  const progRef = useRef<ProgStep[]>([]);   // live mirror of prog so a running progression reads edits
+  const [dragIdx, setDragIdx] = useState<number|null>(null);   // chord block being dragged
+  useEffect(() => { const up=()=>setDragIdx(null); window.addEventListener('pointerup',up); return ()=>window.removeEventListener('pointerup',up); }, []);
+  useEffect(() => { progRef.current = prog; }, [prog]);
   const [progRunning, setProgRunning] = useState(false);
   const [progStepIdx, setProgStepIdx] = useState(0);    // which step is active (for UI highlight)
   const progTransposeRef = useRef(0);                   // current progression transpose (semitones), read by freq calc
@@ -184,7 +188,10 @@ export default function FieldPage() {
     const barMs = (60 / bpm) * 4 * 1000;  // one 4/4 bar in ms at current BPM
     let i = 0;
     const step = () => {
-      const st = prog[i];
+      const seq = progRef.current;
+      if (seq.length === 0) { stopProg(); return; }
+      if (i >= seq.length) i = 0;   // sequence shrank (chord removed) — wrap safely
+      const st = seq[i];
       const dur = barMs * st.bars;
       progTransposeRef.current = stepSemis(st);
       reapplySourceFreq();
@@ -193,7 +200,7 @@ export default function FieldPage() {
       setProgStepIdx(i);
       setProgStepDur(0);
       requestAnimationFrame(() => requestAnimationFrame(() => { setProgStepDur(dur); setProgProgress(1); }));
-      progTimer.current = setTimeout(() => { i = (i + 1) % prog.length; step(); }, dur);
+      progTimer.current = setTimeout(() => { i = (i + 1) % Math.max(1, progRef.current.length); step(); }, dur);
     };
     step();
   }
@@ -1199,14 +1206,16 @@ export default function FieldPage() {
       )}
       {/* CHORDS — progression editor (bottom pop-up). Build a sequence of interval steps + bars; play loops it. */}
       {chordsOpen && (
-        <div onClick={()=>setChordsOpen(false)} style={{ position:'fixed', inset:0, zIndex:320, background:'rgba(4,5,10,0.72)', backdropFilter:'blur(6px)', display:'flex', alignItems:'flex-end', justifyContent:'center', fontFamily:'Rajdhani, sans-serif' }}>
-          <div onClick={(e)=>e.stopPropagation()} style={{ width:'100%', maxWidth:1000, background:'rgba(14,16,26,0.97)', borderTop:'0.5px solid rgba(255,255,255,0.14)', borderRadius:'20px 20px 0 0', padding:'26px 40px 40px' }}>
+        <div style={{ position:'fixed', left:0, right:0, bottom:0, zIndex:320, display:'flex', justifyContent:'center', fontFamily:'Rajdhani, sans-serif', pointerEvents:'none' }}>
+          <div style={{ width:'100%', maxWidth:'none', background:'rgba(10,12,20,0.94)', backdropFilter:'blur(10px)', borderTop:'0.5px solid rgba(255,255,255,0.14)', borderRadius:'18px 18px 0 0', padding:'12px 56px 14px', pointerEvents:'auto', boxShadow:'0 -20px 60px rgba(0,0,0,0.5)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
               <span style={{ fontSize:12, letterSpacing:'0.24em', color:'#8aa0d0', fontFamily:'monospace' }}>CHORDS — PROGRESSION</span>
               <span onClick={()=>setChordsOpen(false)} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:18 }}>×</span>
             </div>
 
             {/* current sequence */}
+            <div style={{ display:'flex', alignItems:'center', gap:40, flexWrap:'nowrap' }}>
+            <div style={{ flex:'0 1 auto' }}>
             <div style={{ fontSize:10, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:12, fontFamily:'monospace' }}>SEQUENCE</div>
             {prog.length===0 ? (
               <div style={{ fontSize:14, color:'rgba(255,255,255,0.35)', marginBottom:22 }}>empty — add steps below</div>
@@ -1216,10 +1225,18 @@ export default function FieldPage() {
                   const lbl = st.note + st.oct;
                   const active = progRunning && progStepIdx===idx;
                   return (
-                    <div key={idx} style={{ position:'relative', overflow:'hidden', display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'12px 14px', borderRadius:12, border:`1px solid ${active?'#a6c4ff':'rgba(255,255,255,0.15)'}`, background: active?'rgba(140,160,210,0.12)':'rgba(255,255,255,0.03)' }}>
+                    <div key={idx}
+                      onPointerDown={(e)=>{ const t=e.target as HTMLElement; if(t.tagName==='SPAN' && t.textContent && ['−','+','remove'].includes(t.textContent)) return; e.preventDefault(); setDragIdx(idx); }}
+                      onPointerEnter={()=>{ if(dragIdx!==null && dragIdx!==idx){ setProg(pr=>{ const a=[...pr]; const [m]=a.splice(dragIdx,1); a.splice(idx,0,m); return a; }); setDragIdx(idx); } }}
+                      onPointerUp={()=>setDragIdx(null)}
+                      style={{ position:'relative', overflow:'hidden', userSelect:'none', touchAction:'none', display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'12px 14px', borderRadius:12, cursor: dragIdx===idx?'grabbing':'grab', border:`1px solid ${dragIdx===idx?'#d8a6ff':(active?'#a6c4ff':'rgba(255,255,255,0.15)')}`, background: dragIdx===idx?'rgba(216,166,255,0.14)':(active?'rgba(140,160,210,0.12)':'rgba(255,255,255,0.03)'), opacity: dragIdx===idx?0.85:1, transition:'border 0.15s, background 0.15s' }}>
                       {active && <div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${progProgress*100}%`, background:'linear-gradient(90deg, rgba(166,196,255,0.4), rgba(166,196,255,0.7))', pointerEvents:'none', transition:`width ${progStepDur}ms linear` }} />}
                       <div style={{ position:'relative', display:'flex', flexDirection:'column', alignItems:'center', gap:6 }}>
-                      <span style={{ fontSize:16, color: active?'#cfe0ff':'#e0e6ff' }}>{lbl}</span>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:2 }}>
+                        <span onClick={()=>setProg(p=>p.map((x,i)=>{ if(i!==idx) return x; let ni=NOTES.indexOf(x.note)-1, oc=x.oct; if(ni<0){ni=11;oc-=1;} return {...x, note:NOTES[ni], oct:Math.max(1,oc)}; }))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.4)', fontSize:16 }}>−</span>
+                        <span style={{ fontSize:16, color: active?'#cfe0ff':'#e0e6ff', minWidth:38, textAlign:'center' }}>{lbl}</span>
+                        <span onClick={()=>setProg(p=>p.map((x,i)=>{ if(i!==idx) return x; let ni=NOTES.indexOf(x.note)+1, oc=x.oct; if(ni>11){ni=0;oc+=1;} return {...x, note:NOTES[ni], oct:Math.min(6,oc)}; }))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.4)', fontSize:16 }}>+</span>
+                      </div>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                         <span onClick={()=>setProg(p=>p.map((x,i)=>i===idx?{...x,bars:Math.max(1,x.bars-1)}:x))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:15 }}>−</span>
                         <span style={{ fontSize:13, color:'rgba(255,255,255,0.7)', minWidth:42, textAlign:'center' }}>{st.bars} bar{st.bars>1?'s':''}</span>
@@ -1234,6 +1251,8 @@ export default function FieldPage() {
             )}
 
             {/* add a step — pick a NOTE (chromatic) at the chosen OCTAVE, like the conductor keyboard */}
+            </div>
+            <div style={{ flex:'1 1 auto', display:'flex', flexDirection:'column', alignItems:'flex-end', gap:14 }}>
             <div style={{ display:'flex', alignItems:'center', gap:16, marginBottom:12 }}>
               <span style={{ fontSize:10, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', fontFamily:'monospace' }}>ADD STEP</span>
               <div style={{ display:'flex', alignItems:'center', gap:10 }}>
@@ -1257,18 +1276,20 @@ export default function FieldPage() {
               })}
             </div>
             {/* transport — Engage starts chord movement, Release stops it (drone continues via master) */}
-            <div style={{ display:'flex', justifyContent:'center', gap:18 }}>
+            <div style={{ display:'flex', justifyContent:'center', gap:14 }}>
               <div onClick={()=>{ if(prog.length && !progRunning) runProg(); }}
                 style={{ padding:'13px 40px', borderRadius:26, cursor: (prog.length && !progRunning)?'pointer':'default',
                   border:`1px solid ${progRunning?'#7af5c8':(prog.length?'rgba(122,245,200,0.7)':'rgba(255,255,255,0.15)')}`,
                   background: progRunning?'rgba(122,245,200,0.22)':(prog.length?'rgba(122,245,200,0.1)':'transparent'),
                   color: progRunning?'#a6fff2':(prog.length?'#a6fff2':'rgba(255,255,255,0.3)'), fontSize:15, letterSpacing:'0.14em',
                   boxShadow: progRunning?'0 0 18px 2px rgba(122,245,200,0.4)':'none' }}>ENGAGE</div>
-              <div onClick={()=>{ if(progRunning) stopProg(); }}
+              <div onClick={()=>{ if(progRunning) stopProg(); setChordsOpen(false); }}
                 style={{ padding:'13px 40px', borderRadius:26, cursor: progRunning?'pointer':'default',
                   border:`1px solid ${progRunning?'rgba(255,140,110,0.7)':'rgba(255,255,255,0.12)'}`,
                   background: progRunning?'rgba(255,140,110,0.12)':'transparent',
                   color: progRunning?'#ff8c6e':'rgba(255,255,255,0.25)', fontSize:15, letterSpacing:'0.14em' }}>RELEASE</div>
+            </div>
+            </div>
             </div>
           </div>
         </div>
