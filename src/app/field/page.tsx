@@ -6,7 +6,7 @@ import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
-  microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq,
+  microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmFreeze, microcosmFreezeReverse,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -156,11 +156,22 @@ export default function FieldPage() {
     return (NOTES.indexOf(st.note) - NOTES.indexOf(lockKey)) + (st.oct - 4) * 12;
   }
   const [bpm, setBpm] = useState(92);   // master tempo — reference frame for progression clock + locked orbs
+  const barAnchorRef = useRef(0);   // performance.now() timestamp of a known bar boundary (free-running clock)
+  const freezeArmRef = useRef<any>(null);   // pending quantized-freeze timer
+  // time in ms until the next HALF-BAR boundary from now, given current bpm
+  function msToNextHalfBar(): number {
+    const halfBarMs = (60 / bpm) * 4 * 1000;   // one full 4/4 bar
+    if (!barAnchorRef.current) return 0;       // no anchor yet -> fire immediately
+    const elapsed = performance.now() - barAnchorRef.current;
+    const into = ((elapsed % halfBarMs) + halfBarMs) % halfBarMs;
+    return halfBarMs - into;
+  }
   useEffect(() => { microcosmBpm(bpm); }, [bpm]);   // push tempo to engine for locked-orb grid
   const [bpmEditing, setBpmEditing] = useState(false);   // double-click Tempo to type a value
   const [chordsOpen, setChordsOpen] = useState(false);
   const [prog, setProg] = useState<ProgStep[]>([]);     // the sequence
   const progRef = useRef<ProgStep[]>([]);   // live mirror of prog so a running progression reads edits
+  const progIdxRef = useRef(0);   // current step index (freeze pause/resume)
   const [dragIdx, setDragIdx] = useState<number|null>(null);   // chord block being dragged
   useEffect(() => { const up=()=>setDragIdx(null); window.addEventListener('pointerup',up); return ()=>window.removeEventListener('pointerup',up); }, []);
   useEffect(() => { progRef.current = prog; }, [prog]);
@@ -182,27 +193,34 @@ export default function FieldPage() {
     setProgRunning(false); setProgProgress(0); setProgStepDur(0);
     progTransposeRef.current = 0; setProgStepIdx(0); reapplySourceFreq();
   }
+  const progStep = () => {
+    const seq = progRef.current;
+    if (seq.length === 0) { stopProg(); return; }
+    let i = progIdxRef.current;
+    if (i >= seq.length) i = 0;   // sequence shrank (chord removed) — wrap safely
+    progIdxRef.current = i;
+    const st = seq[i];
+    const barMs = (60 / bpm) * 4 * 1000;
+    const dur = barMs * st.bars;
+    progTransposeRef.current = stepSemis(st);
+    reapplySourceFreq();
+    setProgProgress(0);
+    setProgStepIdx(i);
+    setProgStepDur(0);
+    requestAnimationFrame(() => requestAnimationFrame(() => { setProgStepDur(dur); setProgProgress(1); }));
+    progTimer.current = setTimeout(() => { progIdxRef.current = (progIdxRef.current + 1) % Math.max(1, progRef.current.length); progStep(); }, dur);
+  };
+  function pauseProg() {   // freeze: hold the progression where it is
+    if (progTimer.current) { clearTimeout(progTimer.current); progTimer.current = null; }
+  }
+  function resumeProg() {  // unfreeze: continue from the held step
+    if (progRunning && !progTimer.current) progStep();
+  }
   function runProg() {
     if (prog.length === 0) return;
     setProgRunning(true);
-    const barMs = (60 / bpm) * 4 * 1000;  // one 4/4 bar in ms at current BPM
-    let i = 0;
-    const step = () => {
-      const seq = progRef.current;
-      if (seq.length === 0) { stopProg(); return; }
-      if (i >= seq.length) i = 0;   // sequence shrank (chord removed) — wrap safely
-      const st = seq[i];
-      const dur = barMs * st.bars;
-      progTransposeRef.current = stepSemis(st);
-      reapplySourceFreq();
-      // reset fill to 0 instantly, then on next frame animate to 1 over `dur` via CSS transition
-      setProgProgress(0);
-      setProgStepIdx(i);
-      setProgStepDur(0);
-      requestAnimationFrame(() => requestAnimationFrame(() => { setProgStepDur(dur); setProgProgress(1); }));
-      progTimer.current = setTimeout(() => { i = (i + 1) % Math.max(1, progRef.current.length); step(); }, dur);
-    };
-    step();
+    progIdxRef.current = 0;
+    progStep();
   }
   const lastTap = useRef<{ key:string; t:number }>({ key:'', t:0 });
   const [palette, setPalette] = useState('open');     // armed flavour palette (global)
@@ -279,6 +297,7 @@ export default function FieldPage() {
     setFieldOrbs(restored); setSongMenu(null);
   }
   const [life, setLife] = useState(0.32);
+  const [freezeOn, setFreezeOn] = useState(false);   // Freeze: hold the grain buffer
   const [solo, setSolo] = useState(false);      // TEST SOLO
   const soloRef = useRef(false);                // TEST SOLO
   const [density, setDensity] = useState(0.5);  // TEST DENSITY
@@ -478,7 +497,7 @@ export default function FieldPage() {
   }
   async function doStart() {
     if (!started.current) { await ensureStarted(); return; }
-    await microcosmStart(); activateRack(); setState('playing');
+    await microcosmStart(); activateRack(); setState('playing'); barAnchorRef.current = performance.now();
   }
   function doStop() { microcosmStopEngine(); setState('stopped'); }
   function toggleMute() {
@@ -1032,8 +1051,18 @@ export default function FieldPage() {
           <div className="haar-section" style={{ display:'flex', flexDirection:'column', alignItems:'flex-start' }}>
             <div className="haar-sectionlbl" style={zlabel}>FIELD</div>
             <div style={{ display:'flex', alignItems:'flex-end', gap:30 }}>
-              <div className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
-                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(174,240,255,0.5)', background:'rgba(174,240,255,0.06)', boxShadow:'0 0 18px 3px rgba(174,240,255,0.4), inset 0 0 14px rgba(174,240,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <div className="haar-hover" onClick={()=>{
+                const n=!freezeOn; setFreezeOn(n);
+                if (freezeArmRef.current) { clearTimeout(freezeArmRef.current); freezeArmRef.current=null; }
+                if (n) {
+                  const barSamples = Math.floor((60/bpm)*4*48000);   // full-bar loop length
+                  const wait = msToNextHalfBar();
+                  freezeArmRef.current = setTimeout(() => { microcosmFreeze(true, barSamples); pauseProg(); freezeArmRef.current=null; }, wait);
+                } else {
+                  microcosmFreeze(false); resumeProg();
+                }
+              }} style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:`1px solid ${freezeOn?'#7ce9ff':'rgba(174,240,255,0.5)'}`, background: freezeOn?'rgba(174,240,255,0.22)':'rgba(174,240,255,0.06)', boxShadow: freezeOn?'0 0 26px 6px rgba(124,233,255,0.7), inset 0 0 14px rgba(174,240,255,0.3)':'0 0 18px 3px rgba(174,240,255,0.4), inset 0 0 14px rgba(174,240,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="24" height="24" viewBox="0 0 20 20"><g stroke="#cdf5ff" strokeWidth="1.3" opacity="0.85"><line x1="10" y1="2" x2="10" y2="18"/><line x1="3" y1="6" x2="17" y2="14"/><line x1="3" y1="14" x2="17" y2="6"/></g></svg>
                 </div>
                 <div className="haar-lbl" style={{ fontSize:12.5, color:'#bfe8f5', marginTop:8 }}>Freeze</div>

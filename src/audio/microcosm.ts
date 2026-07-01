@@ -213,7 +213,8 @@ export class Microcosm {
     return (x >>> 0) / 4294967295;
   }
   setOrbHome(id: string, semis: number): void { this.engineHome[id] = semis; }
-  setFreeze(on: boolean): void { this.node?.port.postMessage({ type: 'freeze', value: on }); }
+  setFreeze(on: boolean, samples?: number): void { this.node?.port.postMessage({ type: 'freeze', value: on, samples: samples || 0 }); }
+  setFreezeReverse(on: boolean): void { this.node?.port.postMessage({ type: 'freezeReverse', value: on }); }
   clearGrains(): void { this.node?.port.postMessage({ type: 'clearGrains' }); }
 
   setFilter(hz: number): void {

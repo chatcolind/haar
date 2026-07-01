@@ -13,8 +13,11 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
     this.size = Math.floor(this.sampleRate * this.bufferSeconds);
     this.ring = new Float32Array(this.size);
     this.writePos = 0;
-    this.frozen = false;        // HOLD — stop writing, keep reading
+    this.frozen = false;        // HOLD — read from the frozen loop buffer instead of live ring
     this.recording = true;
+    this.freezeBuf = null;      // tempo-locked captured loop (Float32Array), grains read this when frozen
+    this.freezeLen = 0;         // length of the freeze loop in samples
+    this.freezeReverse = false; // play the frozen loop backwards
 
     // Active grain voices
     this.grains = [];
@@ -57,8 +60,21 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
           maxRead: behind,
         });
       } else if (m.type === 'freeze') {
-        this.frozen = m.value;
-        this.recording = !m.value;
+        if (m.value) {
+          this._captureFreeze(m.samples || Math.floor(this._sr));  // capture tempo-locked slice
+          this.frozen = true;
+          this.freezePos = 0;       // start the loop player at the top of the captured bar
+          this.recording = false;   // stop overwriting the ring while frozen
+          this.grains.length = 0;   // clear in-flight grains so none jump buffers mid-window (pop)
+        } else {
+          this.frozen = false;
+          this.freezeReverse = false;
+          this.recording = true;    // resume live recording into the ring
+          this._smoothRingSeam();   // crossfade the stale write-head seam so resume is click-free
+          this.grains.length = 0;   // clear so grains restart cleanly in the live ring
+        }
+      } else if (m.type === 'freezeReverse') {
+        this.freezeReverse = !!m.value;
       } else if (m.type === 'clearGrains') {
         this.grains.length = 0;
       } else if (m.type === 'config') {
@@ -67,7 +83,40 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
     };
   }
 
-  // ── 3-band EQ (low-shelf, peaking mid, high-shelf) per engine ──────────
+  // Smooth the live ring's write-head seam (used on freeze release so resuming grains don't pop).
+  _smoothRingSeam() {
+    const xf = Math.min(Math.floor(this._sr * 0.012), Math.floor(this.size / 4));
+    if (xf < 8) return;
+    const w = this.writePos, sz = this.size;
+    for (let k = 0; k < xf; k++) {
+      const t = k / xf; const g = 0.5 - 0.5 * Math.cos(Math.PI * t);
+      const after = (w + k) % sz, before = (w - xf + k + sz) % sz;
+      this.ring[after] = this.ring[after] * g + this.ring[before] * (1 - g);
+    }
+  }
+    // Capture a tempo-locked slice (N samples ending at the write head) into a dedicated
+  // freeze loop buffer, with a crossfaded seam so it loops seamlessly (no pops).
+  _captureFreeze(samples) {
+    const sz = this.size;
+    let len = Math.min(samples, sz - 1);
+    if (len < 64) len = 64;
+    const buf = new Float32Array(len);
+    // copy the most recent `len` samples ending at writePos
+    const start = (this.writePos - len + sz) % sz;
+    for (let k = 0; k < len; k++) buf[k] = this.ring[(start + k) % sz];
+    // crossfade the loop seam: blend the tail into the head over ~15ms so end meets start
+    const xf = Math.min(Math.floor(this._sr * 0.015), Math.floor(len / 4));
+    for (let k = 0; k < xf; k++) {
+      const t = k / xf;
+      const g = 0.5 - 0.5 * Math.cos(Math.PI * t);   // raised-cosine 0..1
+      // head sample k gets a blend of itself and the corresponding tail sample
+      const tail = buf[len - xf + k];
+      buf[k] = buf[k] * g + tail * (1 - g);
+    }
+    this.freezeBuf = buf;
+    this.freezeLen = len;
+  }
+    // ── 3-band EQ (low-shelf, peaking mid, high-shelf) per engine ──────────
   _recalcEQ(id) {
     const sr = this._sr || 48000;
     const g = this.engineEQ[id] || { lo:0, mid:0, hi:0 };
@@ -152,7 +201,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
       const panAccR = this._panAccR || (this._panAccR = {});
       for (const k in panAccL) { panAccL[k] = 0; panAccR[k] = 0; }
 
-      for (let g = 0; g < this.grains.length; g++) {
+      for (let g = 0; !this.frozen && g < this.grains.length; g++) {
         const gr = this.grains[g];
         if (gr.remaining <= 0) continue;
         const phase = (gr.total - gr.remaining) / gr.total;
@@ -185,6 +234,25 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         }
         outL[i] += l;
         outR[i] += r;
+      }
+      // FREEZE LOOP PLAYER: one clean read head over the captured bar (bypasses grains).
+      if (this.frozen && this.freezeBuf && this.freezeLen > 0) {
+        const fl = this.freezeLen;
+        let pos = this.freezePos;
+        let rp = this.freezeReverse ? (fl - 1 - pos) : pos;
+        const a0 = Math.floor(rp) % fl;
+        const a1 = (a0 + 1) % fl;
+        const fr = rp - Math.floor(rp);
+        const fb = this.freezeBuf;
+        let smp = (fb[a0] * (1 - fr) + fb[a1] * fr) * 0.35;   // trim: captured sum is hot vs grained output
+        // short fade at loop edges to guarantee no seam click
+        const edge = 256;
+        if (pos < edge) smp *= pos / edge;
+        else if (pos > fl - edge) smp *= (fl - pos) / edge;
+        outL[i] += smp;
+        outR[i] += smp;
+        this.freezePos += 1;
+        if (this.freezePos >= fl) this.freezePos = 0;
       }
     }
     // 4. Cull finished grains
