@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
-  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSample, microcosmLoadSource, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -157,13 +157,6 @@ export default function FieldPage() {
     // offset that moves detected onto that exact grid note = -(fractional detune)
     const offset = nearestNote - semisFromRoot;               // small ± correction into tune
     return Math.round(offset * 100) / 100;                    // 2dp semitones (can be fractional)
-  }
-  // STEP A test helper: set the Birdsong constellation's register + apply it live to its orbs.
-  function setBirdRegister(semis: number): void {
-    setConstellations(prev => prev.map(c => c.name === 'Birdsong' ? { ...c, register: semis } : c));
-    const g = (window as any).__birdGroup || [];
-    g.forEach((o: string) => microcosmOrbRegister(o, semis));   // register slot
-    console.log('[stepA] birdsong register', semis);
   }
   const orbCounter = useRef<Record<string, number>>({});
   function mintOrbId(engineType: string): string {
@@ -827,28 +820,6 @@ export default function FieldPage() {
 
   return (
     <main style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'radial-gradient(ellipse at 50% 28%, #10131f 0%, #070810 66%, #04050a 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
-      {/* THROWAWAY sample-load test: drop a file to granulate it through the orbs */}
-      <input type="file" accept="audio/*"
-        onChange={async (e)=>{ const f=e.target.files?.[0]; if(f){ await ensureStarted(); await microcosmLoadSample(f); } }}
-        style={{ position:'absolute', top:16, right:16, zIndex:500, fontSize:11, color:'rgba(255,255,255,0.6)' }} />
-      {/* SLICE 4 test: load a WAV, create a 'Birdsong' constellation from it, and assign the
-          first few orbs to it as a GROUP — several orbs grain birdsong together, rest stay synth. */}
-      <div style={{ position:'absolute', top:40, right:16, zIndex:500, fontSize:11, color:'#ffd86b' }}>
-        <span style={{ marginRight:6 }}>birdsong constellation (first 4 orbs):</span>
-        <input type="file" accept="audio/*"
-          onChange={async (e)=>{ const f=e.target.files?.[0]; if(!f) return; if(fieldOrbs.length===0){ console.warn('[slice4] add orbs first'); return; } await ensureStarted(); const res=await microcosmLoadSource('sample', f); const cid=createConstellation('Birdsong','sample'); const group=fieldOrbs.slice(0,4).map(o=>o.id); group.forEach(o=>assignOrbToConstellation(o, cid, 'sample')); (window as any).__birdGroup=group; const tune=tuningOffsetFor(res.rootHz); (window as any).__birdTune=tune; group.forEach(o=>microcosmOrbConstTranspose(o, tune)); console.log('[slice5] Birdsong', cid, 'detected', res.rootHz.toFixed(1)+'Hz -> tuning offset', tune, 'semis'); }}
-          style={{ fontSize:11 }} />
-        {/* SLICE 5 test: transpose the whole Birdsong constellation as a group */}
-        <span style={{ marginLeft:10, marginRight:6 }}>transpose group:</span>
-        <button onClick={()=>{ const g=(window as any).__birdGroup||[]; (window as any).__birdT=((window as any).__birdT||0)-12; g.forEach((o:string)=>microcosmOrbConstTranspose(o,(window as any).__birdT)); console.log('[slice5] group transpose', (window as any).__birdT); }} style={{ fontSize:12, marginRight:4 }}>−12</button>
-        <button onClick={()=>{ const g=(window as any).__birdGroup||[]; (window as any).__birdT=0; g.forEach((o:string)=>microcosmOrbConstTranspose(o,0)); console.log('[slice5] group transpose 0'); }} style={{ fontSize:12, marginRight:4 }}>0</button>
-        <button onClick={()=>{ const g=(window as any).__birdGroup||[]; (window as any).__birdT=((window as any).__birdT||0)+12; g.forEach((o:string)=>microcosmOrbConstTranspose(o,(window as any).__birdT)); console.log('[slice5] group transpose', (window as any).__birdT); }} style={{ fontSize:12 }}>+12</button>
-        {/* STEP A test: set the Birdsong constellation's REGISTER role, then run a chord progression */}
-        <span style={{ marginLeft:10, marginRight:6 }}>birdsong register:</span>
-        <button onClick={()=>setBirdRegister(-12)} style={{ fontSize:12, marginRight:4 }}>bass −12</button>
-        <button onClick={()=>setBirdRegister(0)} style={{ fontSize:12, marginRight:4 }}>mid 0</button>
-        <button onClick={()=>setBirdRegister(12)} style={{ fontSize:12 }}>air +12</button>
-      </div>
       {/* tap-out backdrop: when a panel is open, a click on empty field dismisses it */}
       {(tapeOpen || chordsOpen || mixOpen) && (
         <div onClick={closePanels} style={{ position:'absolute', inset:0, zIndex:200, background:'transparent' }} />
@@ -1503,7 +1474,7 @@ export default function FieldPage() {
             {/* CONSTELLATION — target an existing one, or create a new one */}
             <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:18, fontFamily:'monospace', textAlign:'center' }}>CONSTELLATION</div>
             <div style={{ display:'flex', gap:14, marginBottom:20, justifyContent:'center', flexWrap:'wrap' }}>
-              {constellations.map(c => {
+              {constellations.filter(c => !(c.id===DEFAULT_CONST_ID && c.orbIds.length===0)).map(c => {
                 const sel = createConstTarget===c.id;
                 return <div key={c.id} onClick={()=>{ setCreateConstTarget(c.id); setCreateSrc(c.sourceId==='default'?'synth':'sample'); }} style={{ padding:'12px 22px', borderRadius:14, cursor:'pointer', border: sel?'1px solid #d8a6ff':'0.5px solid rgba(255,255,255,0.16)', background: sel?'rgba(216,166,255,0.12)':'rgba(255,255,255,0.02)', color: sel?'#e0bfff':'rgba(255,255,255,0.6)', fontSize:16 }}>{c.name}<span style={{ fontSize:11, opacity:0.5, marginLeft:8 }}>{c.orbIds.length}</span></div>;
               })}
