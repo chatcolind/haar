@@ -106,6 +106,44 @@ export default function FieldPage() {
   // Each is { id (unique instance), engineType (recipe), label, colorKey }. Starts with one default Mosaic.
   type FieldOrb = { id: string; engineType: string; label: string; colorKey: any };
   const [fieldOrbs, setFieldOrbs] = useState<FieldOrb[]>([]);  // blank field — add orbs to begin
+  // ── CONSTELLATIONS (Slice 4) ──────────────────────────────────────────
+  // A constellation is a named group of orbs sharing ONE source. The default synth
+  // constellation always exists, so single-constellation = today's Haar exactly.
+  type Constellation = {
+    id: string; name: string; sourceId: string;   // sourceId 'default' = synth (1:1)
+    orbIds: string[];
+    register: number;                              // semitone offset (Slice 5)
+    pitchMode: 'varispeed' | 'grainshift';         // (Slice 5)
+  };
+  const DEFAULT_CONST_ID = 'const_default';
+  const [constellations, setConstellations] = useState<Constellation[]>([
+    { id: DEFAULT_CONST_ID, name: 'Synth', sourceId: 'default', orbIds: [], register: 0, pitchMode: 'varispeed' },
+  ]);
+  // which constellation new orbs join / is currently "forward". Defaults to the synth one.
+  const [activeConstId, setActiveConstId] = useState<string>(DEFAULT_CONST_ID);
+  const constCounter = useRef(0);
+  function createConstellation(name: string, sourceId: string): string {
+    const id = `const_${++constCounter.current}`;
+    setConstellations(prev => [...prev, { id, name, sourceId, orbIds: [], register: 0, pitchMode: 'varispeed' }]);
+    return id;
+  }
+  // Move an orb into a constellation (removing it from any other), and route its grains
+  // to that constellation's source via the proven Slice-3 mechanism.
+  function assignOrbToConstellation(orbId: string, constId: string, sourceIdHint?: string): void {
+    let routed = sourceIdHint;
+    setConstellations(prev => {
+      const next = prev.map(c => ({
+        ...c,
+        orbIds: c.id === constId
+          ? Array.from(new Set([...c.orbIds, orbId]))
+          : c.orbIds.filter(o => o !== orbId),
+      }));
+      // read the source from the up-to-date array (avoids stale-closure lookup)
+      if (routed == null) { const c = next.find(x => x.id === constId); routed = c ? c.sourceId : 'default'; }
+      return next;
+    });
+    if (routed != null) microcosmEngineSource(orbId, routed);
+  }
   const orbCounter = useRef<Record<string, number>>({});
   function mintOrbId(engineType: string): string {
     const n = (orbCounter.current[engineType] || 0) + 1;
@@ -128,6 +166,10 @@ export default function FieldPage() {
     fillRef.current[id] = 1;       // full fill
     seedRef.current[id] = 1;       // stable starting seed
     setFieldOrbs(prev => [...prev, { id, engineType, label, colorKey }]);
+    // every orb belongs to exactly one constellation — the active one at birth
+    setConstellations(prev => prev.map(c => c.id === activeConstId ? { ...c, orbIds: [...c.orbIds, id] } : c));
+    const ac = constellations.find(c => c.id === activeConstId);
+    if (ac) microcosmEngineSource(id, ac.sourceId);
     return id;
   }
   function removeFieldOrb(id: string): void {
@@ -629,12 +671,12 @@ export default function FieldPage() {
       <input type="file" accept="audio/*"
         onChange={async (e)=>{ const f=e.target.files?.[0]; if(f){ await ensureStarted(); await microcosmLoadSample(f); } }}
         style={{ position:'absolute', top:16, right:16, zIndex:500, fontSize:11, color:'rgba(255,255,255,0.6)' }} />
-      {/* SLICE 3 test: load a WAV as source 'sample' and assign the FOCUSED/SELECTED orb to it,
-          so it grains the sample while other orbs keep the synth — two sources at once. */}
+      {/* SLICE 4 test: load a WAV, create a 'Birdsong' constellation from it, and assign the
+          first few orbs to it as a GROUP — several orbs grain birdsong together, rest stay synth. */}
       <div style={{ position:'absolute', top:40, right:16, zIndex:500, fontSize:11, color:'#ffd86b' }}>
-        <span style={{ marginRight:6 }}>sample→orb:</span>
+        <span style={{ marginRight:6 }}>birdsong constellation (first 4 orbs):</span>
         <input type="file" accept="audio/*"
-          onChange={async (e)=>{ const f=e.target.files?.[0]; const orb=(focused || selected || fieldOrbs[0]?.id); if(f && orb){ await ensureStarted(); await microcosmLoadSource('sample', f); microcosmEngineSource(orb, 'sample'); console.log('[slice3] orb', orb, '-> sample (rest stay synth)'); } else if(!orb){ console.warn('[slice3] add an orb to the field first'); } }}
+          onChange={async (e)=>{ const f=e.target.files?.[0]; if(!f) return; if(fieldOrbs.length===0){ console.warn('[slice4] add orbs first'); return; } await ensureStarted(); await microcosmLoadSource('sample', f); const cid=createConstellation('Birdsong','sample'); const group=fieldOrbs.slice(0,4).map(o=>o.id); group.forEach(o=>assignOrbToConstellation(o, cid, 'sample')); console.log('[slice4] Birdsong constellation', cid, 'orbs:', group, '(rest stay synth)'); }}
           style={{ fontSize:11 }} />
       </div>
       {/* tap-out backdrop: when a panel is open, a click on empty field dismisses it */}
