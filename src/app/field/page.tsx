@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
-  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSample, microcosmLoadSource, microcosmEngineSource,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSample, microcosmLoadSource, microcosmEngineSource, microcosmOrbConstTranspose,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -676,8 +676,13 @@ export default function FieldPage() {
       <div style={{ position:'absolute', top:40, right:16, zIndex:500, fontSize:11, color:'#ffd86b' }}>
         <span style={{ marginRight:6 }}>birdsong constellation (first 4 orbs):</span>
         <input type="file" accept="audio/*"
-          onChange={async (e)=>{ const f=e.target.files?.[0]; if(!f) return; if(fieldOrbs.length===0){ console.warn('[slice4] add orbs first'); return; } await ensureStarted(); await microcosmLoadSource('sample', f); const cid=createConstellation('Birdsong','sample'); const group=fieldOrbs.slice(0,4).map(o=>o.id); group.forEach(o=>assignOrbToConstellation(o, cid, 'sample')); console.log('[slice4] Birdsong constellation', cid, 'orbs:', group, '(rest stay synth)'); }}
+          onChange={async (e)=>{ const f=e.target.files?.[0]; if(!f) return; if(fieldOrbs.length===0){ console.warn('[slice4] add orbs first'); return; } await ensureStarted(); await microcosmLoadSource('sample', f); const cid=createConstellation('Birdsong','sample'); const group=fieldOrbs.slice(0,4).map(o=>o.id); group.forEach(o=>assignOrbToConstellation(o, cid, 'sample')); (window as any).__birdGroup=group; console.log('[slice5] Birdsong constellation', cid, 'orbs:', group, '(rest stay synth). Use +/- to transpose the group.'); }}
           style={{ fontSize:11 }} />
+        {/* SLICE 5 test: transpose the whole Birdsong constellation as a group */}
+        <span style={{ marginLeft:10, marginRight:6 }}>transpose group:</span>
+        <button onClick={()=>{ const g=(window as any).__birdGroup||[]; (window as any).__birdT=((window as any).__birdT||0)-12; g.forEach((o:string)=>microcosmOrbConstTranspose(o,(window as any).__birdT)); console.log('[slice5] group transpose', (window as any).__birdT); }} style={{ fontSize:12, marginRight:4 }}>−12</button>
+        <button onClick={()=>{ const g=(window as any).__birdGroup||[]; (window as any).__birdT=0; g.forEach((o:string)=>microcosmOrbConstTranspose(o,0)); console.log('[slice5] group transpose 0'); }} style={{ fontSize:12, marginRight:4 }}>0</button>
+        <button onClick={()=>{ const g=(window as any).__birdGroup||[]; (window as any).__birdT=((window as any).__birdT||0)+12; g.forEach((o:string)=>microcosmOrbConstTranspose(o,(window as any).__birdT)); console.log('[slice5] group transpose', (window as any).__birdT); }} style={{ fontSize:12 }}>+12</button>
       </div>
       {/* tap-out backdrop: when a panel is open, a click on empty field dismisses it */}
       {(tapeOpen || chordsOpen || mixOpen) && (

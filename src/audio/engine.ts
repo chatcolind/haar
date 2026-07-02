@@ -699,6 +699,7 @@ export async function microcosmLoadSource(id: string, file: File): Promise<numbe
 }
 export function microcosmRemoveSource(id: string): void { (microcosmCore as any)?.removeSource(id); }
 export function microcosmEngineSource(orbId: string, sourceId: string): void { (microcosmCore as any)?.setEngineSource(orbId, sourceId); }
+export function microcosmOrbConstTranspose(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbConstTranspose(orbId, semis); }
 export function microcosmSetSpace(w: number): void { microcosmCore?.setSpace(w); }
 export function microcosmFreeze(on: boolean, samples?: number): void { microcosmCore?.setFreeze(on, samples); }
 export function microcosmFreezeReverse(on: boolean): void { (microcosmCore as any)?.setFreezeReverse(on); }

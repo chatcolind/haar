@@ -285,7 +285,10 @@ export class Microcosm {
     // home ratio is an EXACT consonant interval (octave/fifth/etc) - never clamp it, that detunes.
     // detune (spec.rate's deviation from 1) is a small wobble; clamp only that to avoid alias.
     const home = this.engineHome[this._currentEngine] ?? 0;
-    const homeRatio = Math.pow(2, home / 12);
+    // CONSTELLATION transpose (Slice 5): register + chord step for this orb's constellation,
+    // applied as an additional exact ratio alongside the per-orb home interval.
+    const constT = this.engineConstTranspose[this._currentEngine] ?? 0;
+    const homeRatio = Math.pow(2, (home + constT) / 12);
     // separate the detune wobble from unity, clamp the wobble modestly, then apply exact home
     const detune = spec.rate;                       // e.g. ~0.94..1.06 normally
     const detuneClamped = Math.sign(detune || 1) * Math.min(Math.abs(detune), 1.5);
@@ -320,6 +323,9 @@ export class Microcosm {
     return (x >>> 0) / 4294967295;
   }
   setOrbHome(id: string, semis: number): void { this.engineHome[id] = semis; }
+  // per-orb CONSTELLATION transpose (semitones): register + chord step of the orb's constellation.
+  private engineConstTranspose: Record<string, number> = {};
+  setOrbConstTranspose(id: string, semis: number): void { this.engineConstTranspose[id] = semis; }
   setFreeze(on: boolean, samples?: number): void { this.node?.port.postMessage({ type: 'freeze', value: on, samples: samples || 0 }); }
   setFreezeReverse(on: boolean): void { this.node?.port.postMessage({ type: 'freezeReverse', value: on }); }
   clearGrains(): void { this.node?.port.postMessage({ type: 'clearGrains' }); }
