@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
-  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSample,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSample, microcosmLoadSource, microcosmEngineSource,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -629,6 +629,14 @@ export default function FieldPage() {
       <input type="file" accept="audio/*"
         onChange={async (e)=>{ const f=e.target.files?.[0]; if(f){ await ensureStarted(); await microcosmLoadSample(f); } }}
         style={{ position:'absolute', top:16, right:16, zIndex:500, fontSize:11, color:'rgba(255,255,255,0.6)' }} />
+      {/* SLICE 3 test: load a WAV as source 'sample' and assign the FOCUSED/SELECTED orb to it,
+          so it grains the sample while other orbs keep the synth — two sources at once. */}
+      <div style={{ position:'absolute', top:40, right:16, zIndex:500, fontSize:11, color:'#ffd86b' }}>
+        <span style={{ marginRight:6 }}>sample→orb:</span>
+        <input type="file" accept="audio/*"
+          onChange={async (e)=>{ const f=e.target.files?.[0]; const orb=(focused || selected || fieldOrbs[0]?.id); if(f && orb){ await ensureStarted(); await microcosmLoadSource('sample', f); microcosmEngineSource(orb, 'sample'); console.log('[slice3] orb', orb, '-> sample (rest stay synth)'); } else if(!orb){ console.warn('[slice3] add an orb to the field first'); } }}
+          style={{ fontSize:11 }} />
+      </div>
       {/* tap-out backdrop: when a panel is open, a click on empty field dismisses it */}
       {(tapeOpen || chordsOpen || mixOpen) && (
         <div onClick={closePanels} style={{ position:'absolute', inset:0, zIndex:200, background:'transparent' }} />

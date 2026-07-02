@@ -292,8 +292,12 @@ export class Microcosm {
     const r = detuneClamped * homeRatio;            // exact interval * gentle wobble
     // final safety only for extreme up-stacks (e.g. +2oct * wide detune): cap high but generous
     const capped = Math.sign(r || 1) * Math.min(Math.abs(r), 4.2);
-    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine });
+    const source = this.engineSource[this._currentEngine] || 'default';
+    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine, source });
   }
+  // per-orb SOURCE (constellation): which loaded source buffer this orb's grains read.
+  private engineSource: Record<string, string> = {};
+  setEngineSource(id: string, sourceId: string): void { this.engineSource[id] = sourceId || 'default'; }
   // per-orb home pitch (semitones, absolute home; conductor transpose added later)
   private engineHome: Record<string, number> = {};
   // ── TEMPO LOCK (per orb) ──────────────────────────────────────────────
