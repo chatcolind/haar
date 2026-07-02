@@ -377,8 +377,11 @@ export default function FieldPage() {
       targetId = createConstellation(name, sourceId);
       const _t = tune; setConstellations(prev => prev.map(c => c.id === targetId ? { ...c, tune: _t } : c));
     } else {
+      // adding to an EXISTING constellation: inherit its source AND its tuning so the new
+      // orb grains the same WAV, in tune, like the rest of that constellation.
       const existing = constellations.find(c => c.id === targetId);
       sourceId = existing ? existing.sourceId : 'default';
+      tune = existing ? (existing.tune || 0) : 0;
     }
     setActiveConstId(targetId);
     const newOrbIds: string[] = [];
@@ -399,17 +402,35 @@ export default function FieldPage() {
     setPendingWav(null);
     setCreateOpen(false);   // auto-exit to field after adding
   }
+  // exit the creation screen without adding — reset all pending selections cleanly
+  function cancelCreate() {
+    stopPreview();
+    setCreateEngine(null);
+    setCreateList([]);
+    setCreateConstName('');
+    setPendingWav(null);
+    setCreateConstTarget('__new__');
+    setCreateSrc('synth');
+    setCreateOpen(false);
+  }
   const PREVIEW_ID = 'preview_temp';
   async function previewEngine(engineType: string) {
     setCreateEngine(engineType);
     await ensureStarted();
     microcosmRemoveOrb(PREVIEW_ID);
     microcosmAddOrb(PREVIEW_ID, engineType, 0.8);
-    // if a WAV source is chosen for a new constellation, preview grains the WAV (not synth)
-    if (createConstTarget==='__new__' && createSrc==='sample' && (window as any).__pendingSrc) {
+    // Route the preview to whatever source the SELECTED constellation actually uses:
+    //  - existing constellation -> its already-loaded source id + its tuning
+    //  - new constellation with a chosen WAV -> the pending source
+    //  - otherwise -> synth (default)
+    const existing = createConstTarget !== '__new__' ? constellations.find(c => c.id === createConstTarget) : null;
+    if (existing && existing.sourceId !== 'default') {
+      microcosmEngineSource(PREVIEW_ID, existing.sourceId);
+      if (existing.tune) microcosmOrbTuning(PREVIEW_ID, existing.tune);
+    } else if (createConstTarget==='__new__' && createSrc==='sample' && (window as any).__pendingSrc) {
       const ps = (window as any).__pendingSrc;
       microcosmEngineSource(PREVIEW_ID, ps.id);
-      if (ps.tune) microcosmOrbConstTranspose(PREVIEW_ID, ps.tune);
+      if (ps.tune) microcosmOrbTuning(PREVIEW_ID, ps.tune);
     } else {
       microcosmEngineSource(PREVIEW_ID, 'default');
     }
@@ -1476,7 +1497,7 @@ export default function FieldPage() {
         <div style={{ position:'fixed', inset:0, zIndex:300, background:'radial-gradient(ellipse at 50% 32%, #0c1018 0%, #06070d 60%, #030409 100%)', display:'flex', flexDirection:'column', fontFamily:'Rajdhani, sans-serif' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'34px 56px 0' }}>
             <span style={{ fontSize:15, letterSpacing:'0.32em', color:'#d8a6ff', fontFamily:'monospace' }}>NEW ORB</span>
-            <div onClick={()=>{ stopPreview(); setCreateEngine(null); setCreateOpen(false); }} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
+            <div onClick={cancelCreate} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
           </div>
           <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 56px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
             {/* CONSTELLATION — target an existing one, or create a new one */}
@@ -1484,7 +1505,7 @@ export default function FieldPage() {
             <div style={{ display:'flex', gap:14, marginBottom:20, justifyContent:'center', flexWrap:'wrap' }}>
               {constellations.map(c => {
                 const sel = createConstTarget===c.id;
-                return <div key={c.id} onClick={()=>setCreateConstTarget(c.id)} style={{ padding:'12px 22px', borderRadius:14, cursor:'pointer', border: sel?'1px solid #d8a6ff':'0.5px solid rgba(255,255,255,0.16)', background: sel?'rgba(216,166,255,0.12)':'rgba(255,255,255,0.02)', color: sel?'#e0bfff':'rgba(255,255,255,0.6)', fontSize:16 }}>{c.name}<span style={{ fontSize:11, opacity:0.5, marginLeft:8 }}>{c.orbIds.length}</span></div>;
+                return <div key={c.id} onClick={()=>{ setCreateConstTarget(c.id); setCreateSrc(c.sourceId==='default'?'synth':'sample'); }} style={{ padding:'12px 22px', borderRadius:14, cursor:'pointer', border: sel?'1px solid #d8a6ff':'0.5px solid rgba(255,255,255,0.16)', background: sel?'rgba(216,166,255,0.12)':'rgba(255,255,255,0.02)', color: sel?'#e0bfff':'rgba(255,255,255,0.6)', fontSize:16 }}>{c.name}<span style={{ fontSize:11, opacity:0.5, marginLeft:8 }}>{c.orbIds.length}</span></div>;
               })}
               <div onClick={()=>setCreateConstTarget('__new__')} style={{ padding:'12px 22px', borderRadius:14, cursor:'pointer', border: createConstTarget==='__new__'?'1px solid #7af5c8':'0.5px dashed rgba(255,255,255,0.25)', background: createConstTarget==='__new__'?'rgba(122,245,200,0.1)':'transparent', color: createConstTarget==='__new__'?'#a6fff2':'rgba(255,255,255,0.5)', fontSize:16 }}>＋ New</div>
             </div>
@@ -1494,7 +1515,7 @@ export default function FieldPage() {
                   style={{ padding:'10px 18px', borderRadius:12, border:'0.5px solid rgba(216,166,255,0.4)', background:'rgba(255,255,255,0.03)', color:'#e0bfff', fontSize:16, textAlign:'center', outline:'none', fontFamily:'Rajdhani, sans-serif', width:320 }} />
               </div>
             )}
-            <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:24, fontFamily:'monospace', textAlign:'center' }}>SOURCE</div>
+            <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:24, fontFamily:'monospace', textAlign:'center' }}>{(() => { if (createConstTarget==='__new__') return 'SOURCE'; const c = constellations.find(x=>x.id===createConstTarget); const wav = c && sourceBytesRef.current[c.sourceId]?.name; return `SOURCE · ${c?.name || ''}${wav ? ' · '+wav : ''}`; })()}</div>
             <div style={{ display:'flex', gap:24, marginBottom: (createConstTarget==='__new__' && createSrc==='sample') ? 24 : 72, justifyContent:'center' }}>
               {(['synth','sample','livein'] as const).map(src => {
                 const lbl = src==='synth'?'Synth':src==='sample'?'Wave':'Live in';
@@ -1531,7 +1552,8 @@ export default function FieldPage() {
             </div>
           </div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 56px 44px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
-            <span style={{ fontSize:12, letterSpacing:'0.06em', color:'rgba(255,255,255,0.3)', fontFamily:'monospace' }}>source stays selected · add as many as you like</span>
+            <div onClick={cancelCreate} style={{ padding:'15px 40px', borderRadius:28, cursor:'pointer', border:'1px solid rgba(255,255,255,0.2)', background:'transparent', color:'rgba(255,255,255,0.55)', fontSize:15, letterSpacing:'0.12em' }}>← BACK</div>
+            <span style={{ fontSize:12, letterSpacing:'0.06em', color:'rgba(255,255,255,0.25)', fontFamily:'monospace' }}>source stays selected · add as many as you like</span>
             {(() => { const n = createList.length || (createEngine?1:0); const on = n>0; return (
             <div onClick={()=>doCreateOrb()} style={{ padding:'15px 52px', borderRadius:28, cursor: on?'pointer':'default', border:`1px solid ${on?'#7af5c8':'rgba(255,255,255,0.15)'}`, background: on?'rgba(122,245,200,0.14)':'transparent', color: on?'#a6fff2':'rgba(255,255,255,0.3)', fontSize:16, letterSpacing:'0.16em' }}>{n>1?`ADD ${n} ORBS`:'ADD ORB'}</div>
             ); })()}
