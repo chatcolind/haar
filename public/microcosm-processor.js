@@ -11,8 +11,13 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
     this.sampleRate = sampleRate; // global in worklet scope
     this.bufferSeconds = 4;
     this.size = Math.floor(this.sampleRate * this.bufferSeconds);
-    this.ring = new Float32Array(this.size);
+    this.ring = new Float32Array(this.size);   // DEFAULT source ring (synth) — unchanged path
     this.writePos = 0;
+    // ONE-BUFFER PRIMITIVE: every source is a worklet-owned buffer read by grain position.
+    // The default source's buffer IS this.ring (aliased) with a live writer, so the existing
+    // freeze/write/seam/capture code is byte-for-byte unchanged. Sample sources are added here
+    // with no writer (filled once, zero-copy). Grains carry a `source` id (absent => default).
+    this.sources = { default: { buf: this.ring, len: this.size, live: true } };
     this.frozen = false;        // HOLD — read from the frozen loop buffer instead of live ring
     this.recording = true;
     this.freezeBuf = null;      // tempo-locked captured loop (Float32Array), grains read this when frozen
@@ -49,6 +54,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         while (pos < 0) pos += this.size;
         this.grains.push({
           pos,
+          source: m.source || 'default',   // which source buffer this grain reads (constellation)
           engine: m.engine || '_',
           rate: m.rate,
           remaining: m.lenSamp,
@@ -207,18 +213,22 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         const phase = (gr.total - gr.remaining) / gr.total;
         const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * phase);
         const p = gr.pos;
-        const i0 = Math.floor(p) % this.size;
-        const i1 = (i0 + 1) % this.size;
+        // read from THIS grain's source buffer (default source's buf === this.ring, so the
+        // default path is byte-for-byte identical). Non-default sources read their own buffer.
+        const src = this.sources[gr.source] || this.sources.default;
+        const sbuf = src.buf, slen = src.len;
+        const i0 = Math.floor(p) % slen;
+        const i1 = (i0 + 1) % slen;
         const frac = p - Math.floor(p);
-        const sMono = (this.ring[i0] * (1 - frac) + this.ring[i1] * frac) * gr.gain * w;
+        const sMono = (sbuf[i0] * (1 - frac) + sbuf[i1] * frac) * gr.gain * w;
         const eng = gr.engine || '_';
         // accumulate this grain's PANNED contribution into its engine's L/R bus
         panAccL[eng] = (panAccL[eng] || 0) + sMono * gr.panL;
         panAccR[eng] = (panAccR[eng] || 0) + sMono * gr.panR;
-        // advance grain
+        // advance grain (wrap within THIS grain's source length)
         gr.pos += gr.rate;
-        if (gr.pos >= this.size) gr.pos -= this.size;
-        if (gr.pos < 0) gr.pos += this.size;
+        if (gr.pos >= slen) gr.pos -= slen;
+        if (gr.pos < 0) gr.pos += slen;
         if (gr.rate > 1) {
           gr.maxRead -= (gr.rate - 1);
           if (gr.maxRead <= 64 && gr.remaining > 1) gr.remaining = 1;

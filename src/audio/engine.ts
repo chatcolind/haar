@@ -610,6 +610,8 @@ export function microcosmStop(): void {
 let microcosmCore: MicrocosmCore | null = null;
 let microTestOsc: OscillatorNode | null = null;
 let microSrcGain: GainNode | null = null;  // source feed gain (for ducking on pitch change)
+let microSampleSrc: AudioBufferSourceNode | null = null;   // PROOF-OF-CONCEPT: sample source into nativeIn
+let sampleLoaded = false;   // once a sample is loaded, keep the oscillator silenced
 
 async function ensureMicrocosmCore(): Promise<void> {
   if (!microcosmCore) {
@@ -620,7 +622,7 @@ async function ensureMicrocosmCore(): Promise<void> {
   // Temporary internal source until the cross-context synth feed is built:
   // a native oscillator in the Microcosm's own context feeding its input.
   const ctx = microcosmCore.context;
-  if (!microTestOsc) {
+  if (!microTestOsc && !sampleLoaded) {
     microTestOsc = ctx.createOscillator();
     microTestOsc.type = 'triangle';
     microTestOsc.frequency.value = 220;
@@ -631,6 +633,36 @@ async function ensureMicrocosmCore(): Promise<void> {
     g.connect(microcosmCore.nativeIn);
     microTestOsc.start();
   }
+}
+
+// PROOF OF CONCEPT: load an audio file, decode it in the Microcosm's own context,
+// and feed it (looping) into nativeIn in place of the test oscillator — so the grain
+// engine granulates real-world audio. Throwaway test for the sampler vision.
+export async function microcosmLoadSample(file: File): Promise<void> {
+  await ensureMicrocosmCore();
+  if (!microcosmCore) return;
+  const ctx = microcosmCore.context;
+  const arr = await file.arrayBuffer();
+  const buf = await ctx.decodeAudioData(arr);
+  // KILL the test oscillator entirely so no code path can revive it over the sample
+  try { if (microSrcGain) microSrcGain.gain.value = 0; } catch {}
+  try { microTestOsc?.stop(); } catch {}
+  try { microTestOsc?.disconnect(); } catch {}
+  try { microSrcGain?.disconnect(); } catch {}
+  microTestOsc = null;   // gone — ensureMicrocosmCore won't rebuild it (guarded by !microTestOsc but sampleLoaded also blocks pitch)
+  // stop any previous sample
+  try { microSampleSrc?.stop(); microSampleSrc?.disconnect(); } catch {}
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.loop = true;
+  const g = ctx.createGain();
+  g.gain.value = 0.9;
+  src.connect(g);
+  g.connect((microcosmCore as any).nativeIn);
+  src.start();
+  microSampleSrc = src;
+  sampleLoaded = true;
+  console.log('[sample] loaded', file.name, buf.duration.toFixed(1)+'s', buf.sampleRate+'Hz');
 }
 
 export async function microcosmStart(): Promise<void> {
@@ -680,6 +712,21 @@ export function microcosmGrainDensity(id: string, d: number): void { (microcosmC
 let microGlide = 0.28;
 export function microcosmGlideTime(sec: number): void { microGlide = Math.max(0.02, sec); }
 export function microcosmSourceFreq(hz: number): void {
+  if (sampleLoaded) {
+    // VARISPEED the sample: playbackRate = target hz / oscillator base (220Hz).
+    // Key, octave, and progression transpose all flow through hz, so the sample now
+    // moves harmonically with the root — the musicality test.
+    if (microSampleSrc) {
+      try {
+        const ctx = microcosmCore!.context;
+        const rate = Math.max(0.05, Math.min(8, hz / 220));
+        microSampleSrc.playbackRate.cancelScheduledValues(ctx.currentTime);
+        microSampleSrc.playbackRate.setValueAtTime(Math.max(0.05, microSampleSrc.playbackRate.value), ctx.currentTime);
+        microSampleSrc.playbackRate.exponentialRampToValueAtTime(rate, ctx.currentTime + microGlide);
+      } catch {}
+    }
+    return;
+  }
   if (microTestOsc) {
     try {
       const ctx = microcosmCore!.context;

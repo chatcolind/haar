@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
-  microcosmClick, microcosmMetroLevel, microcosmAudioTime,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSample,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -625,6 +625,10 @@ export default function FieldPage() {
 
   return (
     <main style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'radial-gradient(ellipse at 50% 28%, #10131f 0%, #070810 66%, #04050a 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
+      {/* THROWAWAY sample-load test: drop a file to granulate it through the orbs */}
+      <input type="file" accept="audio/*"
+        onChange={async (e)=>{ const f=e.target.files?.[0]; if(f){ await ensureStarted(); await microcosmLoadSample(f); } }}
+        style={{ position:'absolute', top:16, right:16, zIndex:500, fontSize:11, color:'rgba(255,255,255,0.6)' }} />
       {/* tap-out backdrop: when a panel is open, a click on empty field dismisses it */}
       {(tapeOpen || chordsOpen || mixOpen) && (
         <div onClick={closePanels} style={{ position:'absolute', inset:0, zIndex:200, background:'transparent' }} />
