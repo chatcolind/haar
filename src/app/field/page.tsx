@@ -114,6 +114,7 @@ export default function FieldPage() {
     orbIds: string[];
     register: number;                              // semitone offset (Slice 5)
     pitchMode: 'varispeed' | 'grainshift';         // (Slice 5)
+    tune?: number;                                 // root-detection tuning offset (semitones)
   };
   const DEFAULT_CONST_ID = 'const_default';
   const [constellations, setConstellations] = useState<Constellation[]>([
@@ -343,6 +344,8 @@ export default function FieldPage() {
   const [createConstTarget, setCreateConstTarget] = useState<string>('__new__');
   const [createConstName, setCreateConstName] = useState<string>('');
   const [pendingWav, setPendingWav] = useState<File | null>(null);   // WAV chosen for a new constellation
+  // retain raw WAV bytes per sourceId so songs can be saved self-contained (base64)
+  const sourceBytesRef = useRef<Record<string, { name: string; b64: string }>>({});
   const [createList, setCreateList] = useState<string[]>([]);   // engines queued for this constellation (multi-add)
   function toggleEngineInList(engineType: string) {
     setCreateList(prev => [...prev, engineType]);   // tap adds one (can queue duplicates)
@@ -359,12 +362,20 @@ export default function FieldPage() {
     if (targetId === '__new__') {
       const name = (createConstName.trim() || `Constellation ${constellations.length}`);
       if (createSrc === 'sample' && pendingWav) {
-        // reuse the source already loaded when the WAV was chosen (used for the live preview)
+        // give this constellation its OWN unique source id (so multiple WAV constellations
+        // don't share/overwrite 'src_pending'), and load the WAV under it.
+        sourceId = `src_${Date.now()}`;
         const ps = (window as any).__pendingSrc;
-        if (ps && ps.id) { sourceId = ps.id; tune = ps.tune || 0; }
-        else { sourceId = `src_${Date.now()}`; const res = await microcosmLoadSource(sourceId, pendingWav); tune = tuningOffsetFor(res.rootHz); }
+        const res = await microcosmLoadSource(sourceId, pendingWav);
+        tune = (ps && ps.tune != null) ? ps.tune : tuningOffsetFor(res.rootHz);
+        // re-key the retained bytes from the pending id to this real source id (for saving)
+        if (sourceBytesRef.current['src_pending']) {
+          sourceBytesRef.current[sourceId] = sourceBytesRef.current['src_pending'];
+          delete sourceBytesRef.current['src_pending'];
+        }
       }
       targetId = createConstellation(name, sourceId);
+      const _t = tune; setConstellations(prev => prev.map(c => c.id === targetId ? { ...c, tune: _t } : c));
     } else {
       const existing = constellations.find(c => c.id === targetId);
       sourceId = existing ? existing.sourceId : 'default';
@@ -427,7 +438,16 @@ export default function FieldPage() {
       locked: !!lockRef.current[o.id], subdiv: subdivRef.current[o.id] ?? 2,
       fill: fillRef.current[o.id] ?? 1, seed: seedRef.current[o.id] ?? 1,
     }));
-    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted } }));
+    // constellations: full structure (name, source, members, register, pitch, tuning)
+    const consts = constellations.map(c => ({
+      id:c.id, name:c.name, sourceId:c.sourceId, orbIds:c.orbIds,
+      register:c.register, pitchMode:c.pitchMode,
+      tune: c.tune ?? 0,
+    }));
+    // source audio (base64 WAV bytes) for any non-default sources used
+    const sources: Record<string, {name:string;b64:string}> = {};
+    for (const c of constellations) { const sb = sourceBytesRef.current[c.sourceId]; if (sb) sources[c.sourceId] = sb; }
+    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sources }));
     const idx = listSongs().filter(s=>s.name!==name); idx.push({name, ts:Date.now()});
     localStorage.setItem('haar_songs_index', JSON.stringify(idx));
     setSongMenu(null); setSongName('');
@@ -462,6 +482,35 @@ export default function FieldPage() {
       (['hiss','sat','wow','roll'] as const).forEach(k => microcosmTapeBalance(k, (bal as any)[k] ?? 0));
       microcosmTape(tp.master ?? 0);
       microcosmTapeMute(!!tp.muted);
+    }
+    // ── restore CONSTELLATIONS (structure + WAV sources + routing + tuning) ──
+    if (data.constellations && Array.isArray(data.constellations)) {
+      // 1. reload each saved WAV source (base64 -> ArrayBuffer -> loadSource under its id)
+      const srcMap = data.sources || {};
+      for (const sid of Object.keys(srcMap)) {
+        try {
+          const b64 = srcMap[sid].b64; const binStr = atob(b64);
+          const bytes = new Uint8Array(binStr.length);
+          for (let i=0;i<binStr.length;i++) bytes[i]=binStr.charCodeAt(i);
+          await microcosmLoadSource(sid, new File([bytes], srcMap[sid].name || 'source.wav'));
+          sourceBytesRef.current[sid] = srcMap[sid];   // retain for re-saving
+        } catch(err) { console.warn('[load] source restore failed', sid, err); }
+      }
+      // 2. restore the constellations state
+      const restoredConsts = data.constellations.map((c:any) => ({
+        id:c.id, name:c.name, sourceId:c.sourceId, orbIds:c.orbIds||[],
+        register:c.register||0, pitchMode:c.pitchMode||'varispeed', tune:c.tune||0,
+      }));
+      setConstellations(restoredConsts.length ? restoredConsts : [{ id: DEFAULT_CONST_ID, name:'Synth', sourceId:'default', orbIds:[], register:0, pitchMode:'varispeed' }]);
+      // 3. re-route + re-tune + re-register each orb per its constellation
+      for (const c of restoredConsts) {
+        for (const oid of c.orbIds) {
+          microcosmEngineSource(oid, c.sourceId);
+          if (c.tune) microcosmOrbTuning(oid, c.tune);
+          if (c.register) microcosmOrbRegister(oid, c.register);
+        }
+      }
+      // keep the source-id counter clear of collisions is unnecessary (timestamp ids)
     }
     setFieldOrbs(restored); setSongMenu(null);
   }
@@ -1460,7 +1509,7 @@ export default function FieldPage() {
               <div style={{ display:'flex', justifyContent:'center', alignItems:'center', gap:12, marginBottom:56 }}>
                 <label style={{ padding:'12px 22px', borderRadius:12, border:'0.5px solid rgba(216,166,255,0.4)', background:'rgba(216,166,255,0.06)', color:'#e0bfff', fontSize:15, cursor:'pointer', letterSpacing:'0.04em' }}>
                   {pendingWav ? 'Change WAV' : 'Choose WAV'}
-                  <input type="file" accept="audio/*" style={{ display:'none' }} onChange={async e=>{ const f=e.target.files?.[0]; if(!f) return; setPendingWav(f); await ensureStarted(); const sid=`src_pending`; const res=await microcosmLoadSource(sid, f); (window as any).__pendingSrc={ id:sid, tune:tuningOffsetFor(res.rootHz) }; }} />
+                  <input type="file" accept="audio/*" style={{ display:'none' }} onChange={async e=>{ const f=e.target.files?.[0]; if(!f) return; setPendingWav(f); await ensureStarted(); const sid=`src_pending`; const res=await microcosmLoadSource(sid, f); (window as any).__pendingSrc={ id:sid, tune:tuningOffsetFor(res.rootHz) }; const ab=await f.arrayBuffer(); let bin=''; const bytes=new Uint8Array(ab); for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]); sourceBytesRef.current['src_pending']={ name:f.name, b64:btoa(bin) }; }} />
                 </label>
                 {pendingWav && <span style={{ color:'rgba(255,255,255,0.55)', fontSize:14 }}>{pendingWav.name}</span>}
               </div>
