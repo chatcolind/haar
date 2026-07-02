@@ -319,6 +319,20 @@ export class Microcosm {
   setFreeze(on: boolean, samples?: number): void { this.node?.port.postMessage({ type: 'freeze', value: on, samples: samples || 0 }); }
   setFreezeReverse(on: boolean): void { this.node?.port.postMessage({ type: 'freezeReverse', value: on }); }
   clearGrains(): void { this.node?.port.postMessage({ type: 'clearGrains' }); }
+  // Register a static source buffer (constellation) in the worklet. Transfers the channel
+  // data zero-copy (one-buffer primitive: worklet owns it, grains read by position).
+  loadSource(id: string, audioBuffer: AudioBuffer): void {
+    if (!this.node) return;
+    // mono sum (average channels) into a fresh Float32Array we can transfer ownership of
+    const n = audioBuffer.length, chs = audioBuffer.numberOfChannels;
+    const mono = new Float32Array(n);
+    for (let c = 0; c < chs; c++) {
+      const cd = audioBuffer.getChannelData(c);
+      for (let i = 0; i < n; i++) mono[i] += cd[i] / chs;
+    }
+    this.node.port.postMessage({ type: 'loadSource', id, channelData: mono }, [mono.buffer]);
+  }
+  removeSource(id: string): void { this.node?.port.postMessage({ type: 'removeSource', id }); }
 
   setFilter(hz: number): void {
     try { this.filter.frequency.setTargetAtTime(Math.max(80, Math.min(18000, hz)), this.ctx.currentTime, 0.02); } catch {}

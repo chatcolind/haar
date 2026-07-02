@@ -686,6 +686,18 @@ export function microcosmPitchSpread(y: number): void { microcosmCore?.setPitchS
 export function microcosmSetFilter(hz: number): void { microcosmCore?.setFilter(hz); }
 export function microcosmSweep(hz: number, q: number): void { (microcosmCore as any)?.setSweep(hz, q); }
 export function microcosmResetFilter(): void { (microcosmCore as any)?.resetFilter(); }
+// SLICE 2/3: register a decoded sample as a named source (constellation). Zero-copy transfer.
+export async function microcosmLoadSource(id: string, file: File): Promise<number> {
+  await ensureMicrocosmCore();
+  if (!microcosmCore) return 0;
+  const ctx = microcosmCore.context;
+  const arr = await file.arrayBuffer();
+  const audioBuf = await ctx.decodeAudioData(arr);
+  (microcosmCore as any).loadSource(id, audioBuf);
+  console.log('[source] loaded', id, file.name, audioBuf.duration.toFixed(1)+'s');
+  return audioBuf.duration;
+}
+export function microcosmRemoveSource(id: string): void { (microcosmCore as any)?.removeSource(id); }
 export function microcosmSetSpace(w: number): void { microcosmCore?.setSpace(w); }
 export function microcosmFreeze(on: boolean, samples?: number): void { microcosmCore?.setFreeze(on, samples); }
 export function microcosmFreezeReverse(on: boolean): void { (microcosmCore as any)?.setFreezeReverse(on); }

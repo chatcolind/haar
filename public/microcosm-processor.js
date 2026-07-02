@@ -83,6 +83,14 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         this.freezeReverse = !!m.value;
       } else if (m.type === 'clearGrains') {
         this.grains.length = 0;
+      } else if (m.type === 'loadSource') {
+        // Register a static source: a worklet-owned buffer with NO writer, read by grain
+        // position (one-buffer primitive). channelData arrives zero-copy (transferred).
+        if (m.id && m.channelData && m.channelData.length > 1) {
+          this.sources[m.id] = { buf: m.channelData, len: m.channelData.length, live: false };
+        }
+      } else if (m.type === 'removeSource') {
+        if (m.id && m.id !== 'default') delete this.sources[m.id];
       } else if (m.type === 'config') {
         if (typeof m.recording === 'boolean') this.recording = m.recording;
       }
