@@ -144,6 +144,19 @@ export default function FieldPage() {
     });
     if (routed != null) microcosmEngineSource(orbId, routed);
   }
+  // ROOT-DETECTION → tuning offset (Slice 5): given a detected fundamental Hz, return the
+  // semitone shift that lands it on the NEAREST pitch of the current root (minimal movement,
+  // keeps the sample in its natural register but in tune). 0 if no pitch detected.
+  function tuningOffsetFor(detectedHz: number): number {
+    if (!detectedHz || detectedHz <= 0) return 0;
+    const rootHz = NOTE_BASE[lockKey] ?? 261.63;
+    // semitone distance from root to detected, then take the fractional part to nearest note
+    const semisFromRoot = 12 * Math.log2(detectedHz / rootHz);
+    const nearestNote = Math.round(semisFromRoot);           // nearest in-key octave/note of root grid
+    // offset that moves detected onto that exact grid note = -(fractional detune)
+    const offset = nearestNote - semisFromRoot;               // small ± correction into tune
+    return Math.round(offset * 100) / 100;                    // 2dp semitones (can be fractional)
+  }
   // STEP A test helper: set the Birdsong constellation's register + apply it live to its orbs.
   function setBirdRegister(semis: number): void {
     setConstellations(prev => prev.map(c => c.name === 'Birdsong' ? { ...c, register: semis } : c));
@@ -695,7 +708,7 @@ export default function FieldPage() {
       <div style={{ position:'absolute', top:40, right:16, zIndex:500, fontSize:11, color:'#ffd86b' }}>
         <span style={{ marginRight:6 }}>birdsong constellation (first 4 orbs):</span>
         <input type="file" accept="audio/*"
-          onChange={async (e)=>{ const f=e.target.files?.[0]; if(!f) return; if(fieldOrbs.length===0){ console.warn('[slice4] add orbs first'); return; } await ensureStarted(); await microcosmLoadSource('sample', f); const cid=createConstellation('Birdsong','sample'); const group=fieldOrbs.slice(0,4).map(o=>o.id); group.forEach(o=>assignOrbToConstellation(o, cid, 'sample')); (window as any).__birdGroup=group; console.log('[slice5] Birdsong constellation', cid, 'orbs:', group, '(rest stay synth). Use +/- to transpose the group.'); }}
+          onChange={async (e)=>{ const f=e.target.files?.[0]; if(!f) return; if(fieldOrbs.length===0){ console.warn('[slice4] add orbs first'); return; } await ensureStarted(); const res=await microcosmLoadSource('sample', f); const cid=createConstellation('Birdsong','sample'); const group=fieldOrbs.slice(0,4).map(o=>o.id); group.forEach(o=>assignOrbToConstellation(o, cid, 'sample')); (window as any).__birdGroup=group; const tune=tuningOffsetFor(res.rootHz); (window as any).__birdTune=tune; group.forEach(o=>microcosmOrbConstTranspose(o, tune)); console.log('[slice5] Birdsong', cid, 'detected', res.rootHz.toFixed(1)+'Hz -> tuning offset', tune, 'semis'); }}
           style={{ fontSize:11 }} />
         {/* SLICE 5 test: transpose the whole Birdsong constellation as a group */}
         <span style={{ marginLeft:10, marginRight:6 }}>transpose group:</span>

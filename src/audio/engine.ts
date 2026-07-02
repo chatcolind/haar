@@ -687,15 +687,50 @@ export function microcosmSetFilter(hz: number): void { microcosmCore?.setFilter(
 export function microcosmSweep(hz: number, q: number): void { (microcosmCore as any)?.setSweep(hz, q); }
 export function microcosmResetFilter(): void { (microcosmCore as any)?.resetFilter(); }
 // SLICE 2/3: register a decoded sample as a named source (constellation). Zero-copy transfer.
-export async function microcosmLoadSource(id: string, file: File): Promise<number> {
+// Autocorrelation fundamental-pitch detector. Analyses the highest-energy window of the
+// sample (skips silence) and finds the dominant period → Hz. Robust for tonal/monophonic-ish
+// sources (cello, voice, a clearly-pitched bird); fuzzy on noise/polyphony (expected).
+function detectFundamentalHz(audioBuf: AudioBuffer): number {
+  const sr = audioBuf.sampleRate;
+  const data = audioBuf.getChannelData(0);
+  const win = Math.min(sr, data.length);              // up to 1s window
+  // find the highest-energy start position (avoid leading silence)
+  let bestStart = 0, bestE = -1;
+  const hop = Math.max(1, Math.floor(win / 8));
+  for (let start = 0; start + win <= data.length; start += win) {
+    let e = 0; for (let i = start; i < start + win; i += hop) e += data[i] * data[i];
+    if (e > bestE) { bestE = e; bestStart = start; }
+    if (start > sr * 20) break;                        // cap scan at first ~20s
+  }
+  const buf = data.subarray(bestStart, bestStart + win);
+  // normalized autocorrelation over a musical range (~50–2000 Hz)
+  const minLag = Math.floor(sr / 2000), maxLag = Math.floor(sr / 50);
+  let bestLag = -1, bestCorr = 0;
+  // mean-remove for a cleaner correlation
+  let mean = 0; for (let i = 0; i < win; i++) mean += buf[i]; mean /= win;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let corr = 0, norm = 0;
+    for (let i = 0; i + lag < win; i++) {
+      const a = buf[i] - mean, b = buf[i + lag] - mean;
+      corr += a * b; norm += a * a;
+    }
+    const c = norm > 0 ? corr / norm : 0;
+    if (c > bestCorr) { bestCorr = c; bestLag = lag; }
+  }
+  if (bestLag <= 0 || bestCorr < 0.2) return 0;        // no confident pitch found
+  return sr / bestLag;
+}
+
+export async function microcosmLoadSource(id: string, file: File): Promise<{ duration: number; rootHz: number }> {
   await ensureMicrocosmCore();
-  if (!microcosmCore) return 0;
+  if (!microcosmCore) return { duration: 0, rootHz: 0 };
   const ctx = microcosmCore.context;
   const arr = await file.arrayBuffer();
   const audioBuf = await ctx.decodeAudioData(arr);
   (microcosmCore as any).loadSource(id, audioBuf);
-  console.log('[source] loaded', id, file.name, audioBuf.duration.toFixed(1)+'s');
-  return audioBuf.duration;
+  const rootHz = detectFundamentalHz(audioBuf);
+  console.log('[source] loaded', id, file.name, audioBuf.duration.toFixed(1)+'s', 'detected root:', rootHz ? rootHz.toFixed(1)+'Hz' : 'none');
+  return { duration: audioBuf.duration, rootHz };
 }
 export function microcosmRemoveSource(id: string): void { (microcosmCore as any)?.removeSource(id); }
 export function microcosmEngineSource(orbId: string, sourceId: string): void { (microcosmCore as any)?.setEngineSource(orbId, sourceId); }
