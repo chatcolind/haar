@@ -144,6 +144,13 @@ export default function FieldPage() {
     });
     if (routed != null) microcosmEngineSource(orbId, routed);
   }
+  // STEP A test helper: set the Birdsong constellation's register + apply it live to its orbs.
+  function setBirdRegister(semis: number): void {
+    setConstellations(prev => prev.map(c => c.name === 'Birdsong' ? { ...c, register: semis } : c));
+    const g = (window as any).__birdGroup || [];
+    g.forEach((o: string) => microcosmOrbConstTranspose(o, semis));
+    console.log('[stepA] birdsong register', semis);
+  }
   const orbCounter = useRef<Record<string, number>>({});
   function mintOrbId(engineType: string): string {
     const n = (orbCounter.current[engineType] || 0) + 1;
@@ -219,6 +226,9 @@ export default function FieldPage() {
   const [dragIdx, setDragIdx] = useState<number|null>(null);   // chord block being dragged
   useEffect(() => { const up=()=>setDragIdx(null); window.addEventListener('pointerup',up); return ()=>window.removeEventListener('pointerup',up); }, []);
   useEffect(() => { progRef.current = prog; }, [prog]);
+  // live mirror of constellations so the running progression can broadcast per-constellation
+  const constRef = useRef<Constellation[]>([]);
+  useEffect(() => { constRef.current = constellations; }, [constellations]);
   const [metroOn, setMetroOn] = useState(false);   // metronome click on/off
   const [metroLevel, setMetroLevel] = useState(0.5);   // metronome click volume 0..1
   const metroBeatRef = useRef(0);
@@ -265,6 +275,8 @@ export default function FieldPage() {
     if (progTimer.current) { clearTimeout(progTimer.current); progTimer.current = null; }
     setProgRunning(false); setProgProgress(0); setProgStepDur(0);
     progTransposeRef.current = 0; setProgStepIdx(0); reapplySourceFreq();
+    // reset each constellation to its register baseline (no chord step) when the progression stops
+    for (const c of constRef.current) { for (const oid of c.orbIds) microcosmOrbConstTranspose(oid, c.register || 0); }
   }
   const progStep = () => {
     const seq = progRef.current;
@@ -277,6 +289,13 @@ export default function FieldPage() {
     const dur = barMs * st.bars;
     progTransposeRef.current = stepSemis(st);
     reapplySourceFreq();
+    // STEP A: broadcast this step's transpose to every constellation, each adding its own
+    // register offset, and push to all its orbs. (LINKED-style: one shared pattern for now.)
+    const stepT = stepSemis(st);
+    for (const c of constRef.current) {
+      const t = stepT + (c.register || 0);
+      for (const oid of c.orbIds) microcosmOrbConstTranspose(oid, t);
+    }
     setProgProgress(0);
     setProgStepIdx(i);
     setProgStepDur(0);
@@ -683,6 +702,11 @@ export default function FieldPage() {
         <button onClick={()=>{ const g=(window as any).__birdGroup||[]; (window as any).__birdT=((window as any).__birdT||0)-12; g.forEach((o:string)=>microcosmOrbConstTranspose(o,(window as any).__birdT)); console.log('[slice5] group transpose', (window as any).__birdT); }} style={{ fontSize:12, marginRight:4 }}>−12</button>
         <button onClick={()=>{ const g=(window as any).__birdGroup||[]; (window as any).__birdT=0; g.forEach((o:string)=>microcosmOrbConstTranspose(o,0)); console.log('[slice5] group transpose 0'); }} style={{ fontSize:12, marginRight:4 }}>0</button>
         <button onClick={()=>{ const g=(window as any).__birdGroup||[]; (window as any).__birdT=((window as any).__birdT||0)+12; g.forEach((o:string)=>microcosmOrbConstTranspose(o,(window as any).__birdT)); console.log('[slice5] group transpose', (window as any).__birdT); }} style={{ fontSize:12 }}>+12</button>
+        {/* STEP A test: set the Birdsong constellation's REGISTER role, then run a chord progression */}
+        <span style={{ marginLeft:10, marginRight:6 }}>birdsong register:</span>
+        <button onClick={()=>setBirdRegister(-12)} style={{ fontSize:12, marginRight:4 }}>bass −12</button>
+        <button onClick={()=>setBirdRegister(0)} style={{ fontSize:12, marginRight:4 }}>mid 0</button>
+        <button onClick={()=>setBirdRegister(12)} style={{ fontSize:12 }}>air +12</button>
       </div>
       {/* tap-out backdrop: when a panel is open, a click on empty field dismisses it */}
       {(tapeOpen || chordsOpen || mixOpen) && (
