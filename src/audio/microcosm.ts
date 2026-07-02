@@ -285,9 +285,18 @@ export class Microcosm {
     // home ratio is an EXACT consonant interval (octave/fifth/etc) - never clamp it, that detunes.
     // detune (spec.rate's deviation from 1) is a small wobble; clamp only that to avoid alias.
     const home = this.engineHome[this._currentEngine] ?? 0;
-    // CONSTELLATION transpose (Slice 5): register + chord step for this orb's constellation,
-    // applied as an additional exact ratio alongside the per-orb home interval.
-    const constT = this.engineConstTranspose[this._currentEngine] ?? 0;
+    // UNIFIED PITCH MODEL (Slice 5 fix): the orb's total transpose is the SUM of separate,
+    // independent parts so no driver clobbers another:
+    //   tuning   — fixed root-detection correction, set once at load, never overwritten
+    //   register — fixed constellation role (bass/mid/air)
+    //   chordStep— moving, the ONLY thing the chord progression writes
+    //   conductor— the keyboard/octave note, so the conductor moves sample orbs too
+    const eng = this._currentEngine;
+    const tuning   = this.engineTuning[eng]   ?? 0;
+    const register = this.engineRegister[eng] ?? 0;
+    const chordStep= this.engineChordStep[eng]?? 0;
+    const conductor= this.engineConductor[eng]?? 0;
+    const constT = tuning + register + chordStep + conductor;
     const homeRatio = Math.pow(2, (home + constT) / 12);
     // separate the detune wobble from unity, clamp the wobble modestly, then apply exact home
     const detune = spec.rate;                       // e.g. ~0.94..1.06 normally
@@ -324,8 +333,17 @@ export class Microcosm {
   }
   setOrbHome(id: string, semis: number): void { this.engineHome[id] = semis; }
   // per-orb CONSTELLATION transpose (semitones): register + chord step of the orb's constellation.
-  private engineConstTranspose: Record<string, number> = {};
-  setOrbConstTranspose(id: string, semis: number): void { this.engineConstTranspose[id] = semis; }
+  // separate additive transpose parts per orb (unified pitch model)
+  private engineTuning:   Record<string, number> = {};   // fixed root-detection correction
+  private engineRegister: Record<string, number> = {};   // fixed constellation register role
+  private engineChordStep:Record<string, number> = {};   // moving chord-progression step
+  private engineConductor:Record<string, number> = {};   // keyboard/octave note
+  setOrbTuning(id: string, semis: number): void { this.engineTuning[id] = semis; }
+  setOrbRegister(id: string, semis: number): void { this.engineRegister[id] = semis; }
+  setOrbChordStep(id: string, semis: number): void { this.engineChordStep[id] = semis; }
+  setOrbConductor(id: string, semis: number): void { this.engineConductor[id] = semis; }
+  // legacy shim: old callers set the whole thing → treat as chord-step (moving part)
+  setOrbConstTranspose(id: string, semis: number): void { this.engineChordStep[id] = semis; }
   setFreeze(on: boolean, samples?: number): void { this.node?.port.postMessage({ type: 'freeze', value: on, samples: samples || 0 }); }
   setFreezeReverse(on: boolean): void { this.node?.port.postMessage({ type: 'freezeReverse', value: on }); }
   clearGrains(): void { this.node?.port.postMessage({ type: 'clearGrains' }); }

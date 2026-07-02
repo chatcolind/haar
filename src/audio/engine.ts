@@ -735,6 +735,10 @@ export async function microcosmLoadSource(id: string, file: File): Promise<{ dur
 export function microcosmRemoveSource(id: string): void { (microcosmCore as any)?.removeSource(id); }
 export function microcosmEngineSource(orbId: string, sourceId: string): void { (microcosmCore as any)?.setEngineSource(orbId, sourceId); }
 export function microcosmOrbConstTranspose(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbConstTranspose(orbId, semis); }
+export function microcosmOrbTuning(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbTuning(orbId, semis); }
+export function microcosmOrbRegister(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbRegister(orbId, semis); }
+export function microcosmOrbChordStep(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbChordStep(orbId, semis); }
+export function microcosmOrbConductor(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbConductor(orbId, semis); }
 export function microcosmSetSpace(w: number): void { microcosmCore?.setSpace(w); }
 export function microcosmFreeze(on: boolean, samples?: number): void { microcosmCore?.setFreeze(on, samples); }
 export function microcosmFreezeReverse(on: boolean): void { (microcosmCore as any)?.setFreezeReverse(on); }

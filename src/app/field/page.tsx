@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
-  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSample, microcosmLoadSource, microcosmEngineSource, microcosmOrbConstTranspose,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSample, microcosmLoadSource, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -161,7 +161,7 @@ export default function FieldPage() {
   function setBirdRegister(semis: number): void {
     setConstellations(prev => prev.map(c => c.name === 'Birdsong' ? { ...c, register: semis } : c));
     const g = (window as any).__birdGroup || [];
-    g.forEach((o: string) => microcosmOrbConstTranspose(o, semis));
+    g.forEach((o: string) => microcosmOrbRegister(o, semis));   // register slot
     console.log('[stepA] birdsong register', semis);
   }
   const orbCounter = useRef<Record<string, number>>({});
@@ -186,10 +186,7 @@ export default function FieldPage() {
     fillRef.current[id] = 1;       // full fill
     seedRef.current[id] = 1;       // stable starting seed
     setFieldOrbs(prev => [...prev, { id, engineType, label, colorKey }]);
-    // every orb belongs to exactly one constellation — the active one at birth
-    setConstellations(prev => prev.map(c => c.id === activeConstId ? { ...c, orbIds: [...c.orbIds, id] } : c));
-    const ac = constellations.find(c => c.id === activeConstId);
-    if (ac) microcosmEngineSource(id, ac.sourceId);
+    // (membership set authoritatively by the caller, e.g. doCreateOrb, to avoid stale state)
     return id;
   }
   function removeFieldOrb(id: string): void {
@@ -283,13 +280,19 @@ export default function FieldPage() {
   function reapplySourceFreq() {
     const rootHz = NOTE_BASE[lockKey] ?? 261.63;
     microcosmSourceFreq(rootHz * Math.pow(2, (playSemi/12) + octave + (progTransposeRef.current/12)));
+    // CONDUCTOR broadcast: the keyboard/octave note as a semitone offset, pushed to SAMPLE
+    // orbs so they follow the key. The default/synth source is already pitched by
+    // microcosmSourceFreq above, so skip its orbs to avoid double-transposing.
+    const noteSemis = playSemi + octave * 12;
+    const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
+    for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
   }
   function stopProg() {
     if (progTimer.current) { clearTimeout(progTimer.current); progTimer.current = null; }
     setProgRunning(false); setProgProgress(0); setProgStepDur(0);
     progTransposeRef.current = 0; setProgStepIdx(0); reapplySourceFreq();
     // reset each constellation to its register baseline (no chord step) when the progression stops
-    for (const c of constRef.current) { for (const oid of c.orbIds) microcosmOrbConstTranspose(oid, c.register || 0); }
+    for (const c of constRef.current) { for (const oid of c.orbIds) microcosmOrbChordStep(oid, 0); }   // clear moving part; tuning+register persist
   }
   const progStep = () => {
     const seq = progRef.current;
@@ -306,8 +309,7 @@ export default function FieldPage() {
     // register offset, and push to all its orbs. (LINKED-style: one shared pattern for now.)
     const stepT = stepSemis(st);
     for (const c of constRef.current) {
-      const t = stepT + (c.register || 0);
-      for (const oid of c.orbIds) microcosmOrbConstTranspose(oid, t);
+      for (const oid of c.orbIds) microcosmOrbChordStep(oid, stepT);   // ONLY the moving chord part
     }
     setProgProgress(0);
     setProgStepIdx(i);
@@ -336,13 +338,54 @@ export default function FieldPage() {
   const [createOpen, setCreateOpen] = useState(false);          // orb creation bloom
   const [createSrc, setCreateSrc] = useState<'synth'|'sample'|'livein'>('synth');
   const [createEngine, setCreateEngine] = useState<string | null>(null);  // selected engine type
-  function doCreateOrb() {
-    if (!createEngine) return;
-    const cat = ALL_ORBS.find(o => o.engineType === createEngine);
-    const id = addFieldOrb(createEngine, cat?.label || createEngine, cat?.colorKey || 'tunnel');
-    if (started.current && state==='playing') { microcosmAddOrb(id, createEngine, orbLevel(id)); microcosmEngineActive(id, true); microcosmEngineLevel(id, orbLevel(id)); }
+  // CONSTELLATION targeting in the creation screen: which existing constellation a new orb
+  // joins, or '__new__' to create a new one (with a name + the SOURCE row's source).
+  const [createConstTarget, setCreateConstTarget] = useState<string>('__new__');
+  const [createConstName, setCreateConstName] = useState<string>('');
+  const [pendingWav, setPendingWav] = useState<File | null>(null);   // WAV chosen for a new constellation
+  const [createList, setCreateList] = useState<string[]>([]);   // engines queued for this constellation (multi-add)
+  function toggleEngineInList(engineType: string) {
+    setCreateList(prev => [...prev, engineType]);   // tap adds one (can queue duplicates)
+    previewEngine(engineType);                       // preview the most-recent tap
+  }
+  async function doCreateOrb() {
+    // build the list: queued engines, or fall back to the single previewed engine
+    const list = createList.length > 0 ? createList : (createEngine ? [createEngine] : []);
+    if (list.length === 0) return;
+    // Resolve the target constellation + its source id FIRST (no reliance on just-queued state).
+    let targetId = createConstTarget;
+    let sourceId = 'default';
+    let tune = 0;
+    if (targetId === '__new__') {
+      const name = (createConstName.trim() || `Constellation ${constellations.length}`);
+      if (createSrc === 'sample' && pendingWav) {
+        // reuse the source already loaded when the WAV was chosen (used for the live preview)
+        const ps = (window as any).__pendingSrc;
+        if (ps && ps.id) { sourceId = ps.id; tune = ps.tune || 0; }
+        else { sourceId = `src_${Date.now()}`; const res = await microcosmLoadSource(sourceId, pendingWav); tune = tuningOffsetFor(res.rootHz); }
+      }
+      targetId = createConstellation(name, sourceId);
+    } else {
+      const existing = constellations.find(c => c.id === targetId);
+      sourceId = existing ? existing.sourceId : 'default';
+    }
+    setActiveConstId(targetId);
+    const newOrbIds: string[] = [];
+    for (const engineType of list) {
+      const cat = ALL_ORBS.find(o => o.engineType === engineType);
+      const id = addFieldOrb(engineType, cat?.label || engineType, cat?.colorKey || 'tunnel');
+      newOrbIds.push(id);
+      microcosmEngineSource(id, sourceId);              // route to the constellation's source
+      if (tune) microcosmOrbTuning(id, tune);           // FIXED tuning slot (never overwritten by chords)
+      if (started.current && state==='playing') { microcosmAddOrb(id, engineType, orbLevel(id)); microcosmEngineActive(id, true); microcosmEngineLevel(id, orbLevel(id)); }
+    }
+    // AUTHORITATIVE membership (no stale state): record new orbs into the target constellation
+    setConstellations(prev => prev.map(c => ({ ...c, orbIds: c.id === targetId ? Array.from(new Set([...c.orbIds, ...newOrbIds])) : c.orbIds.filter(o => !newOrbIds.includes(o)) })));
     setCreateEngine(null);
+    setCreateList([]);
     stopPreview();
+    setCreateConstName('');
+    setPendingWav(null);
     setCreateOpen(false);   // auto-exit to field after adding
   }
   const PREVIEW_ID = 'preview_temp';
@@ -351,6 +394,14 @@ export default function FieldPage() {
     await ensureStarted();
     microcosmRemoveOrb(PREVIEW_ID);
     microcosmAddOrb(PREVIEW_ID, engineType, 0.8);
+    // if a WAV source is chosen for a new constellation, preview grains the WAV (not synth)
+    if (createConstTarget==='__new__' && createSrc==='sample' && (window as any).__pendingSrc) {
+      const ps = (window as any).__pendingSrc;
+      microcosmEngineSource(PREVIEW_ID, ps.id);
+      if (ps.tune) microcosmOrbConstTranspose(PREVIEW_ID, ps.tune);
+    } else {
+      microcosmEngineSource(PREVIEW_ID, 'default');
+    }
     microcosmEngineActive(PREVIEW_ID, true);
     microcosmEngineLevel(PREVIEW_ID, 0.8);
   }
@@ -549,6 +600,10 @@ export default function FieldPage() {
     const hz = rootHz * Math.pow(2, (semis / 12) + octave + (progTransposeRef.current/12));
     microcosmSourceFreq(hz);
     setPlayNote(note); setPlaySemi(semis);
+    // CONDUCTOR: push the note offset to SAMPLE orbs (default/synth already moved via SourceFreq)
+    const noteSemis = semis + octave * 12;
+    const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
+    for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
   }
   // double-click a note to LOCK it as the root (yellow); single tap to play
   // `semis` = semitone distance from current locked root
@@ -561,6 +616,9 @@ export default function FieldPage() {
       setPlayNote(note); setPlaySemi(0);
       const rootHz = NOTE_BASE[note] ?? 261.63;
       microcosmSourceFreq(rootHz * Math.pow(2, octave));
+      const noteSemis = 0 + octave * 12;
+      const defIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
+      for (const o of fieldOrbs) if (!defIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
       lastTap.current = { key:'', t:0 };
     } else {
       // single tap -> play this note (semis from current locked root)
@@ -1372,22 +1430,50 @@ export default function FieldPage() {
             <div onClick={()=>{ stopPreview(); setCreateEngine(null); setCreateOpen(false); }} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
           </div>
           <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 56px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
+            {/* CONSTELLATION — target an existing one, or create a new one */}
+            <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:18, fontFamily:'monospace', textAlign:'center' }}>CONSTELLATION</div>
+            <div style={{ display:'flex', gap:14, marginBottom:20, justifyContent:'center', flexWrap:'wrap' }}>
+              {constellations.map(c => {
+                const sel = createConstTarget===c.id;
+                return <div key={c.id} onClick={()=>setCreateConstTarget(c.id)} style={{ padding:'12px 22px', borderRadius:14, cursor:'pointer', border: sel?'1px solid #d8a6ff':'0.5px solid rgba(255,255,255,0.16)', background: sel?'rgba(216,166,255,0.12)':'rgba(255,255,255,0.02)', color: sel?'#e0bfff':'rgba(255,255,255,0.6)', fontSize:16 }}>{c.name}<span style={{ fontSize:11, opacity:0.5, marginLeft:8 }}>{c.orbIds.length}</span></div>;
+              })}
+              <div onClick={()=>setCreateConstTarget('__new__')} style={{ padding:'12px 22px', borderRadius:14, cursor:'pointer', border: createConstTarget==='__new__'?'1px solid #7af5c8':'0.5px dashed rgba(255,255,255,0.25)', background: createConstTarget==='__new__'?'rgba(122,245,200,0.1)':'transparent', color: createConstTarget==='__new__'?'#a6fff2':'rgba(255,255,255,0.5)', fontSize:16 }}>＋ New</div>
+            </div>
+            {createConstTarget==='__new__' && (
+              <div style={{ display:'flex', justifyContent:'center', marginBottom:28 }}>
+                <input value={createConstName} onChange={e=>setCreateConstName(e.target.value)} placeholder="name this constellation"
+                  style={{ padding:'10px 18px', borderRadius:12, border:'0.5px solid rgba(216,166,255,0.4)', background:'rgba(255,255,255,0.03)', color:'#e0bfff', fontSize:16, textAlign:'center', outline:'none', fontFamily:'Rajdhani, sans-serif', width:320 }} />
+              </div>
+            )}
             <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:24, fontFamily:'monospace', textAlign:'center' }}>SOURCE</div>
-            <div style={{ display:'flex', gap:24, marginBottom:72, justifyContent:'center' }}>
+            <div style={{ display:'flex', gap:24, marginBottom: (createConstTarget==='__new__' && createSrc==='sample') ? 24 : 72, justifyContent:'center' }}>
               {(['synth','sample','livein'] as const).map(src => {
-                const lbl = src==='synth'?'Synth':src==='sample'?'Sample':'Live in';
+                const lbl = src==='synth'?'Synth':src==='sample'?'Wave':'Live in';
                 const sel = createSrc===src;
-                const soon = src!=='synth';
-                return <div key={src} onClick={()=>setCreateSrc(src)} style={{ width:280, textAlign:'center', padding:'22px 0', borderRadius:16, cursor:'pointer', border: sel?'1px solid #d8a6ff':'0.5px solid rgba(255,255,255,0.16)', background: sel?'rgba(216,166,255,0.1)':'rgba(255,255,255,0.02)', color: sel?'#e0bfff':'rgba(255,255,255,0.6)', fontSize:19, letterSpacing:'0.04em' }}>{lbl}{soon?'  ·  soon':''}</div>;
+                const soon = src==='livein';               // only Live-in is greyed now
+                const isNew = createConstTarget==='__new__';
+                const disabled = soon || !isNew;           // source is only choosable for a NEW constellation
+                return <div key={src} onClick={()=>{ if(!disabled) setCreateSrc(src); }} style={{ width:280, textAlign:'center', padding:'22px 0', borderRadius:16, cursor: disabled?'default':'pointer', border: sel?'1px solid #d8a6ff':'0.5px solid rgba(255,255,255,0.16)', background: sel?'rgba(216,166,255,0.1)':'rgba(255,255,255,0.02)', color: sel?'#e0bfff':(disabled?'rgba(255,255,255,0.28)':'rgba(255,255,255,0.6)'), fontSize:19, letterSpacing:'0.04em' }}>{lbl}{soon?'  ·  soon':''}</div>;
               })}
             </div>
+            {createConstTarget==='__new__' && createSrc==='sample' && (
+              <div style={{ display:'flex', justifyContent:'center', alignItems:'center', gap:12, marginBottom:56 }}>
+                <label style={{ padding:'12px 22px', borderRadius:12, border:'0.5px solid rgba(216,166,255,0.4)', background:'rgba(216,166,255,0.06)', color:'#e0bfff', fontSize:15, cursor:'pointer', letterSpacing:'0.04em' }}>
+                  {pendingWav ? 'Change WAV' : 'Choose WAV'}
+                  <input type="file" accept="audio/*" style={{ display:'none' }} onChange={async e=>{ const f=e.target.files?.[0]; if(!f) return; setPendingWav(f); await ensureStarted(); const sid=`src_pending`; const res=await microcosmLoadSource(sid, f); (window as any).__pendingSrc={ id:sid, tune:tuningOffsetFor(res.rootHz) }; }} />
+                </label>
+                {pendingWav && <span style={{ color:'rgba(255,255,255,0.55)', fontSize:14 }}>{pendingWav.name}</span>}
+              </div>
+            )}
             <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:30, fontFamily:'monospace' }}>ENGINE — tap to select</div>
             <div style={{ display:'flex', gap:40, flexWrap:'wrap', rowGap:40 }}>
               {ALL_ORBS.map(e => {
-                const sel = createEngine===e.engineType;
+                const queued = createList.filter(x=>x===e.engineType).length;
+                const sel = queued>0 || createEngine===e.engineType;
                 const col = ORB_COLORS[e.colorKey] || ORB_COLORS['tunnel'];
                 return (
-                  <div key={e.engineType} onClick={()=>previewEngine(e.engineType)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12, width:104, cursor:'pointer', opacity: sel?1:0.82, transition:'opacity 0.2s, transform 0.2s', transform: sel?'scale(1.08)':'scale(1)' }}>
+                  <div key={e.engineType} onClick={()=>toggleEngineInList(e.engineType)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12, width:104, cursor:'pointer', opacity: sel?1:0.82, transition:'opacity 0.2s, transform 0.2s', transform: sel?'scale(1.08)':'scale(1)', position:'relative' }}>
+                    {queued>0 && <div onClick={(ev)=>{ ev.stopPropagation(); setCreateList(prev=>{ const i=prev.lastIndexOf(e.engineType); if(i>=0){ const n=[...prev]; n.splice(i,1); return n; } return prev; }); }} title="tap badge to remove one" style={{ position:'absolute', top:-4, right:18, zIndex:2, minWidth:22, height:22, padding:'0 6px', borderRadius:11, background:'#7af5c8', color:'#04140f', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center' }}>{queued}</div>}
                     <div style={{ width: sel?66:58, height: sel?66:58, borderRadius:'50%', background:`radial-gradient(circle, ${col.core}, ${col.mid}55 52%, transparent 76%)`, boxShadow: sel?`0 0 30px 6px ${col.mid}99`:`0 0 12px 2px ${col.mid}33`, border: sel?`2px solid ${col.core}`:'2px solid transparent' }} />
                     <div style={{ fontSize:15, letterSpacing:'0.06em', color: sel?col.core:'rgba(255,255,255,0.82)' }}>{e.label}{sel?' ✦':''}</div>
                   </div>
@@ -1397,7 +1483,9 @@ export default function FieldPage() {
           </div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 56px 44px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
             <span style={{ fontSize:12, letterSpacing:'0.06em', color:'rgba(255,255,255,0.3)', fontFamily:'monospace' }}>source stays selected · add as many as you like</span>
-            <div onClick={()=>doCreateOrb()} style={{ padding:'15px 52px', borderRadius:28, cursor: createEngine?'pointer':'default', border:`1px solid ${createEngine?'#7af5c8':'rgba(255,255,255,0.15)'}`, background: createEngine?'rgba(122,245,200,0.14)':'transparent', color: createEngine?'#a6fff2':'rgba(255,255,255,0.3)', fontSize:16, letterSpacing:'0.16em' }}>ADD ORB</div>
+            {(() => { const n = createList.length || (createEngine?1:0); const on = n>0; return (
+            <div onClick={()=>doCreateOrb()} style={{ padding:'15px 52px', borderRadius:28, cursor: on?'pointer':'default', border:`1px solid ${on?'#7af5c8':'rgba(255,255,255,0.15)'}`, background: on?'rgba(122,245,200,0.14)':'transparent', color: on?'#a6fff2':'rgba(255,255,255,0.3)', fontSize:16, letterSpacing:'0.16em' }}>{n>1?`ADD ${n} ORBS`:'ADD ORB'}</div>
+            ); })()}
           </div>
         </div>
       )}
