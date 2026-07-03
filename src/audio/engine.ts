@@ -738,6 +738,8 @@ export function microcosmFreezeSource(id: string, seconds?: number): void { (mic
 export function microcosmSourcePosition(id: string, position: number, spray?: number): void { (microcosmCore as any)?.setSourcePosition(id, position, spray); }
 export function microcosmEngineSource(orbId: string, sourceId: string): void { (microcosmCore as any)?.setEngineSource(orbId, sourceId); }
 export function microcosmOrbPosition(orbId: string, position: number, spray?: number): void { (microcosmCore as any)?.setOrbPosition(orbId, position, spray); }
+export function microcosmOrbAbsence(orbId: string, v: number): void { (microcosmCore as any)?.setOrbAbsence(orbId, v); }
+export function microcosmOrbChaos(orbId: string, v: number): void { (microcosmCore as any)?.setOrbChaos(orbId, v); }
 export function microcosmOrbConstTranspose(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbConstTranspose(orbId, semis); }
 export function microcosmOrbTuning(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbTuning(orbId, semis); }
 export function microcosmOrbRegister(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbRegister(orbId, semis); }

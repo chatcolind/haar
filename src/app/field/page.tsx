@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
-  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmFreezeSource, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmOrbAbsence, microcosmOrbChaos, microcosmFreezeSource, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -377,6 +377,8 @@ export default function FieldPage() {
   // retain raw WAV bytes per sourceId so songs can be saved self-contained (base64)
   const sourceBytesRef = useRef<Record<string, { name: string; b64: string }>>({});
   const posRef = useRef<Record<string, number>>({});   // per-orb POSITION 0..1 into its WAV source
+  const absRef = useRef<Record<string, number>>({});   // per-orb ABSENCE -1(flutter)..0(off)..+1(dropouts)
+  const chaosRef = useRef<Record<string, number>>({});   // per-orb CHAOS 0..1 (disorder→pitch→stutter)
   const [createList, setCreateList] = useState<string[]>([]);   // engines queued for this constellation (multi-add)
   function toggleEngineInList(engineType: string) {
     setCreateList(prev => [...prev, engineType]);   // tap adds one (can queue duplicates)
@@ -1273,6 +1275,32 @@ export default function FieldPage() {
                   <input type="range" min={0} max={1} step={0.01} value={densRef.current[focused] ?? 0.5}
                     onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; microcosmGrainDensity(focused, d); forceOrb(x=>x+1); }}
                     style={{ width:'100%', accentColor:'#d8a6ff' }} />
+                </div>
+                {/* ABSENCE — controlled chaos, centre-detented: left=flutter, centre=off, right=dropouts */}
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                    <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>ABSENCE</span>
+                    <span style={{ fontSize:12.5, color:'#ffb060' }}>{(() => { const a = absRef.current[focused] ?? 0; if (Math.abs(a) < 0.02) return 'off'; return a < 0 ? `flutter ${Math.round(-a*100)}%` : `drop ${Math.round(a*100)}%`; })()}</span>
+                  </div>
+                  <input type="range" min={-1} max={1} step={0.02} value={absRef.current[focused] ?? 0}
+                    onChange={(e)=>{ let a=parseFloat(e.target.value); if(Math.abs(a)<0.06) a=0; absRef.current[focused]=a; microcosmOrbAbsence(focused, a); forceOrb(x=>x+1); }}
+                    style={{ width:'100%', accentColor:'#ffb060' }} />
+                  <div style={{ display:'flex', justifyContent:'space-between', marginTop:3, fontSize:9.5, letterSpacing:'0.12em', color:'rgba(255,255,255,0.32)', fontFamily:'monospace' }}>
+                    <span>FLUTTER</span><span>·</span><span>DROPOUTS</span>
+                  </div>
+                </div>
+                {/* CHAOS — staged mayhem 0..1: disorder → pitch scatter → stutter/reverse */}
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                    <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>CHAOS</span>
+                    <span style={{ fontSize:12.5, color:'#ff6090' }}>{(() => { const c = chaosRef.current[focused] ?? 0; if (c < 0.02) return 'off'; if (c < 0.33) return 'disorder'; if (c < 0.66) return 'scatter'; return 'breakdown'; })()}</span>
+                  </div>
+                  <input type="range" min={0} max={1} step={0.01} value={chaosRef.current[focused] ?? 0}
+                    onChange={(e)=>{ const c=parseFloat(e.target.value); chaosRef.current[focused]=c; microcosmOrbChaos(focused, c); forceOrb(x=>x+1); }}
+                    style={{ width:'100%', accentColor:'#ff6090' }} />
+                  <div style={{ display:'flex', justifyContent:'space-between', marginTop:3, fontSize:9.5, letterSpacing:'0.12em', color:'rgba(255,255,255,0.32)', fontFamily:'monospace' }}>
+                    <span>DISORDER</span><span>SCATTER</span><span>BREAKDOWN</span>
+                  </div>
                 </div>
                 {/* FREEZE — for SYNTH constellations: capture the live ring into a static
                     source (2/4/8s), lit when frozen, tap again to release back to live. */}

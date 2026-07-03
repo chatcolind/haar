@@ -307,13 +307,19 @@ export class Microcosm {
     const source = this.engineSource[this._currentEngine] || 'default';
     const posEng = this.enginePosition[this._currentEngine];
     const sprayEng = this.engineSpray[this._currentEngine];
-    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine, source, position: posEng, spray: sprayEng });
+    const absEng = this.engineAbsence[this._currentEngine] || 0;
+    const chaosEng = this.engineChaos[this._currentEngine] || 0;
+    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine, source, position: posEng, spray: sprayEng, absence: absEng, chaos: chaosEng });
   }
   // per-orb SOURCE (constellation): which loaded source buffer this orb's grains read.
   private engineSource: Record<string, string> = {};
   setEngineSource(id: string, sourceId: string): void { this.engineSource[id] = sourceId || 'default'; }
   // per-orb POSITION/scan into its (static) source buffer, 0..1, + spray. undefined => use source default.
   private enginePosition: Record<string, number | undefined> = {};
+  private engineAbsence: Record<string, number> = {};   // per-orb ABSENCE (-1 flutter .. +1 dropouts)
+  setOrbAbsence(id: string, v: number): void { this.engineAbsence[id] = Math.max(-1, Math.min(1, v)); }
+  private engineChaos: Record<string, number> = {};   // per-orb CHAOS 0..1 (disorder→pitch→stutter)
+  setOrbChaos(id: string, v: number): void { this.engineChaos[id] = Math.max(0, Math.min(1, v)); }
   private engineSpray: Record<string, number | undefined> = {};
   setOrbPosition(id: string, position: number, spray?: number): void {
     this.enginePosition[id] = position;

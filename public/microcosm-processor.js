@@ -76,14 +76,74 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
           if (pos > hi) pos = hi;
           maxRead = src.len;
         }
-        this.grains.push({
+        // ── CHAOS (staged mayhem 0..1) — the real Fauve/Aphex destruction ──────────────
+        // Layered so every knob position is a distinct usable sound:
+        //   0.00-0.33  DISORDER: grains leap to RANDOM positions in the buffer (source shatters,
+        //              reassembled out of order — stays tonal because it is the same material).
+        //   0.33-0.66  PITCH SCATTER: grains jump by random octave/fifth steps (warble/glitch).
+        //   0.66-1.00  STUTTER + REVERSE: grains shorten + machine-gun-repeat, some play backward.
+        let chaosRate = 1;            // multiplies the grain rate (pitch)
+        let chaosLenMul = 1;          // multiplies grain length (stutter = shorter)
+        const chaos = m.chaos || 0;
+        if (chaos > 0) {
+          // DISORDER — ramps in over 0..0.33; probability of a full random jump scales up
+          const disorder = Math.min(1, chaos / 0.33);
+          if (Math.random() < disorder * 0.9) {
+            const usable = maxRead > 4 ? maxRead : (src.len || this.size);
+            if (src.live) {
+              // jump to a random recent point in the ring (0..usable behind the head)
+              pos = this.writePos - Math.floor(Math.random() * usable);
+              while (pos < 0) pos += this.size;
+              maxRead = usable;
+            } else {
+              // jump anywhere in the static buffer (clamped inward like the normal read)
+              const readSpan = Math.min(src.len * 0.5, (m.rate || 1) * (m.lenSamp || 0));
+              const margin = Math.min(src.len * 0.02, this._sr * 0.01);
+              const lo = margin, hi = Math.max(margin + 1, src.len - readSpan - margin);
+              pos = lo + Math.random() * (hi - lo);
+            }
+          }
+          // PITCH SCATTER — ramps in over 0.33..0.66. Random musical multiple (oct/fifth up/down).
+          const scatter = Math.max(0, Math.min(1, (chaos - 0.33) / 0.33));
+          if (scatter > 0 && Math.random() < scatter * 0.7) {
+            const steps = [0.25, 0.5, 0.5, 1, 1.5, 2, 2, 3, 4];   // musical-ish ratios
+            chaosRate = steps[(Math.random() * steps.length) | 0];
+            if (Math.random() < 0.35) chaosRate *= -1;             // sometimes reverse via -rate
+          }
+          // STUTTER + REVERSE — ramps in over 0.66..1.0. Short, repeated, sometimes backward.
+          const stut = Math.max(0, Math.min(1, (chaos - 0.66) / 0.34));
+          if (stut > 0) {
+            if (Math.random() < stut * 0.8) chaosLenMul = 0.12 + Math.random() * 0.35;  // tiny grains = buzzy stutter
+            if (Math.random() < stut * 0.5) chaosRate = -Math.abs(chaosRate || 1);       // force reverse
+          }
+        }
+        // ── ABSENCE (controlled chaos, two-sided -1..+1) ────────────────────────────────
+        // RIGHT (>0): dropouts — with probability scaling to absence, skip the grain entirely
+        // (gaps, stutter, holes). Full right ≈ most grains vanish.
+        // LEFT (<0): flutter — randomize the grain's gain per grain (organic amplitude shimmer).
+        // Full left ≈ wild per-grain volume swings. Centre (0) = clean, no effect.
+        let grainGain = m.gain;
+        let dropGrain = false;
+        const absence = m.absence || 0;
+        if (absence > 0) {
+          // dropout probability ramps to ~0.92 at full right (never a total kill, so it still lives)
+          if (Math.random() < absence * 0.92) dropGrain = true;   // this grain simply won't spawn
+        } else if (absence < 0) {
+          const amt = -absence;                          // 0..1
+          // random gain factor; at full left this dips dramatically (^3 skews toward quiet)
+          const r = Math.pow(Math.random(), 1 + amt * 3);
+          grainGain = m.gain * (1 - amt + amt * r * 1.6);   // blend clean→wild as amt rises
+        }
+        const finalRate = m.rate * chaosRate;
+        const finalLen = Math.max(64, Math.floor(m.lenSamp * chaosLenMul));
+        if (!dropGrain) this.grains.push({
           pos,
           source: srcId,   // which source buffer this grain reads (constellation)
           engine: m.engine || '_',
-          rate: m.rate,
-          remaining: m.lenSamp,
-          total: m.lenSamp,
-          gain: m.gain,
+          rate: finalRate,
+          remaining: finalLen,
+          total: finalLen,
+          gain: grainGain,
           panL: Math.cos((Math.max(-1, Math.min(1, m.pan + (this.enginePan[m.engine] || 0))) + 1) * 0.25 * Math.PI),
           panR: Math.sin((Math.max(-1, Math.min(1, m.pan + (this.enginePan[m.engine] || 0))) + 1) * 0.25 * Math.PI),
           // safety margin: how many samples of headroom before the write head
