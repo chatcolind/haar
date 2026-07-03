@@ -23,6 +23,8 @@ type OrbProps = {
   onSelect?: (id: string) => void;
   onXY?: (x: number, y: number) => void;
   hideLabel?: boolean;
+  subLabel?: string;   // constellation name (source identity)
+  tint?: string;       // per-constellation tint colour
 };
 
 const BOX = 600;
@@ -31,7 +33,7 @@ const TRAVEL = 0.42;
 export default function Orb({
   id, label, colorKey, x, y,
   size = 130, volume = 0.7, selected = false,
-  xy = { x: 0.5, y: 0.5 }, onSelect, onXY, hideLabel = false,
+  xy = { x: 0.5, y: 0.5 }, onSelect, onXY, hideLabel = false, subLabel, tint,
 }: OrbProps) {
   const c = ORB_COLORS[colorKey];
   const waveRef = useRef<SVGPathElement>(null);
@@ -136,6 +138,12 @@ export default function Orb({
         letterSpacing: '0.04em', opacity: selected ? 0.95 : 0.66, pointerEvents: 'none',
         transition: 'all 0.9s ease',
       }}>{label}</div>}
+      {!hideLabel && subLabel && <div style={{
+        position: 'absolute', left: 0, right: 0, top: cx + haloR + 13,
+        textAlign: 'center', color: tint || c.mid, fontSize: 11, fontWeight: 600,
+        letterSpacing: '0.14em', textTransform: 'uppercase', fontFamily: 'monospace',
+        opacity: selected ? 0.9 : 0.6, pointerEvents: 'none', transition: 'all 0.9s ease',
+      }}>{subLabel}</div>}
     </div>
   );
 }

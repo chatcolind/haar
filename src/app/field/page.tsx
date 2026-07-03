@@ -118,6 +118,16 @@ export default function FieldPage() {
     position?: number;                             // constellation base scan position 0..1
   };
   const DEFAULT_CONST_ID = 'const_default';
+  // per-constellation TINT (Stage 1 source identity): a small palette cycled by constellation
+  // order, so same-constellation orbs share a hue on the field. Default synth = neutral.
+  const CONST_TINTS = ['#8ab6ff','#ffce8a','#7af5c8','#d46090','#b79dff','#f0d0a0','#88e0d0','#e89ab0'];
+  function constFor(orbId: string) { return constellations.find(c => c.orbIds.includes(orbId)); }
+  function tintFor(orbId: string): string | undefined {
+    const c = constFor(orbId); if (!c) return undefined;
+    if (c.id === DEFAULT_CONST_ID) return undefined;   // plain synth = no tint
+    const idx = constellations.filter(x => x.id !== DEFAULT_CONST_ID).findIndex(x => x.id === c.id);
+    return CONST_TINTS[((idx % CONST_TINTS.length) + CONST_TINTS.length) % CONST_TINTS.length];
+  }
   const [constellations, setConstellations] = useState<Constellation[]>([
     { id: DEFAULT_CONST_ID, name: 'Synth', sourceId: 'default', orbIds: [], register: 0, pitchMode: 'varispeed' },
   ]);
@@ -358,6 +368,7 @@ export default function FieldPage() {
   const createEngineRef = useRef<string | null>(null);   // live mirror so progStep sees preview state (no stale closure)
   useEffect(() => { createEngineRef.current = createEngine; }, [createEngine]);
   const [liveMode, setLiveMode] = useState(false);   // false=studio (instant preview), true=live (everything blooms)
+  const [editingConstId, setEditingConstId] = useState<string | null>(null);   // double-click a chip to rename
   // CONSTELLATION targeting in the creation screen: which existing constellation a new orb
   // joins, or '__new__' to create a new one (with a name + the SOURCE row's source).
   const [createConstTarget, setCreateConstTarget] = useState<string>('__new__');
@@ -513,6 +524,26 @@ export default function FieldPage() {
   // ---- SAVE / RECALL songs (Universe) — localStorage ----
   const [songMenu, setSongMenu] = useState<null | 'save' | 'open'>(null);
   const [songName, setSongName] = useState('');
+  const [currentSongName, setCurrentSongName] = useState<string>('');   // the loaded/saved song, for the header
+  // ── IndexedDB for source audio (WAV blobs) — localStorage can't hold audio (~5MB cap) ──
+  function idbOpen(): Promise<IDBDatabase> {
+    return new Promise((res, rej) => {
+      const req = indexedDB.open('haar_audio', 1);
+      req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains('sources')) db.createObjectStore('sources'); };
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+  }
+  async function idbSet(key: string, val: any): Promise<void> {
+    const db = await idbOpen();
+    await new Promise<void>((res, rej) => { const tx = db.transaction('sources','readwrite'); tx.objectStore('sources').put(val, key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+    db.close();
+  }
+  async function idbGet(key: string): Promise<any> {
+    const db = await idbOpen();
+    const val = await new Promise<any>((res, rej) => { const tx = db.transaction('sources','readonly'); const r = tx.objectStore('sources').get(key); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    db.close(); return val;
+  }
   function listSongs(): {name:string;ts:number}[] {
     try { return JSON.parse(localStorage.getItem('haar_songs_index') || '[]'); } catch { return []; }
   }
@@ -534,13 +565,17 @@ export default function FieldPage() {
       register:c.register, pitchMode:c.pitchMode,
       tune: c.tune ?? 0,
     }));
-    // source audio (base64 WAV bytes) for any non-default sources used
-    const sources: Record<string, {name:string;b64:string}> = {};
-    for (const c of constellations) { const sb = sourceBytesRef.current[c.sourceId]; if (sb) sources[c.sourceId] = sb; }
-    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sources }));
+    // source audio (WAV bytes) → IndexedDB (localStorage can't hold audio). Song JSON keeps only
+    // the source ids + names; the actual base64 blobs live in IndexedDB keyed by source id.
+    const sourceMeta: Record<string, {name:string}> = {};
+    for (const c of constellations) {
+      const sb = sourceBytesRef.current[c.sourceId];
+      if (sb) { sourceMeta[c.sourceId] = { name: sb.name }; idbSet('src_'+c.sourceId, sb).catch(err=>console.warn('[idb] save failed', c.sourceId, err)); }
+    }
+    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta }));
     const idx = listSongs().filter(s=>s.name!==name); idx.push({name, ts:Date.now()});
     localStorage.setItem('haar_songs_index', JSON.stringify(idx));
-    setSongMenu(null); setSongName('');
+    setCurrentSongName(name); setSongMenu(null); setSongName('');
   }
   async function loadSong(name: string) {
     let data; try { data = JSON.parse(localStorage.getItem('haar_song_'+name) || ''); } catch { return; }
@@ -575,15 +610,22 @@ export default function FieldPage() {
     }
     // ── restore CONSTELLATIONS (structure + WAV sources + routing + tuning) ──
     if (data.constellations && Array.isArray(data.constellations)) {
-      // 1. reload each saved WAV source (base64 -> ArrayBuffer -> loadSource under its id)
-      const srcMap = data.sources || {};
-      for (const sid of Object.keys(srcMap)) {
+      // 1. reload each saved WAV source. NEW format: audio blobs live in IndexedDB (keyed by
+      // src_<id>), with data.sourceMeta listing ids. OLD format: base64 inline in data.sources.
+      const meta = data.sourceMeta || {};
+      const legacy = data.sources || {};
+      const sids = Object.keys(meta).length ? Object.keys(meta) : Object.keys(legacy);
+      for (const sid of sids) {
         try {
-          const b64 = srcMap[sid].b64; const binStr = atob(b64);
+          let sb = null as null | {name:string;b64:string};
+          if (meta[sid]) { sb = await idbGet('src_'+sid); }        // IndexedDB (new)
+          if (!sb && legacy[sid]) { sb = legacy[sid]; }             // inline base64 (old)
+          if (!sb || !sb.b64) { console.warn('[load] no audio for source', sid); continue; }
+          const binStr = atob(sb.b64);
           const bytes = new Uint8Array(binStr.length);
           for (let i=0;i<binStr.length;i++) bytes[i]=binStr.charCodeAt(i);
-          await microcosmLoadSource(sid, new File([bytes], srcMap[sid].name || 'source.wav'));
-          sourceBytesRef.current[sid] = srcMap[sid];   // retain for re-saving
+          await microcosmLoadSource(sid, new File([bytes], sb.name || 'source.wav'));
+          sourceBytesRef.current[sid] = sb;   // retain for re-saving
         } catch(err) { console.warn('[load] source restore failed', sid, err); }
       }
       // 2. restore the constellations state
@@ -602,7 +644,7 @@ export default function FieldPage() {
       }
       // keep the source-id counter clear of collisions is unnecessary (timestamp ids)
     }
-    setFieldOrbs(restored); setSongMenu(null);
+    setFieldOrbs(restored); setCurrentSongName(name); setSongMenu(null);
   }
   const [life, setLife] = useState(0.32);
   const [tapeAmt, setTapeAmt] = useState(0);   // Tape character amount 0..1 (drag the button)
@@ -922,6 +964,7 @@ export default function FieldPage() {
         const slot = slotFor(o.id);
         return (
           <Orb key={o.id} id={o.id} label={o.label} colorKey={o.colorKey}
+            subLabel={constFor(o.id)?.name} tint={tintFor(o.id)}
             x={slot.x} y={slot.y} size={slot.size} volume={0.7}
             selected={selected===o.id} xy={xyMap[o.id]} onSelect={handleSelect} onXY={handleXY} />
         );
@@ -1582,7 +1625,7 @@ export default function FieldPage() {
       {createOpen && (
         <div style={{ position:'fixed', inset:0, zIndex:300, background:'radial-gradient(ellipse at 50% 32%, #0c1018 0%, #06070d 60%, #030409 100%)', display:'flex', flexDirection:'column', fontFamily:'Rajdhani, sans-serif' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'34px 56px 0' }}>
-            <span style={{ fontSize:15, letterSpacing:'0.32em', color:'#d8a6ff', fontFamily:'monospace' }}>NEW ORB</span>
+            <span style={{ fontSize:15, letterSpacing:'0.4em', color:'#d8a6ff', fontFamily:'monospace', fontWeight:600 }}>H A A R</span>
             <div style={{ display:'flex', alignItems:'center', gap:16 }}>
               {/* STUDIO: instant preview (snappy building) · LIVE: preview slowly blooms in to ~90% */}
               <div onClick={()=>setLiveMode(v=>!v)} title="Studio: instant preview · Live: preview blooms in gently"
@@ -1598,20 +1641,45 @@ export default function FieldPage() {
           </div>
           <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 56px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
             {/* CONSTELLATION — target an existing one, or create a new one */}
-            <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:18, fontFamily:'monospace', textAlign:'center' }}>CONSTELLATION</div>
+            <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:18, fontFamily:'monospace', textAlign:'center' }}>{currentSongName ? `CONSTELLATIONS · ${currentSongName.toUpperCase()}` : 'CONSTELLATION'}</div>
             <div style={{ display:'flex', gap:14, marginBottom:20, justifyContent:'center', flexWrap:'wrap' }}>
               {constellations.filter(c => !(c.id===DEFAULT_CONST_ID && c.orbIds.length===0)).map(c => {
                 const sel = createConstTarget===c.id;
-                return <div key={c.id} onClick={()=>{ setCreateConstTarget(c.id); setCreateSrc(c.sourceId==='default'?'synth':'sample'); }} style={{ padding:'12px 22px', borderRadius:14, cursor:'pointer', border: sel?'1px solid #d8a6ff':'0.5px solid rgba(255,255,255,0.16)', background: sel?'rgba(216,166,255,0.12)':'rgba(255,255,255,0.02)', color: sel?'#e0bfff':'rgba(255,255,255,0.6)', fontSize:16 }}>{c.name}<span style={{ fontSize:11, opacity:0.5, marginLeft:8 }}>{c.orbIds.length}</span></div>;
+                if (editingConstId === c.id) {
+                  return <input key={c.id} autoFocus defaultValue={c.name}
+                    onBlur={(e)=>{ const v=e.target.value.trim(); if(v) setConstellations(prev=>prev.map(x=>x.id===c.id?{...x,name:v}:x)); setEditingConstId(null); }}
+                    onKeyDown={(e)=>{ if(e.key==='Enter'){ const v=(e.target as HTMLInputElement).value.trim(); if(v) setConstellations(prev=>prev.map(x=>x.id===c.id?{...x,name:v}:x)); setEditingConstId(null); } if(e.key==='Escape') setEditingConstId(null); }}
+                    style={{ padding:'12px 18px', borderRadius:14, border:'1px solid #d8a6ff', background:'rgba(216,166,255,0.12)', color:'#e0bfff', fontSize:16, outline:'none', fontFamily:'Rajdhani, sans-serif', width:150, textAlign:'center' }} />;
+                }
+                return (() => {
+                  // distinct tint per constellation, computed directly from its position among the
+                  // non-default constellations so each gets its OWN colour (cello/bird/fire differ).
+                  const nonDef = constellations.filter(x => x.id !== DEFAULT_CONST_ID);
+                  const ci = nonDef.findIndex(x => x.id === c.id);
+                  const ct = c.id === DEFAULT_CONST_ID ? '#c9a6ff' : CONST_TINTS[((ci % CONST_TINTS.length)+CONST_TINTS.length)%CONST_TINTS.length];
+                  const rgb = [parseInt(ct.slice(1,3),16), parseInt(ct.slice(3,5),16), parseInt(ct.slice(5,7),16)];
+                  const rgba = (a:number) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
+                  return <div key={c.id} onClick={()=>{ setCreateConstTarget(c.id); setCreateSrc(c.sourceId==='default'?'synth':'sample'); }} onDoubleClick={()=>setEditingConstId(c.id)} title="double-click to rename"
+                    style={{ position:'relative', overflow:'visible', padding:'20px 38px', borderRadius:18, cursor:'pointer', transition:'all 0.3s ease', transform: sel?'scale(1.06)':'scale(1)',
+                      border:`1.5px solid ${sel?rgba(0.95):rgba(0.5)}`, background:rgba(sel?0.2:0.1),
+                      boxShadow: sel?`0 0 46px 6px ${rgba(0.7)}, inset 0 0 24px ${rgba(0.25)}`:`0 0 26px 3px ${rgba(0.45)}, inset 0 0 16px ${rgba(0.15)}` }}>
+                    <div style={{ position:'absolute', left:'50%', top:'50%', width:'85%', height:'170%', transform:'translate(-50%,-50%)', borderRadius:'50%', background:`radial-gradient(circle, ${rgba(sel?1:0.8)} 0%, ${rgba(0.35)} 42%, transparent 72%)`, filter:'blur(18px)', pointerEvents:'none' }} />
+                    <div style={{ position:'relative', display:'flex', alignItems:'center', gap:13 }}>
+                      <span style={{ fontSize:23, fontWeight:500, letterSpacing:'0.05em', color:'#fff', textShadow:`0 0 16px ${rgba(sel?1:0.8)}, 0 0 6px ${rgba(0.9)}` }}>{c.name}</span>
+                      <span style={{ fontSize:14, fontFamily:'monospace', color:rgba(0.9), textShadow:`0 0 8px ${rgba(0.7)}` }}>{c.orbIds.length}</span>
+                    </div>
+                  </div>;
+                })();
               })}
-              <div onClick={()=>setCreateConstTarget('__new__')} style={{ padding:'12px 22px', borderRadius:14, cursor:'pointer', border: createConstTarget==='__new__'?'1px solid #7af5c8':'0.5px dashed rgba(255,255,255,0.25)', background: createConstTarget==='__new__'?'rgba(122,245,200,0.1)':'transparent', color: createConstTarget==='__new__'?'#a6fff2':'rgba(255,255,255,0.5)', fontSize:16 }}>＋ New</div>
             </div>
-            {createConstTarget==='__new__' && (
-              <div style={{ display:'flex', justifyContent:'center', marginBottom:28 }}>
-                <input value={createConstName} onChange={e=>setCreateConstName(e.target.value)} placeholder="name this constellation"
-                  style={{ padding:'10px 18px', borderRadius:12, border:'0.5px solid rgba(216,166,255,0.4)', background:'rgba(255,255,255,0.03)', color:'#e0bfff', fontSize:16, textAlign:'center', outline:'none', fontFamily:'Rajdhani, sans-serif', width:320 }} />
-              </div>
-            )}
+            {/* the name field IS the create-new-constellation entry: typing here targets a new one */}
+            <div style={{ display:'flex', justifyContent:'center', marginBottom:28 }}>
+              <input value={createConstName}
+                onChange={e=>{ setCreateConstName(e.target.value); if(e.target.value && createConstTarget!=='__new__') setCreateConstTarget('__new__'); }}
+                onFocus={()=>setCreateConstTarget('__new__')}
+                placeholder="create constellation"
+                style={{ padding:'13px 22px', borderRadius:12, border:`0.5px solid ${createConstTarget==='__new__'?'rgba(122,245,200,0.55)':'rgba(255,255,255,0.14)'}`, background: createConstTarget==='__new__'?'rgba(122,245,200,0.05)':'rgba(255,255,255,0.02)', color:'#e0f5ec', fontSize:16, textAlign:'center', outline:'none', fontFamily:'Rajdhani, sans-serif', width:340, transition:'all 0.25s ease', boxShadow: createConstTarget==='__new__'?'0 0 18px 1px rgba(122,245,200,0.2)':'none' }} />
+            </div>
             <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:24, fontFamily:'monospace', textAlign:'center' }}>{(() => { if (createConstTarget==='__new__') return 'SOURCE'; const c = constellations.find(x=>x.id===createConstTarget); const wav = c && sourceBytesRef.current[c.sourceId]?.name; return `SOURCE · ${c?.name || ''}${wav ? ' · '+wav : ''}`; })()}</div>
             <div style={{ display:'flex', gap:24, marginBottom: (createConstTarget==='__new__' && createSrc==='sample') ? 24 : 72, justifyContent:'center' }}>
               {(['synth','sample','livein'] as const).map(src => {
@@ -1620,7 +1688,7 @@ export default function FieldPage() {
                 const soon = src==='livein';               // only Live-in is greyed now
                 const isNew = createConstTarget==='__new__';
                 const disabled = soon || !isNew;           // source is only choosable for a NEW constellation
-                return <div key={src} onClick={()=>{ if(!disabled) setCreateSrc(src); }} style={{ width:280, textAlign:'center', padding:'22px 0', borderRadius:16, cursor: disabled?'default':'pointer', border: sel?'1px solid #d8a6ff':'0.5px solid rgba(255,255,255,0.16)', background: sel?'rgba(216,166,255,0.1)':'rgba(255,255,255,0.02)', color: sel?'#e0bfff':(disabled?'rgba(255,255,255,0.28)':'rgba(255,255,255,0.6)'), fontSize:19, letterSpacing:'0.04em' }}>{lbl}{soon?'  ·  soon':''}</div>;
+                return <div key={src} onClick={()=>{ if(!disabled) setCreateSrc(src); }} style={{ padding:'11px 30px', borderRadius:22, cursor: disabled?'default':'pointer', border: sel?'1px solid #c9a6ff':'0.5px solid rgba(255,255,255,0.14)', background: sel?'rgba(201,166,255,0.1)':'rgba(255,255,255,0.02)', color: sel?'#c9a6ff':(disabled?'rgba(255,255,255,0.28)':'rgba(255,255,255,0.6)'), fontSize:15, letterSpacing:'0.05em', boxShadow: sel?'0 0 16px 1px rgba(201,166,255,0.3)':'none', transition:'all 0.25s ease' }}>{lbl}{soon?'  ·  soon':''}</div>;
               })}
             </div>
             {createConstTarget==='__new__' && createSrc==='sample' && (
