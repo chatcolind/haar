@@ -305,11 +305,20 @@ export class Microcosm {
     // final safety only for extreme up-stacks (e.g. +2oct * wide detune): cap high but generous
     const capped = Math.sign(r || 1) * Math.min(Math.abs(r), 4.2);
     const source = this.engineSource[this._currentEngine] || 'default';
-    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine, source });
+    const posEng = this.enginePosition[this._currentEngine];
+    const sprayEng = this.engineSpray[this._currentEngine];
+    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine, source, position: posEng, spray: sprayEng });
   }
   // per-orb SOURCE (constellation): which loaded source buffer this orb's grains read.
   private engineSource: Record<string, string> = {};
   setEngineSource(id: string, sourceId: string): void { this.engineSource[id] = sourceId || 'default'; }
+  // per-orb POSITION/scan into its (static) source buffer, 0..1, + spray. undefined => use source default.
+  private enginePosition: Record<string, number | undefined> = {};
+  private engineSpray: Record<string, number | undefined> = {};
+  setOrbPosition(id: string, position: number, spray?: number): void {
+    this.enginePosition[id] = position;
+    if (spray != null) this.engineSpray[id] = spray;
+  }
   // per-orb home pitch (semitones, absolute home; conductor transpose added later)
   private engineHome: Record<string, number> = {};
   // ── TEMPO LOCK (per orb) ──────────────────────────────────────────────
@@ -361,6 +370,10 @@ export class Microcosm {
     this.node.port.postMessage({ type: 'loadSource', id, channelData: mono }, [mono.buffer]);
   }
   removeSource(id: string): void { this.node?.port.postMessage({ type: 'removeSource', id }); }
+  // Position/scan for a static (WAV) source: position 0..1 into the buffer, spray = scatter width.
+  setSourcePosition(id: string, position: number, spray?: number): void {
+    this.node?.port.postMessage({ type: 'sourcePosition', id, position, spray });
+  }
 
   setFilter(hz: number): void {
     try { this.filter.frequency.setTargetAtTime(Math.max(80, Math.min(18000, hz)), this.ctx.currentTime, 0.02); } catch {}

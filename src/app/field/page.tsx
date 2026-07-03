@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
-  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -115,6 +115,7 @@ export default function FieldPage() {
     register: number;                              // semitone offset (Slice 5)
     pitchMode: 'varispeed' | 'grainshift';         // (Slice 5)
     tune?: number;                                 // root-detection tuning offset (semitones)
+    position?: number;                             // constellation base scan position 0..1
   };
   const DEFAULT_CONST_ID = 'const_default';
   const [constellations, setConstellations] = useState<Constellation[]>([
@@ -339,6 +340,7 @@ export default function FieldPage() {
   const [pendingWav, setPendingWav] = useState<File | null>(null);   // WAV chosen for a new constellation
   // retain raw WAV bytes per sourceId so songs can be saved self-contained (base64)
   const sourceBytesRef = useRef<Record<string, { name: string; b64: string }>>({});
+  const posRef = useRef<Record<string, number>>({});   // per-orb POSITION 0..1 into its WAV source
   const [createList, setCreateList] = useState<string[]>([]);   // engines queued for this constellation (multi-add)
   function toggleEngineInList(engineType: string) {
     setCreateList(prev => [...prev, engineType]);   // tap adds one (can queue duplicates)
@@ -1155,6 +1157,22 @@ export default function FieldPage() {
                     onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; microcosmGrainDensity(focused, d); forceOrb(x=>x+1); }}
                     style={{ width:'100%', accentColor:'#d8a6ff' }} />
                 </div>
+                {/* POSITION — only for orbs whose constellation uses a WAV source */}
+                {(() => {
+                  const oc = constellations.find(c => c.orbIds.includes(focused));
+                  if (!oc || oc.sourceId === 'default') return null;
+                  return (
+                    <div style={{ marginBottom:14 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                        <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>POSITION</span>
+                        <span style={{ fontSize:12.5, color:'#ffce8a' }}>{Math.round((posRef.current[focused] ?? oc.position ?? 0)*100)}%</span>
+                      </div>
+                      <input type="range" min={0} max={1} step={0.001} value={posRef.current[focused] ?? oc.position ?? 0}
+                        onChange={(e)=>{ const v=parseFloat(e.target.value); posRef.current[focused]=v; microcosmOrbPosition(focused, v, 0.06); forceOrb(x=>x+1); }}
+                        style={{ width:'100%', accentColor:'#ffce8a' }} />
+                    </div>
+                  );
+                })()}
               </div>
 
             </div>

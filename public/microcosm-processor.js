@@ -46,15 +46,32 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         return;
       }
       if (m.type === 'grain') {
-        // startSamp is interpreted as "samples behind the current write head".
-        // This keeps reads in recent, safe audio and never crosses the write
-        // head (which would cause a discontinuity = pop).
-        const behind = m.startSamp;
-        let pos = this.writePos - behind;
-        while (pos < 0) pos += this.size;
+        const srcId = m.source || 'default';
+        const src = this.sources[srcId] || this.sources.default;
+        let pos, maxRead;
+        if (src.live) {
+          // LIVE ring: startSamp = samples behind the write head (recent, safe, never crosses it)
+          const behind = m.startSamp;
+          pos = this.writePos - behind;
+          while (pos < 0) pos += this.size;
+          maxRead = behind;
+        } else {
+          // STATIC source (WAV): read from the source's POSITION (0..1 into the buffer) plus a
+          // spray so grains scatter around the point (avoids a static/combed sound). This is
+          // what lets you freeze on one moment or slowly scan through the sample.
+          // per-ORB position/spray if the grain carries them, else the source's default
+          const p01   = (m.position != null) ? m.position : ((src.position != null) ? src.position : 0.0);
+          const spray = (m.spray != null)    ? m.spray    : ((src.spray != null)    ? src.spray    : 0.08);
+          const centre = p01 * src.len;
+          const jitter = (Math.random() * 2 - 1) * spray * src.len;
+          pos = centre + jitter;
+          while (pos < 0) pos += src.len;
+          while (pos >= src.len) pos -= src.len;
+          maxRead = src.len;   // static buffer: whole length is readable
+        }
         this.grains.push({
           pos,
-          source: m.source || 'default',   // which source buffer this grain reads (constellation)
+          source: srcId,   // which source buffer this grain reads (constellation)
           engine: m.engine || '_',
           rate: m.rate,
           remaining: m.lenSamp,
@@ -63,7 +80,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
           panL: Math.cos((Math.max(-1, Math.min(1, m.pan + (this.enginePan[m.engine] || 0))) + 1) * 0.25 * Math.PI),
           panR: Math.sin((Math.max(-1, Math.min(1, m.pan + (this.enginePan[m.engine] || 0))) + 1) * 0.25 * Math.PI),
           // safety margin: how many samples of headroom before the write head
-          maxRead: behind,
+          maxRead,
         });
       } else if (m.type === 'freeze') {
         if (m.value) {
@@ -91,6 +108,9 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         }
       } else if (m.type === 'removeSource') {
         if (m.id && m.id !== 'default') delete this.sources[m.id];
+      } else if (m.type === 'sourcePosition') {
+        const src = this.sources[m.id];
+        if (src) { if (m.position != null) src.position = m.position; if (m.spray != null) src.spray = m.spray; }
       } else if (m.type === 'config') {
         if (typeof m.recording === 'boolean') this.recording = m.recording;
       }
