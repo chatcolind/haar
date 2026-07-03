@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
-  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmFreezeSource, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -407,6 +407,27 @@ export default function FieldPage() {
     setCreateConstTarget('__new__');
     setCreateSrc('synth');
     setCreateOpen(false);
+  }
+  // FREEZE a synth constellation: snapshot the live ring into a static source, convert the
+  // constellation to it, re-route its orbs. It then behaves exactly like a WAV constellation
+  // (per-orb POSITION/scan lights up). This completes position/scan on the synth side.
+  const [freezeSecs, setFreezeSecs] = useState<2|4|8>(2);   // freeze capture length
+  function doFreeze(constId: string, seconds: number) {
+    const c = constRef.current.find(x => x.id === constId);
+    if (!c) return;
+    const frozenId = `src_frozen_${Date.now()}`;
+    microcosmFreezeSource(frozenId, seconds);              // capture `seconds` of the ring
+    // default position to the MIDDLE of the buffer (not 0) so grains read clean centre content,
+    // away from the loop seam at 0/1 where the crossfade can still leave a small discontinuity.
+    for (const oid of c.orbIds) { microcosmEngineSource(oid, frozenId); microcosmOrbPosition(oid, 0.5, 0.06); posRef.current[oid] = 0.5; }
+    setConstellations(prev => prev.map(x => x.id === constId ? { ...x, sourceId: frozenId, position: 0.5 } : x));
+  }
+  // release a frozen constellation back to the live synth (default) source
+  function unFreeze(constId: string) {
+    const c = constRef.current.find(x => x.id === constId);
+    if (!c) return;
+    for (const oid of c.orbIds) { microcosmEngineSource(oid, 'default'); microcosmOrbPosition(oid, 0, 0.06); }
+    setConstellations(prev => prev.map(x => x.id === constId ? { ...x, sourceId: 'default' } : x));
   }
   const PREVIEW_ID = 'preview_temp';
   async function previewEngine(engineType: string) {
@@ -1157,6 +1178,29 @@ export default function FieldPage() {
                     onChange={(e)=>{ const d=parseFloat(e.target.value); densRef.current[focused]=d; microcosmGrainDensity(focused, d); forceOrb(x=>x+1); }}
                     style={{ width:'100%', accentColor:'#d8a6ff' }} />
                 </div>
+                {/* FREEZE — for SYNTH constellations: capture the live ring into a static
+                    source (2/4/8s), lit when frozen, tap again to release back to live. */}
+                {(() => {
+                  const oc = constellations.find(c => c.orbIds.includes(focused));
+                  if (!oc) return null;
+                  const frozen = oc.sourceId.startsWith('src_frozen_');
+                  const isSynthOrFrozen = oc.sourceId === 'default' || frozen;
+                  if (!isSynthOrFrozen) return null;   // WAV constellations don't freeze
+                  return (
+                    <div style={{ marginBottom:14 }}>
+                      <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                        <div onClick={()=>{ if(frozen){ unFreeze(oc.id); } else { doFreeze(oc.id, freezeSecs); } forceOrb(x=>x+1); }}
+                          style={{ flex:1, padding:'11px 0', borderRadius:12, textAlign:'center', cursor:'pointer', border:`1px solid ${frozen?'#a6e3ff':'rgba(122,213,255,0.5)'}`, background: frozen?'rgba(122,213,255,0.22)':'rgba(122,213,255,0.08)', color:'#a6e3ff', fontSize:13, letterSpacing:'0.14em', boxShadow: frozen?'0 0 16px 2px rgba(122,213,255,0.4)':'none' }}>
+                          {frozen ? '❄ FROZEN — release' : '❄ FREEZE'}
+                        </div>
+                        {!frozen && ([2,4,8] as const).map(sec => (
+                          <div key={sec} onClick={()=>setFreezeSecs(sec)} style={{ width:34, padding:'11px 0', borderRadius:10, textAlign:'center', cursor:'pointer', border:`0.5px solid ${freezeSecs===sec?'#a6e3ff':'rgba(255,255,255,0.18)'}`, background: freezeSecs===sec?'rgba(122,213,255,0.16)':'transparent', color: freezeSecs===sec?'#a6e3ff':'rgba(255,255,255,0.5)', fontSize:12 }}>{sec}s</div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.35)', textAlign:'center', marginTop:5, fontFamily:'monospace' }}>{frozen ? 'scan it below · release to go live' : 'capture the live synth to scan it'}</div>
+                    </div>
+                  );
+                })()}
                 {/* POSITION — only for orbs whose constellation uses a WAV source */}
                 {(() => {
                   const oc = constellations.find(c => c.orbIds.includes(focused));

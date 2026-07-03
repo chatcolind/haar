@@ -65,9 +65,16 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
           const centre = p01 * src.len;
           const jitter = (Math.random() * 2 - 1) * spray * src.len;
           pos = centre + jitter;
-          while (pos < 0) pos += src.len;
-          while (pos >= src.len) pos -= src.len;
-          maxRead = src.len;   // static buffer: whole length is readable
+          // CLAMP (don't wrap) so no grain reads ACROSS the loop seam at 0/end — the source of
+          // the edge pops. A grain reads ~ rate*lenSamp samples over its life, so keep its whole
+          // read window inside [margin, len - readSpan - margin]. Grains near the edges read
+          // INWARD instead of wrapping past the discontinuity → clean at every position.
+          const readSpan = Math.min(src.len * 0.5, (m.rate || 1) * (m.lenSamp || 0));
+          const margin = Math.min(src.len * 0.02, this._sr * 0.01);   // ~10ms safety
+          const lo = margin, hi = Math.max(margin + 1, src.len - readSpan - margin);
+          if (pos < lo) pos = lo;
+          if (pos > hi) pos = hi;
+          maxRead = src.len;
         }
         this.grains.push({
           pos,
@@ -105,6 +112,29 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         // position (one-buffer primitive). channelData arrives zero-copy (transferred).
         if (m.id && m.channelData && m.channelData.length > 1) {
           this.sources[m.id] = { buf: m.channelData, len: m.channelData.length, live: false };
+        }
+      } else if (m.type === 'freezeSource') {
+        // FREEZE: capture the most-recent `seconds` of the live ring into a NEW static source,
+        // reusing the PROVEN seam-crossfade from _captureFreeze so the loop point is click-free.
+        // Registered as a static source -> gets full per-orb position/scan (like a loaded WAV).
+        if (m.id) {
+          const sz = this.size;
+          let len = Math.min(Math.floor(this._sr * (m.seconds || 2.0)), sz - 1);
+          if (len < 64) len = 64;
+          const buf = new Float32Array(len);
+          // copy the most recent `len` samples ending at the write head, chronological order
+          const start = (this.writePos - len + sz) % sz;
+          for (let k = 0; k < len; k++) buf[k] = this.ring[(start + k) % sz];
+          // crossfade the loop seam: blend the tail into the head over ~15ms (raised-cosine),
+          // so a grain crossing end->start hits no discontinuity. Exactly _captureFreeze's method.
+          const xf = Math.min(Math.floor(this._sr * 0.015), Math.floor(len / 4));
+          for (let k = 0; k < xf; k++) {
+            const t = k / xf;
+            const g = 0.5 - 0.5 * Math.cos(Math.PI * t);   // 0..1
+            const tail = buf[len - xf + k];
+            buf[k] = buf[k] * g + tail * (1 - g);
+          }
+          this.sources[m.id] = { buf, len, live: false };
         }
       } else if (m.type === 'removeSource') {
         if (m.id && m.id !== 'default') delete this.sources[m.id];

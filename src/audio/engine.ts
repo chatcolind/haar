@@ -733,6 +733,7 @@ export async function microcosmLoadSource(id: string, file: File): Promise<{ dur
   return { duration: audioBuf.duration, rootHz };
 }
 export function microcosmRemoveSource(id: string): void { (microcosmCore as any)?.removeSource(id); }
+export function microcosmFreezeSource(id: string, seconds?: number): void { (microcosmCore as any)?.freezeSource(id, seconds); }
 export function microcosmSourcePosition(id: string, position: number, spray?: number): void { (microcosmCore as any)?.setSourcePosition(id, position, spray); }
 export function microcosmEngineSource(orbId: string, sourceId: string): void { (microcosmCore as any)?.setEngineSource(orbId, sourceId); }
 export function microcosmOrbPosition(orbId: string, position: number, spray?: number): void { (microcosmCore as any)?.setOrbPosition(orbId, position, spray); }

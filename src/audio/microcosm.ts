@@ -370,6 +370,8 @@ export class Microcosm {
     this.node.port.postMessage({ type: 'loadSource', id, channelData: mono }, [mono.buffer]);
   }
   removeSource(id: string): void { this.node?.port.postMessage({ type: 'removeSource', id }); }
+  // FREEZE the live ring into a new static source id (a captured snapshot, like loading a WAV).
+  freezeSource(id: string, seconds: number = 2): void { this.node?.port.postMessage({ type: 'freezeSource', id, seconds }); }
   // Position/scan for a static (WAV) source: position 0..1 into the buffer, spray = scatter width.
   setSourcePosition(id: string, position: number, spray?: number): void {
     this.node?.port.postMessage({ type: 'sourcePosition', id, position, spray });
