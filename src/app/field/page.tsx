@@ -282,6 +282,25 @@ export default function FieldPage() {
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
     for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
   }
+
+  // ── SINGLE PITCH SOURCE OF TRUTH ─────────────────────────────────────────
+  // resolveCurrentPitch returns the CURRENT live musical context for a constellation: the moving
+  // offsets an orb needs to arrive in tune with everything else RIGHT NOW.
+  //   conductor = where the master keyboard is (playSemi + octave*12)
+  //   chordStep = the progression's current transpose (so a joining orb lands on the CURRENT
+  //               chord and follows along), 0 if no progression running.
+  function resolveCurrentPitch(_constId: string): { conductor: number; chordStep: number } {
+    const conductor = playSemi + octave * 12;
+    const chordStep = progRunning ? progTransposeRef.current : 0;
+    return { conductor, chordStep };
+  }
+  // applyJoinPitch sets BOTH moving slots on a joining orb so it enters correctly mid-anything.
+  // The orb's own fixed root-detection tuning is applied separately and stays put.
+  function applyJoinPitch(orbId: string, constId: string, isDefaultSource: boolean): void {
+    const { conductor, chordStep } = resolveCurrentPitch(constId);
+    if (!isDefaultSource) microcosmOrbConductor(orbId, conductor);
+    microcosmOrbChordStep(orbId, chordStep);
+  }
   function stopProg() {
     if (progTimer.current) { clearTimeout(progTimer.current); progTimer.current = null; }
     setProgRunning(false); setProgProgress(0); setProgStepDur(0);
@@ -306,6 +325,9 @@ export default function FieldPage() {
     for (const c of constRef.current) {
       for (const oid of c.orbIds) microcosmOrbChordStep(oid, stepT);   // ONLY the moving chord part
     }
+    // keep the live PREVIEW orb in step with the progression too, so auditioning follows the
+    // chords exactly like a real orb would (preview is a faithful audition).
+    if (createEngineRef.current) microcosmOrbChordStep(PREVIEW_ID, stepT);   // live ref, not stale closure
     setProgProgress(0);
     setProgStepIdx(i);
     setProgStepDur(0);
@@ -333,6 +355,8 @@ export default function FieldPage() {
   const [createOpen, setCreateOpen] = useState(false);          // orb creation bloom
   const [createSrc, setCreateSrc] = useState<'synth'|'sample'|'livein'>('synth');
   const [createEngine, setCreateEngine] = useState<string | null>(null);  // selected engine type
+  const createEngineRef = useRef<string | null>(null);   // live mirror so progStep sees preview state (no stale closure)
+  useEffect(() => { createEngineRef.current = createEngine; }, [createEngine]);
   // CONSTELLATION targeting in the creation screen: which existing constellation a new orb
   // joins, or '__new__' to create a new one (with a name + the SOURCE row's source).
   const [createConstTarget, setCreateConstTarget] = useState<string>('__new__');
@@ -386,6 +410,7 @@ export default function FieldPage() {
       newOrbIds.push(id);
       microcosmEngineSource(id, sourceId);              // route to the constellation's source
       if (tune) microcosmOrbTuning(id, tune);           // FIXED tuning slot (never overwritten by chords)
+      applyJoinPitch(id, targetId, sourceId === 'default');   // arrive in the current key + on the current chord
       if (started.current && state==='playing') { microcosmAddOrb(id, engineType, orbLevel(id)); microcosmEngineActive(id, true); microcosmEngineLevel(id, orbLevel(id)); }
     }
     // AUTHORITATIVE membership (no stale state): record new orbs into the target constellation
@@ -417,10 +442,20 @@ export default function FieldPage() {
     if (!c) return;
     const frozenId = `src_frozen_${Date.now()}`;
     microcosmFreezeSource(frozenId, seconds);              // capture `seconds` of the ring
+    // PITCH CORRECTION: the frozen buffer holds the pitch the synth was playing when captured
+    // (conductor offset = playSemi + octave*12). Once frozen it becomes a sample orb and receives
+    // the live conductor broadcast on top. To keep it IN TUNE with live orbs, set its tuning to
+    // cancel the baked-in pitch: tuning = -(captured conductor offset). Net = current conductor pitch.
+    const capturedOffset = playSemi + octave * 12;
     // default position to the MIDDLE of the buffer (not 0) so grains read clean centre content,
     // away from the loop seam at 0/1 where the crossfade can still leave a small discontinuity.
-    for (const oid of c.orbIds) { microcosmEngineSource(oid, frozenId); microcosmOrbPosition(oid, 0.5, 0.06); posRef.current[oid] = 0.5; }
-    setConstellations(prev => prev.map(x => x.id === constId ? { ...x, sourceId: frozenId, position: 0.5 } : x));
+    for (const oid of c.orbIds) {
+      microcosmEngineSource(oid, frozenId);
+      microcosmOrbPosition(oid, 0.5, 0.06); posRef.current[oid] = 0.5;
+      microcosmOrbTuning(oid, -capturedOffset);   // cancel baked-in pitch → tracks the key
+      microcosmOrbChordStep(oid, progRunning ? progTransposeRef.current : 0);   // land on current chord
+    }
+    setConstellations(prev => prev.map(x => x.id === constId ? { ...x, sourceId: frozenId, position: 0.5, tune: -capturedOffset } : x));
   }
   // release a frozen constellation back to the live synth (default) source
   function unFreeze(constId: string) {
@@ -450,6 +485,10 @@ export default function FieldPage() {
     } else {
       microcosmEngineSource(PREVIEW_ID, 'default');
     }
+    // arrive at the CURRENT pitch context immediately (conductor + chord). Ongoing progression
+    // steps reach the preview via progStep's createEngineRef broadcast (a live ref, not a stale
+    // closure), so preview follows the chords identically to a real orb.
+    applyJoinPitch(PREVIEW_ID, createConstTarget, createConstTarget!=='__new__' && (constellations.find(c=>c.id===createConstTarget)?.sourceId==='default'));
     microcosmEngineActive(PREVIEW_ID, true);
     microcosmEngineLevel(PREVIEW_ID, 0.8);
   }
