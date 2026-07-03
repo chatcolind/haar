@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Orb, { ORB_COLORS } from '../../components/field/Orb';
 import {
   startAudio, microcosmStart, microcosmStopEngine,
-  microcosmEngineActive, microcosmEngineLevel, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
+  microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
   microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmFreezeSource, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
@@ -357,6 +357,7 @@ export default function FieldPage() {
   const [createEngine, setCreateEngine] = useState<string | null>(null);  // selected engine type
   const createEngineRef = useRef<string | null>(null);   // live mirror so progStep sees preview state (no stale closure)
   useEffect(() => { createEngineRef.current = createEngine; }, [createEngine]);
+  const [liveMode, setLiveMode] = useState(false);   // false=studio (instant preview), true=live (everything blooms)
   // CONSTELLATION targeting in the creation screen: which existing constellation a new orb
   // joins, or '__new__' to create a new one (with a name + the SOURCE row's source).
   const [createConstTarget, setCreateConstTarget] = useState<string>('__new__');
@@ -411,7 +412,11 @@ export default function FieldPage() {
       microcosmEngineSource(id, sourceId);              // route to the constellation's source
       if (tune) microcosmOrbTuning(id, tune);           // FIXED tuning slot (never overwritten by chords)
       applyJoinPitch(id, targetId, sourceId === 'default');   // arrive in the current key + on the current chord
-      if (started.current && state==='playing') { microcosmAddOrb(id, engineType, orbLevel(id)); microcosmEngineActive(id, true); microcosmEngineLevel(id, orbLevel(id)); }
+      // seamless add: the newly-added orb inherits the PREVIEW's current level (in live mode the
+      // preview has been blooming in), so committing it never jumps — it's already at that level.
+      const joinLevel = (engineType === createEngine && (window as any).__previewLevel != null) ? (window as any).__previewLevel : orbLevel(id);
+      volRef.current[id] = joinLevel;
+      if (started.current && state==='playing') { microcosmAddOrb(id, engineType, joinLevel); microcosmEngineActive(id, true); microcosmEngineLevel(id, joinLevel); }
     }
     // AUTHORITATIVE membership (no stale state): record new orbs into the target constellation
     setConstellations(prev => prev.map(c => ({ ...c, orbIds: c.id === targetId ? Array.from(new Set([...c.orbIds, ...newOrbIds])) : c.orbIds.filter(o => !newOrbIds.includes(o)) })));
@@ -490,7 +495,10 @@ export default function FieldPage() {
     // closure), so preview follows the chords identically to a real orb.
     applyJoinPitch(PREVIEW_ID, createConstTarget, createConstTarget!=='__new__' && (constellations.find(c=>c.id===createConstTarget)?.sourceId==='default'));
     microcosmEngineActive(PREVIEW_ID, true);
-    microcosmEngineLevel(PREVIEW_ID, 0.8);
+    // STUDIO: instant/full for snappy auditioning. LIVE: slow graceful entry to ~90% — the
+    // preview IS the bloom-in; when you then add the orb it's already playing at level (no second fade).
+    if (liveMode) { microcosmFadeInEngine(PREVIEW_ID, 0.9, 2.0); (window as any).__previewLevel = 0.9; }
+    else { microcosmEngineLevel(PREVIEW_ID, 0.8); (window as any).__previewLevel = 0.8; }
   }
   function stopPreview() {
     microcosmEngineActive(PREVIEW_ID, false);
@@ -1569,7 +1577,18 @@ export default function FieldPage() {
         <div style={{ position:'fixed', inset:0, zIndex:300, background:'radial-gradient(ellipse at 50% 32%, #0c1018 0%, #06070d 60%, #030409 100%)', display:'flex', flexDirection:'column', fontFamily:'Rajdhani, sans-serif' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'34px 56px 0' }}>
             <span style={{ fontSize:15, letterSpacing:'0.32em', color:'#d8a6ff', fontFamily:'monospace' }}>NEW ORB</span>
-            <div onClick={cancelCreate} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
+            <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+              {/* STUDIO: instant preview (snappy building) · LIVE: preview slowly blooms in to ~90% */}
+              <div onClick={()=>setLiveMode(v=>!v)} title="Studio: instant preview · Live: preview blooms in gently"
+                style={{ padding:'7px 16px', borderRadius:20, cursor:'pointer', fontFamily:'monospace', fontSize:11, letterSpacing:'0.18em',
+                  border:`1px solid ${liveMode?'#ffce8a':'rgba(255,255,255,0.2)'}`,
+                  background: liveMode?'rgba(255,206,138,0.14)':'rgba(255,255,255,0.03)',
+                  color: liveMode?'#ffce8a':'rgba(255,255,255,0.5)',
+                  boxShadow: liveMode?'0 0 14px 1px rgba(255,206,138,0.35)':'none' }}>
+                {liveMode ? '● LIVE' : '○ STUDIO'}
+              </div>
+              <div onClick={cancelCreate} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
+            </div>
           </div>
           <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 56px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
             {/* CONSTELLATION — target an existing one, or create a new one */}
@@ -1615,7 +1634,7 @@ export default function FieldPage() {
                 const col = ORB_COLORS[e.colorKey] || ORB_COLORS['tunnel'];
                 return (
                   <div key={e.engineType} onClick={()=>toggleEngineInList(e.engineType)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12, width:104, cursor:'pointer', opacity: sel?1:0.82, transition:'opacity 0.2s, transform 0.2s', transform: sel?'scale(1.08)':'scale(1)', position:'relative' }}>
-                    {queued>0 && <div onClick={(ev)=>{ ev.stopPropagation(); setCreateList(prev=>{ const i=prev.lastIndexOf(e.engineType); if(i>=0){ const n=[...prev]; n.splice(i,1); return n; } return prev; }); }} title="tap badge to remove one" style={{ position:'absolute', top:-4, right:18, zIndex:2, minWidth:22, height:22, padding:'0 6px', borderRadius:11, background:'#7af5c8', color:'#04140f', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center' }}>{queued}</div>}
+                    {queued>0 && <div onClick={(ev)=>{ ev.stopPropagation(); setCreateList(prev=>{ const i=prev.lastIndexOf(e.engineType); if(i>=0){ const n=[...prev]; n.splice(i,1); if(n.length===0){ stopPreview(); setCreateEngine(null); } return n; } return prev; }); }} title="tap badge to remove one" style={{ position:'absolute', top:-4, right:18, zIndex:2, minWidth:22, height:22, padding:'0 6px', borderRadius:11, background:'#7af5c8', color:'#04140f', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center' }}>{queued}</div>}
                     <div style={{ width: sel?66:58, height: sel?66:58, borderRadius:'50%', background:`radial-gradient(circle, ${col.core}, ${col.mid}55 52%, transparent 76%)`, boxShadow: sel?`0 0 30px 6px ${col.mid}99`:`0 0 12px 2px ${col.mid}33`, border: sel?`2px solid ${col.core}`:'2px solid transparent' }} />
                     <div style={{ fontSize:15, letterSpacing:'0.06em', color: sel?col.core:'rgba(255,255,255,0.82)' }}>{e.label}{sel?' ✦':''}</div>
                   </div>

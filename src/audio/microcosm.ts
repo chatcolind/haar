@@ -420,6 +420,26 @@ export class Microcosm {
   setEngineLevel(id: string, level: number): void {
     if (this.rack[id]) this.rack[id].level = Math.max(0, Math.min(1, level));
   }
+  // GRACEFUL JOIN: ramp an orb's level from 0 up to `target` over `seconds` so it blooms into
+  // the mix instead of punching in. Click-free (grains just get progressively louder). Cancels
+  // any prior fade on the same orb.
+  private _fadeTimers: Record<string, any> = {};
+  fadeInEngine(id: string, target: number, seconds: number = 1.5): void {
+    if (!this.rack[id]) return;
+    if (this._fadeTimers[id]) { clearInterval(this._fadeTimers[id]); }
+    const tgt = Math.max(0, Math.min(1, target));
+    const stepMs = 40;
+    const steps = Math.max(1, Math.floor((seconds * 1000) / stepMs));
+    let n = 0;
+    this.rack[id].level = 0;
+    this._fadeTimers[id] = setInterval(() => {
+      n++;
+      const t = n / steps;                       // 0..1
+      const eased = t * t * (3 - 2 * t);         // smoothstep — gentle bloom
+      if (this.rack[id]) this.rack[id].level = tgt * eased;
+      if (n >= steps) { if (this.rack[id]) this.rack[id].level = tgt; clearInterval(this._fadeTimers[id]); delete this._fadeTimers[id]; }
+    }, stepMs);
+  }
   // ---- dynamic rack (rack-by-orb-id) ----
   // Create a rack entry for an orb instance running a given engine recipe.
   // Idempotent: re-adding an existing orbId updates its engineType, keeps level/active.
