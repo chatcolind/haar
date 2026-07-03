@@ -475,6 +475,12 @@ export default function FieldPage() {
     await ensureStarted();
     microcosmRemoveOrb(PREVIEW_ID);
     microcosmAddOrb(PREVIEW_ID, engineType, 0.8);
+    // RESET the reused preview orb's pitch slots so nothing leaks between previews — e.g. a
+    // prior WAV preview left a tuning offset that would detune a later synth preview.
+    microcosmOrbTuning(PREVIEW_ID, 0);
+    microcosmOrbRegister(PREVIEW_ID, 0);
+    microcosmOrbChordStep(PREVIEW_ID, 0);
+    microcosmOrbConductor(PREVIEW_ID, 0);
     // Route the preview to whatever source the SELECTED constellation actually uses:
     //  - existing constellation -> its already-loaded source id + its tuning
     //  - new constellation with a chosen WAV -> the pending source
@@ -1628,15 +1634,21 @@ export default function FieldPage() {
             )}
             <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:30, fontFamily:'monospace' }}>ENGINE — tap to select</div>
             <div style={{ display:'flex', gap:40, flexWrap:'wrap', rowGap:40 }}>
+              {(() => { const _sc = createConstTarget !== '__new__' ? constellations.find(c=>c.id===createConstTarget) : null; (window as any).__assignedEngines = _sc ? new Set(_sc.orbIds.map(oid => fieldOrbs.find(o=>o.id===oid)?.engineType).filter(Boolean)) : new Set(); return null; })()}
               {ALL_ORBS.map(e => {
                 const queued = createList.filter(x=>x===e.engineType).length;
                 const sel = queued>0 || createEngine===e.engineType;
+                const alreadyHere = ((window as any).__assignedEngines as Set<string>)?.has(e.engineType);
                 const col = ORB_COLORS[e.colorKey] || ORB_COLORS['tunnel'];
                 return (
                   <div key={e.engineType} onClick={()=>toggleEngineInList(e.engineType)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12, width:104, cursor:'pointer', opacity: sel?1:0.82, transition:'opacity 0.2s, transform 0.2s', transform: sel?'scale(1.08)':'scale(1)', position:'relative' }}>
                     {queued>0 && <div onClick={(ev)=>{ ev.stopPropagation(); setCreateList(prev=>{ const i=prev.lastIndexOf(e.engineType); if(i>=0){ const n=[...prev]; n.splice(i,1); if(n.length===0){ stopPreview(); setCreateEngine(null); } return n; } return prev; }); }} title="tap badge to remove one" style={{ position:'absolute', top:-4, right:18, zIndex:2, minWidth:22, height:22, padding:'0 6px', borderRadius:11, background:'#7af5c8', color:'#04140f', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center' }}>{queued}</div>}
-                    <div style={{ width: sel?66:58, height: sel?66:58, borderRadius:'50%', background:`radial-gradient(circle, ${col.core}, ${col.mid}55 52%, transparent 76%)`, boxShadow: sel?`0 0 30px 6px ${col.mid}99`:`0 0 12px 2px ${col.mid}33`, border: sel?`2px solid ${col.core}`:'2px solid transparent' }} />
-                    <div style={{ fontSize:15, letterSpacing:'0.06em', color: sel?col.core:'rgba(255,255,255,0.82)' }}>{e.label}{sel?' ✦':''}</div>
+                    <div style={{ position:'relative' }}>
+                      <div style={{ width: sel?66:58, height: sel?66:58, borderRadius:'50%', background:`radial-gradient(circle, ${col.core}, ${col.mid}55 52%, transparent 76%)`, boxShadow: sel?`0 0 30px 6px ${col.mid}99`:(alreadyHere?`0 0 22px 5px ${col.mid}88`:`0 0 12px 2px ${col.mid}33`), border: sel?`2px solid ${col.core}`:(alreadyHere?`2px solid ${col.core}`:'2px solid transparent') }} />
+                      {alreadyHere && !sel && <div style={{ position:'absolute', top:-6, right:-2, width:10, height:10, borderRadius:'50%', background:'#7af5c8', boxShadow:'0 0 8px 2px rgba(122,245,200,0.8)' }} />}
+                    </div>
+                    <div style={{ fontSize:15, letterSpacing:'0.06em', color: sel?col.core:(alreadyHere?col.core:'rgba(255,255,255,0.82)') }}>{e.label}{sel?' ✦':''}</div>
+                    {alreadyHere && !sel && <div style={{ fontSize:10, letterSpacing:'0.2em', color:'#7af5c8', fontFamily:'monospace', marginTop:-4, fontWeight:600 }}>● LIVE</div>}
                   </div>
                 );
               })}
