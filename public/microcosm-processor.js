@@ -91,8 +91,11 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
           if (Math.random() < disorder * 0.9) {
             const usable = maxRead > 4 ? maxRead : (src.len || this.size);
             if (src.live) {
-              // jump to a random recent point in the ring (0..usable behind the head)
-              pos = this.writePos - Math.floor(Math.random() * usable);
+              // jump to a random recent point in the ring, staying ~30ms BEHIND the write head so
+              // a grain never lands on the record seam (old/new discontinuity → pop).
+              const guard = Math.floor(this._sr * 0.03);
+              const safe = Math.max(1, usable - guard);
+              pos = this.writePos - (guard + Math.floor(Math.random() * safe));
               while (pos < 0) pos += this.size;
               maxRead = usable;
             } else {
@@ -136,13 +139,32 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         }
         const finalRate = m.rate * chaosRate;
         const finalLen = Math.max(64, Math.floor(m.lenSamp * chaosLenMul));
+        // POP FIX (character-neutral): a grain reads |finalRate| * len samples over its life.
+        // Long engines (Tunnel = 0.6-1.6s grains) at chaos rates (up to 4x) demand a read window
+        // far bigger than the frozen buffer, so they overrun the loop seam → pop. For a static
+        // source: (1) CAP the grain length so its whole read window fits inside the buffer, then
+        // (2) clamp pos so the (now-fitting) window can't reach the seam. Grain plays a slightly
+        // shorter chunk (imperceptible on long grains) but physically cannot hit the discontinuity.
+        let safeLen = finalLen;
+        if (!src.live) {
+          const mg = Math.min(src.len * 0.02, this._sr * 0.01);
+          const avail = Math.max(1, src.len - 2 * mg);          // usable span inside the margins
+          const rateAbs = Math.max(0.0001, Math.abs(finalRate));
+          const maxLen = Math.floor(avail / rateAbs);            // longest grain whose read fits
+          if (safeLen > maxLen) safeLen = Math.max(64, maxLen);  // trim to fit (keep audible)
+          const span = rateAbs * safeLen;
+          const clo = mg + (finalRate < 0 ? span : 0);
+          const chi = Math.max(clo + 1, src.len - mg - (finalRate > 0 ? span : 0));
+          if (pos < clo) pos = clo;
+          if (pos > chi) pos = chi;
+        }
         if (!dropGrain) this.grains.push({
           pos,
           source: srcId,   // which source buffer this grain reads (constellation)
           engine: m.engine || '_',
           rate: finalRate,
-          remaining: finalLen,
-          total: finalLen,
+          remaining: safeLen,
+          total: safeLen,
           gain: grainGain,
           panL: Math.cos((Math.max(-1, Math.min(1, m.pan + (this.enginePan[m.engine] || 0))) + 1) * 0.25 * Math.PI),
           panR: Math.sin((Math.max(-1, Math.min(1, m.pan + (this.enginePan[m.engine] || 0))) + 1) * 0.25 * Math.PI),
