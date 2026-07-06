@@ -380,6 +380,8 @@ export default function FieldPage() {
   const fauveRef = useRef<Record<string, boolean>>({});   // per-orb FAUVE on/off
   const fauveDisRef = useRef<Record<string, number>>({});   // per-orb FAUVE disorder 0..1
   const fauveRepRef = useRef<Record<string, number>>({});   // per-orb FAUVE repeat 0..1
+  const fauveRevRef = useRef<Record<string, number>>({});   // per-orb FAUVE reverse 0..1
+  const fauveGapRef = useRef<Record<string, number>>({});   // per-orb FAUVE gaps 0..1
   const [, forceFauve] = useState(0);
   const absRef = useRef<Record<string, number>>({});   // per-orb ABSENCE -1(flutter)..0(off)..+1(dropouts)
   const chaosRef = useRef<Record<string, number>>({});   // per-orb CHAOS 0..1 (disorder→pitch→stutter)
@@ -1357,6 +1359,20 @@ export default function FieldPage() {
                           </div>
                           <input type="range" min={0} max={1} step={0.01} value={fauveRepRef.current[focused] ?? 0}
                             onChange={(e)=>{ const r=parseFloat(e.target.value); fauveRepRef.current[focused]=r; microcosmFauveParam(focused,'repeat',r); forceFauve(x=>x+1); }}
+                            style={{ width:'100%', accentColor:'#c77dff' }} />
+                          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, marginTop:12 }}>
+                            <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>REVERSE</span>
+                            <span style={{ fontSize:12.5, color:'#d9b3ff' }}>{Math.round((fauveRevRef.current[focused] ?? 0)*100)}%</span>
+                          </div>
+                          <input type="range" min={0} max={1} step={0.01} value={fauveRevRef.current[focused] ?? 0}
+                            onChange={(e)=>{ const v=parseFloat(e.target.value); fauveRevRef.current[focused]=v; microcosmFauveParam(focused,'reverse',v); forceFauve(x=>x+1); }}
+                            style={{ width:'100%', accentColor:'#c77dff' }} />
+                          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, marginTop:12 }}>
+                            <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>GAPS</span>
+                            <span style={{ fontSize:12.5, color:'#d9b3ff' }}>{Math.round((fauveGapRef.current[focused] ?? 0)*100)}%</span>
+                          </div>
+                          <input type="range" min={0} max={1} step={0.01} value={fauveGapRef.current[focused] ?? 0}
+                            onChange={(e)=>{ const v=parseFloat(e.target.value); fauveGapRef.current[focused]=v; microcosmFauveParam(focused,'gaps',v); forceFauve(x=>x+1); }}
                             style={{ width:'100%', accentColor:'#c77dff' }} />
                         </div>
                       )}

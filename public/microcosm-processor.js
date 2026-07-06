@@ -237,7 +237,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
             src.fragments = bounds;
             console.log('[fauve] sliced', m.srcId, 'fragments', bounds.length - 1);
           }
-          this._fauve[m.orbId] = { srcId: m.srcId, idx: 0, pos: 0, gain: (m.gain != null ? m.gain : 0.6), disorder: 0, repeat: 0, rate: 1 };
+          this._fauve[m.orbId] = { srcId: m.srcId, idx: 0, pos: 0, gain: (m.gain != null ? m.gain : 0.6), disorder: 0, repeat: 0, reverse: 0, rev: false, gaps: 0, silent: false, rate: 1 };
           console.log('[fauve] ON orb', m.orbId, 'src', m.srcId);
         }
       } else if (m.type === 'fauveParam') {
@@ -443,10 +443,11 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         const a = frags[fv.idx], b = frags[fv.idx + 1];
         const flen = b - a;
         const rate = fv.rate || 1;                    // pitch multiplier (follows the note)
-        const rp = a + fv.pos;                        // fractional read position (interpolated)
+        // REVERSE: read the fragment back-to-front (fv.rev set when the fragment starts)
+        const rp = fv.rev ? (b - fv.pos) : (a + fv.pos);
         const i0 = Math.floor(rp), i1 = i0 + 1;
         const fr = rp - i0;
-        let smp = (((buf[i0] || 0) * (1 - fr)) + ((buf[i1] || 0) * fr)) * fv.gain;
+        let smp = fv.silent ? 0 : (((buf[i0] || 0) * (1 - fr)) + ((buf[i1] || 0) * fr)) * fv.gain;
         const ef = Math.min(64, flen >> 1);          // edge fade so joins never click
         if (fv.pos < ef) smp *= fv.pos / ef;
         else if (fv.pos > flen - ef) smp *= (flen - fv.pos) / ef;
@@ -463,6 +464,10 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
           } else {
             fv.idx++; if (fv.idx >= nF) fv.idx = 0;     // next fragment
           }
+          // REVERSE: decide if the NEW fragment plays backward
+          fv.rev = Math.random() < (fv.reverse || 0);
+          // GAPS: decide if the NEW fragment is dropped to silence (still advances = keeps timing)
+          fv.silent = Math.random() < (fv.gaps || 0);
         }
       }
     }
