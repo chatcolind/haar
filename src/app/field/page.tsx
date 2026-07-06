@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
-  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmOrbAbsence, microcosmOrbChaos, microcosmFreezeSource, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmOrbAbsence, microcosmOrbChaos, microcosmFreezeSource, microcosmFauveOn, microcosmFauveOff, microcosmFauveParam, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -377,6 +377,9 @@ export default function FieldPage() {
   // retain raw WAV bytes per sourceId so songs can be saved self-contained (base64)
   const sourceBytesRef = useRef<Record<string, { name: string; b64: string }>>({});
   const posRef = useRef<Record<string, number>>({});   // per-orb POSITION 0..1 into its WAV source
+  const fauveRef = useRef<Record<string, boolean>>({});   // per-orb FAUVE on/off
+  const fauveDisRef = useRef<Record<string, number>>({});   // per-orb FAUVE disorder 0..1
+  const [, forceFauve] = useState(0);
   const absRef = useRef<Record<string, number>>({});   // per-orb ABSENCE -1(flutter)..0(off)..+1(dropouts)
   const chaosRef = useRef<Record<string, number>>({});   // per-orb CHAOS 0..1 (disorder→pitch→stutter)
   const [createList, setCreateList] = useState<string[]>([]);   // engines queued for this constellation (multi-add)
@@ -1322,6 +1325,33 @@ export default function FieldPage() {
                         ))}
                       </div>
                       <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.35)', textAlign:'center', marginTop:5, fontFamily:'monospace' }}>{frozen ? 'scan it below · release to go live' : 'capture the live synth to scan it'}</div>
+                    </div>
+                  );
+                })()}
+                {/* FAUVE — per-orb fragment sequencer. Source silenced, only fragments play. */}
+                {(() => {
+                  const oc = constellations.find(c => c.orbIds.includes(focused));
+                  if (!oc || oc.sourceId === 'default') return null;
+                  const on = !!fauveRef.current[focused];
+                  return (
+                    <div style={{ marginBottom:14 }}>
+                      <div onClick={()=>{ const now=!on; fauveRef.current[focused]=now; if(now) microcosmFauveOn(focused, oc.sourceId); else microcosmFauveOff(focused); forceFauve(x=>x+1); }}
+                        style={{ padding:'11px 0', borderRadius:12, textAlign:'center', cursor:'pointer', letterSpacing:'0.14em', fontSize:13,
+                          border:`1px solid ${on?'#c77dff':'rgba(199,125,255,0.4)'}`, background: on?'rgba(199,125,255,0.18)':'rgba(199,125,255,0.05)', color:'#d9b3ff',
+                          boxShadow: on?'0 0 18px 2px rgba(199,125,255,0.4)':'none' }}>
+                        {on ? '◆ FAUVE — on' : '◆ FAUVE'}
+                      </div>
+                      {on && (
+                        <div style={{ marginTop:12 }}>
+                          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                            <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>DISORDER</span>
+                            <span style={{ fontSize:12.5, color:'#d9b3ff' }}>{Math.round((fauveDisRef.current[focused] ?? 0)*100)}%</span>
+                          </div>
+                          <input type="range" min={0} max={1} step={0.01} value={fauveDisRef.current[focused] ?? 0}
+                            onChange={(e)=>{ const d=parseFloat(e.target.value); fauveDisRef.current[focused]=d; microcosmFauveParam(focused,'disorder',d); forceFauve(x=>x+1); }}
+                            style={{ width:'100%', accentColor:'#c77dff' }} />
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

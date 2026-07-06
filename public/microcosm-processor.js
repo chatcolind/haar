@@ -21,6 +21,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
     this.frozen = false;        // HOLD — read from the frozen loop buffer instead of live ring
     this.recording = true;
     this.freezeBuf = null;      // tempo-locked captured loop (Float32Array), grains read this when frozen
+    this._fauve = {};   // FAUVE per-orb fragment players, keyed by orb id: { srcId, idx, pos, gain }
     this.freezeLen = 0;         // length of the freeze loop in samples
     this.freezeReverse = false; // play the frozen loop backwards
 
@@ -218,6 +219,32 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
           }
           this.sources[m.id] = { buf, len, live: false };
         }
+      } else if (m.type === 'fauveOn') {
+        // FAUVE per-orb: slice the source at zero crossings (if not already) and start a fragment
+        // player for this orb. m.orbId = orb, m.srcId = its source, m.minMs = min fragment length.
+        const src = this.sources[m.srcId];
+        if (src && src.buf && m.orbId) {
+          if (!src.fragments || src.fragments.length < 2) {
+            const buf = src.buf, len = src.len;
+            const minLen = Math.max(1, Math.floor(this._sr * ((m.minMs || 25) / 1000)));
+            const bounds = [0]; let last = 0; let prev = buf[0];
+            for (let k = 1; k < len; k++) {
+              const cur = buf[k];
+              if (((prev <= 0 && cur > 0) || (prev >= 0 && cur < 0)) && (k - last) >= minLen) { bounds.push(k); last = k; }
+              prev = cur;
+            }
+            if (bounds[bounds.length - 1] !== len) bounds.push(len);
+            src.fragments = bounds;
+            console.log('[fauve] sliced', m.srcId, 'fragments', bounds.length - 1);
+          }
+          this._fauve[m.orbId] = { srcId: m.srcId, idx: 0, pos: 0, gain: (m.gain != null ? m.gain : 0.6), disorder: 0 };
+          console.log('[fauve] ON orb', m.orbId, 'src', m.srcId);
+        }
+      } else if (m.type === 'fauveParam') {
+        const fv = this._fauve[m.orbId];
+        if (fv && m.key) fv[m.key] = m.value;
+      } else if (m.type === 'fauveOff') {
+        if (this._fauve[m.orbId]) { delete this._fauve[m.orbId]; console.log('[fauve] OFF orb', m.orbId); }
       } else if (m.type === 'removeSource') {
         if (m.id && m.id !== 'default') delete this.sources[m.id];
       } else if (m.type === 'sourcePosition') {
@@ -362,9 +389,12 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         const frac = p - Math.floor(p);
         const sMono = (sbuf[i0] * (1 - frac) + sbuf[i1] * frac) * gr.gain * w;
         const eng = gr.engine || '_';
-        // accumulate this grain's PANNED contribution into its engine's L/R bus
-        panAccL[eng] = (panAccL[eng] || 0) + sMono * gr.panL;
-        panAccR[eng] = (panAccR[eng] || 0) + sMono * gr.panR;
+        // FAUVE: if this orb is in Fauve mode, silence its normal grain output (we hear only
+        // the fragment player). Advance still happens below so grain lifecycle is unaffected.
+        if (!this._fauve[eng]) {
+          panAccL[eng] = (panAccL[eng] || 0) + sMono * gr.panL;
+          panAccR[eng] = (panAccR[eng] || 0) + sMono * gr.panR;
+        }
         // advance grain (wrap within THIS grain's source length)
         gr.pos += gr.rate;
         if (gr.pos >= slen) gr.pos -= slen;
@@ -403,6 +433,28 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         outR[i] += smp;
         this.freezePos += 1;
         if (this.freezePos >= fl) this.freezePos = 0;
+      }
+      // ── FAUVE per-orb fragment players ──────────────────────────────────────────────
+      for (const oid in this._fauve) {
+        const fv = this._fauve[oid];
+        const src = this.sources[fv.srcId];
+        if (!src || !src.fragments || src.fragments.length < 2) continue;
+        const frags = src.fragments, buf = src.buf;
+        const a = frags[fv.idx], b = frags[fv.idx + 1];
+        const flen = b - a;
+        let smp = (buf[a + fv.pos] || 0) * fv.gain;
+        const ef = Math.min(64, flen >> 1);          // edge fade so joins never click
+        if (fv.pos < ef) smp *= fv.pos / ef;
+        else if (fv.pos > flen - ef) smp *= (flen - fv.pos) / ef;
+        outL[i] += smp; outR[i] += smp;
+        fv.pos++;
+        if (fv.pos >= flen) {
+          fv.pos = 0;
+          const nF = frags.length - 1;
+          // DISORDER: chance to jump to a RANDOM fragment instead of the next (out-of-order = Fauve)
+          if (Math.random() < (fv.disorder || 0)) fv.idx = (Math.random() * nF) | 0;
+          else { fv.idx++; if (fv.idx >= nF) fv.idx = 0; }
+        }
       }
     }
     // 4. Cull finished grains
