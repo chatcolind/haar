@@ -381,6 +381,14 @@ export class Microcosm {
   fauveOn(orbId: string, srcId: string, minMs: number = 25, gain: number = 0.6): void { this.node?.port.postMessage({ type: 'fauveOn', orbId, srcId, minMs, gain }); }
   fauveOff(orbId: string): void { this.node?.port.postMessage({ type: 'fauveOff', orbId }); }
   fauveParam(orbId: string, key: string, value: number): void { this.node?.port.postMessage({ type: 'fauveParam', orbId, key, value }); }
+  // clean pitch ratio for an orb (home + tuning + register + chord + conductor), no detune wobble.
+  fauvePitchRatio(orbId: string): number {
+    const home = this.engineHome[orbId] ?? 0;
+    const constT = (this.engineTuning[orbId] ?? 0) + (this.engineRegister[orbId] ?? 0) + (this.engineChordStep[orbId] ?? 0) + (this.engineConductor[orbId] ?? 0);
+    return Math.pow(2, (home + constT) / 12);
+  }
+  // push the current pitch ratio to an orb's Fauve player so fragments track the note.
+  fauveUpdatePitch(orbId: string): void { this.node?.port.postMessage({ type: 'fauveParam', orbId, key: 'rate', value: this.fauvePitchRatio(orbId) }); }
   // Position/scan for a static (WAV) source: position 0..1 into the buffer, spray = scatter width.
   setSourcePosition(id: string, position: number, spray?: number): void {
     this.node?.port.postMessage({ type: 'sourcePosition', id, position, spray });

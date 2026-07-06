@@ -237,7 +237,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
             src.fragments = bounds;
             console.log('[fauve] sliced', m.srcId, 'fragments', bounds.length - 1);
           }
-          this._fauve[m.orbId] = { srcId: m.srcId, idx: 0, pos: 0, gain: (m.gain != null ? m.gain : 0.6), disorder: 0 };
+          this._fauve[m.orbId] = { srcId: m.srcId, idx: 0, pos: 0, gain: (m.gain != null ? m.gain : 0.6), disorder: 0, repeat: 0, rate: 1 };
           console.log('[fauve] ON orb', m.orbId, 'src', m.srcId);
         }
       } else if (m.type === 'fauveParam') {
@@ -442,18 +442,27 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         const frags = src.fragments, buf = src.buf;
         const a = frags[fv.idx], b = frags[fv.idx + 1];
         const flen = b - a;
-        let smp = (buf[a + fv.pos] || 0) * fv.gain;
+        const rate = fv.rate || 1;                    // pitch multiplier (follows the note)
+        const rp = a + fv.pos;                        // fractional read position (interpolated)
+        const i0 = Math.floor(rp), i1 = i0 + 1;
+        const fr = rp - i0;
+        let smp = (((buf[i0] || 0) * (1 - fr)) + ((buf[i1] || 0) * fr)) * fv.gain;
         const ef = Math.min(64, flen >> 1);          // edge fade so joins never click
         if (fv.pos < ef) smp *= fv.pos / ef;
         else if (fv.pos > flen - ef) smp *= (flen - fv.pos) / ef;
         outL[i] += smp; outR[i] += smp;
-        fv.pos++;
+        fv.pos += rate;                               // advance by pitch rate (was +1 = native/low)
         if (fv.pos >= flen) {
           fv.pos = 0;
           const nF = frags.length - 1;
-          // DISORDER: chance to jump to a RANDOM fragment instead of the next (out-of-order = Fauve)
-          if (Math.random() < (fv.disorder || 0)) fv.idx = (Math.random() * nF) | 0;
-          else { fv.idx++; if (fv.idx >= nF) fv.idx = 0; }
+          // REPEAT: chance to replay the SAME fragment (stutter — makes rhythm from a static note)
+          if (Math.random() < (fv.repeat || 0)) {
+            // keep fv.idx (repeat the fragment)
+          } else if (Math.random() < (fv.disorder || 0)) {
+            fv.idx = (Math.random() * nF) | 0;          // DISORDER: random fragment
+          } else {
+            fv.idx++; if (fv.idx >= nF) fv.idx = 0;     // next fragment
+          }
         }
       }
     }
