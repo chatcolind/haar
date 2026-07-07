@@ -1834,7 +1834,7 @@ export default function FieldPage() {
               <div onClick={cancelCreate} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
             </div>
           </div>
-          <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 56px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
+          <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'flex-start', padding:'32px 56px 48px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box', overflowY:'auto', minHeight:0 }}>
             {/* SONG KEY — three glowing-ring dials (note / octave / scale). Scrub up/down. */}
             <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'center', gap:40, marginBottom:34 }}>
               {[
