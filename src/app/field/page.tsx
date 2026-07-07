@@ -211,6 +211,19 @@ export default function FieldPage() {
   const [muted, setMuted] = useState(false);
   const [xyMap, setXyMap] = useState<Record<string, XY>>(defaultXY);
   const [lockKey, setLockKey] = useState('C');   // the LOCKED root (yellow), double-click to set
+  const [scaleLock, setScaleLock] = useState(false);      // SCALE-LOCK: snap notes to the song key
+  const [scaleMode, setScaleMode] = useState<'major'|'minor'>('major');   // song scale type
+  // scale intervals (semitones from root). Snap any semitone offset to the nearest in-key note.
+  const SCALE_SEMIS: Record<string, number[]> = { major:[0,2,4,5,7,9,11], minor:[0,2,3,5,7,8,10] };
+  function snapToScale(semis: number): number {
+    if (!scaleLock) return semis;                          // off = free chromatic (today's behaviour)
+    const scale = SCALE_SEMIS[scaleMode];
+    const oct = Math.floor(semis / 12), within = ((semis % 12) + 12) % 12;
+    // nearest scale degree to `within` (tie → lower)
+    let best = scale[0], bestD = 99;
+    for (const deg of scale) { const d = Math.abs(deg - within); if (d < bestD) { bestD = d; best = deg; } }
+    return oct * 12 + best;
+  }
   const [playNote, setPlayNote] = useState('C'); // current note being played (white)
   const [playSemi, setPlaySemi] = useState(0); // semitones from locked root      // octave offset of the played note from lock
   const [octave, setOctave] = useState(0);        // whole-keyboard register shift
@@ -810,11 +823,12 @@ export default function FieldPage() {
   // play a note `semis` semitones from the locked root (negative = down, positive = up)
   function playAt(note: string, semis: number) {
     const rootHz = NOTE_BASE[lockKey] ?? 261.63;
-    const hz = rootHz * Math.pow(2, (semis / 12) + octave + (progTransposeRef.current/12));
+    const snapped = snapToScale(semis);                    // SCALE-LOCK: snap the played note to key
+    const hz = rootHz * Math.pow(2, (snapped / 12) + octave + (progTransposeRef.current/12));
     microcosmSourceFreq(hz);
-    setPlayNote(note); setPlaySemi(semis);
+    setPlayNote(note); setPlaySemi(snapped);
     // CONDUCTOR: push the note offset to SAMPLE orbs (default/synth already moved via SourceFreq)
-    const noteSemis = semis + octave * 12;
+    const noteSemis = snapToScale(semis + octave * 12);   // SCALE-LOCK: snap to key when on (else raw)
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
     for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
   }
