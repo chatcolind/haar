@@ -380,6 +380,7 @@ export class Microcosm {
   freezeSource(id: string, seconds: number = 2): void { this.node?.port.postMessage({ type: 'freezeSource', id, seconds }); }
   fauveOn(orbId: string, srcId: string, minMs: number = 25, gain: number = 0.6): void { this.node?.port.postMessage({ type: 'fauveOn', orbId, srcId, minMs, gain }); }
   fauveOff(orbId: string): void { this.node?.port.postMessage({ type: 'fauveOff', orbId }); }
+  fauveOffAll(): void { this.node?.port.postMessage({ type: 'fauveOffAll' }); }
   fauveParam(orbId: string, key: string, value: number): void { this.node?.port.postMessage({ type: 'fauveParam', orbId, key, value }); }
   // clean pitch ratio for an orb (home + tuning + register + chord + conductor), no detune wobble.
   fauvePitchRatio(orbId: string): number {

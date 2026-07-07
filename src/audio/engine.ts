@@ -737,6 +737,7 @@ export function microcosmRemoveSource(id: string): void { (microcosmCore as any)
 export function microcosmFreezeSource(id: string, seconds?: number): void { (microcosmCore as any)?.freezeSource(id, seconds); }
 export function microcosmFauveOn(orbId: string, srcId: string, minMs?: number, gain?: number): void { (microcosmCore as any)?.fauveOn(orbId, srcId, minMs, gain); }
 export function microcosmFauveOff(orbId: string): void { (microcosmCore as any)?.fauveOff(orbId); }
+export function microcosmFauveOffAll(): void { (microcosmCore as any)?.fauveOffAll(); }
 export function microcosmFauveParam(orbId: string, key: string, value: number): void { (microcosmCore as any)?.fauveParam(orbId, key, value); }
 export function microcosmFauveUpdatePitch(orbId: string): void { (microcosmCore as any)?.fauveUpdatePitch(orbId); }
 export function microcosmSourcePosition(id: string, position: number, spray?: number): void { (microcosmCore as any)?.setSourcePosition(id, position, spray); }

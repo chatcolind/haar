@@ -237,12 +237,14 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
             src.fragments = bounds;
             console.log('[fauve] sliced', m.srcId, 'fragments', bounds.length - 1);
           }
-          this._fauve[m.orbId] = { srcId: m.srcId, idx: 0, pos: 0, gain: (m.gain != null ? m.gain : 0.6), disorder: 0, repeat: 0, reverse: 0, rev: false, gaps: 0, silent: false, rate: 1 };
+          this._fauve[m.orbId] = { srcId: m.srcId, idx: 0, pos: 0, gain: (m.gain != null ? m.gain : 0.28), disorder: 0, repeat: 0, reverse: 0, rev: false, gaps: 0, silent: false, rate: 1 };
           console.log('[fauve] ON orb', m.orbId, 'src', m.srcId);
         }
       } else if (m.type === 'fauveParam') {
         const fv = this._fauve[m.orbId];
         if (fv && m.key) fv[m.key] = m.value;
+      } else if (m.type === 'fauveOffAll') {
+        this._fauve = {};   // stop ALL fragment players (master stop)
       } else if (m.type === 'fauveOff') {
         if (this._fauve[m.orbId]) { delete this._fauve[m.orbId]; console.log('[fauve] OFF orb', m.orbId); }
       } else if (m.type === 'removeSource') {

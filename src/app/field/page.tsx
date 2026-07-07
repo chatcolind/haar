@@ -7,7 +7,7 @@ import {
   microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
   microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
-  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmOrbAbsence, microcosmOrbChaos, microcosmFreezeSource, microcosmFauveOn, microcosmFauveOff, microcosmFauveParam, microcosmFauveUpdatePitch, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
+  microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmOrbAbsence, microcosmOrbChaos, microcosmFreezeSource, microcosmFauveOn, microcosmFauveOff, microcosmFauveOffAll, microcosmFauveParam, microcosmFauveUpdatePitch, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
 } from '../../audio/engine';
@@ -566,6 +566,7 @@ export default function FieldPage() {
       offset: offsetRef.current[o.id] ?? 0,
       locked: !!lockRef.current[o.id], subdiv: subdivRef.current[o.id] ?? 2,
       fill: fillRef.current[o.id] ?? 1, seed: seedRef.current[o.id] ?? 1,
+      fauve: !!fauveRef.current[o.id], fauveDis: fauveDisRef.current[o.id] ?? 0, fauveRep: fauveRepRef.current[o.id] ?? 0, fauveRev: fauveRevRef.current[o.id] ?? 0, fauveGap: fauveGapRef.current[o.id] ?? 0,
     }));
     // constellations: full structure (name, source, members, register, pitch, tuning)
     const consts = constellations.map(c => ({
@@ -596,6 +597,9 @@ export default function FieldPage() {
       flavourRef.current[o.id]=o.flavour; muteRef.current[o.id]=o.mute; soloSetRef.current[o.id]=o.solo;
       panRef.current[o.id]=o.pan; eqRef.current[o.id]=o.eq; xyRef.current[o.id]=o.xy; offsetRef.current[o.id]=o.offset ?? 0;
       lockRef.current[o.id]=!!o.locked; subdivRef.current[o.id]=o.subdiv ?? 2; fillRef.current[o.id]=o.fill ?? 1; seedRef.current[o.id]=o.seed ?? 1;
+      fauveRef.current[o.id]=!!o.fauve; fauveDisRef.current[o.id]=o.fauveDis ?? 0; fauveRepRef.current[o.id]=o.fauveRep ?? 0; fauveRevRef.current[o.id]=o.fauveRev ?? 0; fauveGapRef.current[o.id]=o.fauveGap ?? 0;
+      // FAUVE: restore the refs now; actually activate after constellations are set up (needs sourceId)
+      fauveRef.current[o.id]=!!o.fauve; fauveDisRef.current[o.id]=o.fauveDis ?? 0; fauveRepRef.current[o.id]=o.fauveRep ?? 0; fauveRevRef.current[o.id]=o.fauveRev ?? 0; fauveGapRef.current[o.id]=o.fauveGap ?? 0;
       const n = parseInt((o.id.split('_')[1]||'0')); orbCounter.current[o.engineType]=Math.max(orbCounter.current[o.engineType]||0, n);
       restored.push({ id:o.id, engineType:o.engineType, label:o.label, colorKey:o.colorKey });
       microcosmAddOrb(o.id, o.engineType, o.vol);
@@ -648,6 +652,14 @@ export default function FieldPage() {
           microcosmEngineSource(oid, c.sourceId);
           if (c.tune) microcosmOrbTuning(oid, c.tune);
           if (c.register) microcosmOrbRegister(oid, c.register);
+          if (fauveRef.current[oid] && c.sourceId !== 'default') {
+            microcosmFauveOn(oid, c.sourceId);
+            microcosmFauveUpdatePitch(oid);
+            microcosmFauveParam(oid, 'disorder', fauveDisRef.current[oid] ?? 0);
+            microcosmFauveParam(oid, 'repeat', fauveRepRef.current[oid] ?? 0);
+            microcosmFauveParam(oid, 'reverse', fauveRevRef.current[oid] ?? 0);
+            microcosmFauveParam(oid, 'gaps', fauveGapRef.current[oid] ?? 0);
+          }
         }
       }
       // keep the source-id counter clear of collisions is unnecessary (timestamp ids)
@@ -759,6 +771,18 @@ export default function FieldPage() {
     });
     const v = xyRef.current[selected] ?? { x:0.5, y:0.5 };
     microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
+    // FAUVE: re-activate for orbs whose setting is on (stop silenced them but kept the ref)
+    for (const oid in fauveRef.current) {
+      if (!fauveRef.current[oid]) continue;
+      const c = constRef.current.find(x => x.orbIds.includes(oid));
+      if (!c || c.sourceId === 'default') continue;
+      microcosmFauveOn(oid, c.sourceId);
+      microcosmFauveUpdatePitch(oid);
+      microcosmFauveParam(oid, 'disorder', fauveDisRef.current[oid] ?? 0);
+      microcosmFauveParam(oid, 'repeat', fauveRepRef.current[oid] ?? 0);
+      microcosmFauveParam(oid, 'reverse', fauveRevRef.current[oid] ?? 0);
+      microcosmFauveParam(oid, 'gaps', fauveGapRef.current[oid] ?? 0);
+    }
   }
 
   useEffect(() => { if (started.current && state==='playing') activateRack(); /* eslint-disable-next-line */ }, [count]);
@@ -919,7 +943,7 @@ export default function FieldPage() {
     if (!started.current) { await ensureStarted(); return; }
     await microcosmStart(); activateRack(); setState('playing'); barAnchorRef.current = performance.now(); barAudioAnchorRef.current = microcosmAudioTime();
   }
-  function doStop() { microcosmStopEngine(); setState('stopped'); }
+  function doStop() { microcosmStopEngine(); microcosmFauveOffAll(); setState('stopped'); }   // silence Fauve audio but KEEP fauveRef (your setting) so save/restart preserves it
   function toggleMute() {
     const m = !mutedRef.current; mutedRef.current=m; setMuted(m);
     activateRack();
