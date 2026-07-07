@@ -1319,7 +1319,7 @@ export default function FieldPage() {
                   return (
                     <div style={{ marginBottom:14 }}>
                       <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                        <div onClick={()=>{ if(frozen){ unFreeze(oc.id); } else { doFreeze(oc.id, freezeSecs); } forceOrb(x=>x+1); }}
+                        <div onClick={()=>{ const live = constRef.current.find(x=>x.id===oc.id); const isFrozen = !!live && live.sourceId.startsWith('src_frozen_'); if(isFrozen){ unFreeze(oc.id); } else { doFreeze(oc.id, freezeSecs); } forceOrb(x=>x+1); }}
                           style={{ flex:1, padding:'11px 0', borderRadius:12, textAlign:'center', cursor:'pointer', border:`1px solid ${frozen?'#a6e3ff':'rgba(122,213,255,0.5)'}`, background: frozen?'rgba(122,213,255,0.22)':'rgba(122,213,255,0.08)', color:'#a6e3ff', fontSize:13, letterSpacing:'0.14em', boxShadow: frozen?'0 0 16px 2px rgba(122,213,255,0.4)':'none' }}>
                           {frozen ? '❄ FROZEN — release' : '❄ FREEZE'}
                         </div>
@@ -1331,10 +1331,12 @@ export default function FieldPage() {
                     </div>
                   );
                 })()}
-                {/* FAUVE — per-orb fragment sequencer. Source silenced, only fragments play. */}
+                {/* FAUVE — per-orb fragment sequencer. Source silenced, only fragments play.
+                    PARKED for frozen synths: a held pure tone has no fragment variety, so it just
+                    reconstructs a continuous drone. Shown only for real WAV samples for now. */}
                 {(() => {
                   const oc = constellations.find(c => c.orbIds.includes(focused));
-                  if (!oc || oc.sourceId === 'default') return null;
+                  if (!oc || oc.sourceId === 'default' || oc.sourceId.startsWith('src_frozen_')) return null;
                   const on = !!fauveRef.current[focused];
                   return (
                     <div style={{ marginBottom:14 }}>
