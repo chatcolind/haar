@@ -1500,7 +1500,7 @@ export default function FieldPage() {
         onMouseLeave={(e)=>{ (e.currentTarget as HTMLElement).style.transform='translateX(-50%) scale(1)'; (e.currentTarget as HTMLElement).style.boxShadow='0 0 16px 5px rgba(216,166,255,0.9), 0 0 36px 12px rgba(216,166,255,0.5), 0 0 60px 20px rgba(216,166,255,0.25)'; }} />
       {/* MIX DESK — slides up over the lower portion; orbs stay faint above */}
       {mixOpen && (
-        <div style={{ position:'absolute', inset:0, zIndex:170 }}>
+        <div style={{ position:'absolute', inset:0, zIndex:210 }}>
           {/* faint dim only over the desk area handled by panel; keep field visible above */}
           <div onClick={closeMix} style={{ position:'absolute', inset:0 }} />
           <div style={{ position:'absolute', left:0, right:0, bottom:0, height: mixerH,
@@ -1642,7 +1642,7 @@ export default function FieldPage() {
               style={{ fontSize:13, letterSpacing:'0.14em', cursor:'pointer', userSelect:'none', transition:'all 0.25s ease',
                 color: scaleLock?'#ffe066':'rgba(255,255,255,0.32)',
                 textShadow: scaleLock?'0 0 12px rgba(255,210,80,0.55)':'none' }}>
-              {scaleLock ? `${lockKey} ${scaleMode}` : 'free'}
+              {scaleLock ? `${FLAT_NAMES[NOTES.indexOf(lockKey)]} ${scaleMode}` : 'free'}
             </span>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:4, maxWidth:'100%' }}>
@@ -2047,18 +2047,25 @@ export default function FieldPage() {
               </div>
             </div>
             <div style={{ display:'flex', gap:7, flexWrap:'wrap', marginBottom:28 }}>
-              {NOTES.map(n => {
-                const sharp = n.includes('#');
-                return (
-                  <div key={n} onClick={()=>setProg(p=>[...p,{note:n, oct:progPickOct, bars:4}])}
-                    style={{ minWidth: sharp?34:38, textAlign:'center', padding:'10px 10px', borderRadius:18, cursor:'pointer',
-                      border:`0.5px solid ${sharp?'rgba(255,255,255,0.12)':'rgba(255,255,255,0.22)'}`,
-                      background: sharp?'rgba(255,255,255,0.02)':'rgba(255,255,255,0.05)',
-                      fontSize:14, color: sharp?'rgba(255,255,255,0.55)':'rgba(255,255,255,0.85)' }}>
-                    {n}{progPickOct}
-                  </div>
-                );
-              })}
+              {(scaleLock
+                  // SCALE-LOCK: the scale IN ORDER from the root (Bb minor -> Bb C Db Eb F Gb Ab), tone 1 = root
+                  ? SCALE_SEMIS[scaleMode].map(deg => (NOTES.indexOf(lockKey) + deg) % 12)
+                  // free: all 12 chromatic from C
+                  : NOTES.map((_, i) => i)
+                ).map((idx, pos) => {
+                  const n = NOTES[idx];
+                  const sharp = n.includes('#');
+                  const label = scaleLock ? FLAT_NAMES[idx] : n;
+                  return (
+                    <div key={pos} onClick={()=>setProg(p=>[...p,{note:n, oct:progPickOct, bars:4}])}
+                      style={{ minWidth: (scaleLock||!sharp)?38:34, textAlign:'center', padding:'10px 10px', borderRadius:18, cursor:'pointer',
+                        border:`0.5px solid ${(scaleLock||!sharp)?'rgba(255,255,255,0.22)':'rgba(255,255,255,0.12)'}`,
+                        background: (scaleLock||!sharp)?'rgba(255,255,255,0.05)':'rgba(255,255,255,0.02)',
+                        fontSize:14, color: (scaleLock||!sharp)?'rgba(255,255,255,0.85)':'rgba(255,255,255,0.55)' }}>
+                      {label}{progPickOct}
+                    </div>
+                  );
+                })}
             </div>
             {/* transport — Engage starts chord movement, Release stops it (drone continues via master) */}
             <div style={{ display:'flex', justifyContent:'center', gap:14 }}>
