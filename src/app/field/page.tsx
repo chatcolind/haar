@@ -233,8 +233,11 @@ export default function FieldPage() {
   // ---- PROGRESSIONS (Chords): conductor steps through interval offsets on a bar clock ----
   type ProgStep = { note:string; oct:number; bars:number };
   function stepSemis(st: {note:string; oct:number}): number {
-    // transpose = semitones from locked root (at oct 4) to this step's note+oct
-    return (NOTES.indexOf(st.note) - NOTES.indexOf(lockKey)) + (st.oct - 4) * 12;
+    // transpose = semitones from the locked root AT THE SONG OCTAVE to this step's note+oct.
+    // The conductor already applies `octave` (song register), so the chord step must be measured
+    // relative to the SONG octave (octave+4), NOT a fixed oct 4 — otherwise the step re-bakes the
+    // octave the conductor already applied and the chord drops an extra register (double-octave).
+    return (NOTES.indexOf(st.note) - NOTES.indexOf(lockKey)) + (st.oct - (octave + 4)) * 12;
   }
   const [bpm, setBpm] = useState(92);   // master tempo — reference frame for progression clock + locked orbs
   const barAnchorRef = useRef(0);   // performance.now() timestamp of a known bar boundary (free-running clock)
@@ -1632,13 +1635,12 @@ export default function FieldPage() {
 
         {/* TIER 1 — full-width keyboard */}
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
-          {/* SCALE-LOCK: minimal Haar control — one glowing token. Tap = toggle lock.
-              When locked, tapping again cycles major/minor. Root comes from the keyboard. */}
+          {/* SCALE-LOCK: minimal Haar control — one glowing token. Tap = toggle locked <-> free
+              (chromatic). Major/minor is set by the song key, not here. */}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'center', marginBottom:10 }}>
             <span
-              onClick={()=>{ if(!scaleLock){ setScaleLock(true); } else { setScaleMode(m=>m==='major'?'minor':'major'); } }}
-              onDoubleClick={()=>setScaleLock(false)}
-              title="Tap: lock / switch major-minor · double-tap: unlock"
+              onClick={()=>setScaleLock(v=>!v)}   // simple toggle: locked <-> free (chromatic). Major/minor stays as the song key set it.
+              title="Tap: lock to the song key / free to chromatic"
               style={{ fontSize:13, letterSpacing:'0.14em', cursor:'pointer', userSelect:'none', transition:'all 0.25s ease',
                 color: scaleLock?'#ffe066':'rgba(255,255,255,0.32)',
                 textShadow: scaleLock?'0 0 12px rgba(255,210,80,0.55)':'none' }}>
@@ -1754,7 +1756,7 @@ export default function FieldPage() {
                 { k:'Rec',    col:'rgba(224,80,58,0.5)',   bg:'rgba(224,80,58,0.06)',   dot:'#ff7a5a' },
                 { k:'Mix',    col:'rgba(170,196,255,0.5)', bg:'rgba(170,196,255,0.06)', dot:'#aac4ff' },
               ].map(u => (
-                <div key={u.k} onClick={()=>{ if(u.k==='Mix') openMix(); if(u.k==='Chords') setChordsOpen(true); }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                <div key={u.k} onClick={()=>{ if(u.k==='Mix') openMix(); if(u.k==='Chords'){ setProgPickOct(octave + 4); setChordsOpen(true); } }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                   <div style={{ width:44, height:44, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, boxShadow:`0 0 16px 3px ${u.dot}55, inset 0 0 12px ${u.dot}22`, display:'flex', alignItems:'center', justifyContent:'center' }}>
                     <div style={{ width:7, height:7, borderRadius:'50%', background:u.dot }} />
                   </div>
@@ -2007,7 +2009,7 @@ export default function FieldPage() {
             ) : (
               <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:24 }}>
                 {prog.map((st, idx) => {
-                  const lbl = st.note + st.oct;
+                  const lbl = (scaleLock ? FLAT_NAMES[NOTES.indexOf(st.note)] : st.note) + st.oct;   // flats when locked (Ab3 not G#3), matching the picker/key
                   const active = progRunning && progStepIdx===idx;
                   return (
                     <div key={idx}
