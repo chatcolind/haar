@@ -31,6 +31,7 @@ const ALL_ORBS: OrbDef[] = [
 
 const FIELD_H = 0.70;
 const NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const FLAT_NAMES = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];   // scale-lock labels use flats
 // base frequencies for octave 0 reference (G3..F4 around the 220Hz source)
 // chromatic frequencies, octave 4 (equal temperament). Ascending C..B.
 const NOTE_BASE: Record<string, number> = {
@@ -1579,6 +1580,19 @@ export default function FieldPage() {
 
         {/* TIER 1 — full-width keyboard */}
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
+          {/* SCALE-LOCK: minimal Haar control — one glowing token. Tap = toggle lock.
+              When locked, tapping again cycles major/minor. Root comes from the keyboard. */}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'center', marginBottom:10 }}>
+            <span
+              onClick={()=>{ if(!scaleLock){ setScaleLock(true); } else { setScaleMode(m=>m==='major'?'minor':'major'); } }}
+              onDoubleClick={()=>setScaleLock(false)}
+              title="Tap: lock / switch major-minor · double-tap: unlock"
+              style={{ fontSize:13, letterSpacing:'0.14em', cursor:'pointer', userSelect:'none', transition:'all 0.25s ease',
+                color: scaleLock?'#ffe066':'rgba(255,255,255,0.32)',
+                textShadow: scaleLock?'0 0 12px rgba(255,210,80,0.55)':'none' }}>
+              {scaleLock ? `${lockKey} ${scaleMode}` : 'free'}
+            </span>
+          </div>
           <div style={{ display:'flex', alignItems:'center', gap:4, maxWidth:'100%' }}>
             <div onClick={()=>{ const o=Math.max(-3,octave-1); setOctave(o); playAt(playNote, playSemi); }}
               style={{ fontSize:15, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none', padding:'0 6px' }}>◂</div>
@@ -1598,22 +1612,27 @@ export default function FieldPage() {
                 const noteLabel = n + octNum;
                 const isLock = off === 0;
                 const isPlay = (off === playSemi);   // off IS the semitone distance from root
-                const sz = isLock ? 34 : sharp ? 17 : 26;
+                // SCALE-LOCK: when locked, show ONLY the scale notes (skip the rest), named with flats
+                const degree = ((off % 12) + 12) % 12;
+                const inScale = SCALE_SEMIS[scaleMode].includes(degree);
+                if (scaleLock && !inScale) continue;                 // hide out-of-scale notes entirely
+                const label = scaleLock ? (FLAT_NAMES[idx] + octNum) : noteLabel;   // flats+oct when locked
+                const sz = isLock ? 34 : (scaleLock ? 26 : (sharp ? 17 : 26));   // all scale notes same size when locked
                 cells.push(
                   <div key={off} onClick={()=>tapNote(n, off)} title={noteLabel}
-                    style={{ width:sz, height:sz, borderRadius:'50%', cursor:'pointer', flexShrink:0,
+                    style={{ width:sz, height:sz, borderRadius:'50%', cursor:'pointer', flexShrink:0, transition:'all 0.3s ease',
                       display:'flex', alignItems:'center', justifyContent:'center',
-                      fontSize: isLock?12:sharp?8:10, fontWeight: (isLock||isPlay)?700:500,
+                      fontSize: isLock?12:(scaleLock?10:(sharp?8:10)), fontWeight: (isLock||isPlay)?700:500,
                       boxShadow: isLock ? '0 0 12px 1px rgba(255,210,80,0.45)' : 'none',
                       background: isLock
                         ? 'radial-gradient(circle, #ffe066 0%, rgba(224,170,40,0.6) 52%, transparent 78%)'
                         : isPlay
                           ? 'radial-gradient(circle, #fff 0%, rgba(170,196,255,0.7) 48%, transparent 76%)'
-                          : sharp
+                          : (sharp && !scaleLock)
                             ? 'radial-gradient(circle, rgba(120,130,160,0.5) 0%, rgba(60,68,92,0.22) 55%, transparent 80%)'
                             : 'radial-gradient(circle, rgba(234,240,255,0.42) 0%, rgba(170,192,232,0.14) 55%, transparent 80%)',
-                      color: isLock?'#2a2008':isPlay?'#1a2030':sharp?'rgba(215,222,238,0.6)':'#e8eeff' }}>
-                    {(isLock||isPlay||!sharp) ? noteLabel : ''}
+                      color: isLock?'#2a2008':isPlay?'#1a2030':(scaleLock?'#e8eeff':(sharp?'rgba(215,222,238,0.6)':'#e8eeff')) }}>
+                    {scaleLock ? label : ((isLock||isPlay||!sharp)? noteLabel : '')}
                   </div>
                 );
               }
