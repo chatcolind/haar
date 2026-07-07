@@ -563,7 +563,10 @@ export default function FieldPage() {
     // arrive at the CURRENT pitch context immediately (conductor + chord). Ongoing progression
     // steps reach the preview via progStep's createEngineRef broadcast (a live ref, not a stale
     // closure), so preview follows the chords identically to a real orb.
-    applyJoinPitch(PREVIEW_ID, createConstTarget, createConstTarget!=='__new__' && (constellations.find(c=>c.id===createConstTarget)?.sourceId==='default'));
+    const _prevExisting = createConstTarget !== '__new__' ? constellations.find(c=>c.id===createConstTarget) : null;
+    const _prevIsDefault = _prevExisting ? _prevExisting.sourceId === 'default'
+                          : !(createSrc==='sample' && (window as any).__pendingSrc);
+    applyJoinPitch(PREVIEW_ID, createConstTarget, _prevIsDefault);
     microcosmEngineActive(PREVIEW_ID, true);
     // STUDIO: instant/full for snappy auditioning. LIVE: slow graceful entry to ~90% — the
     // preview IS the bloom-in; when you then add the orb it's already playing at level (no second fade).
@@ -626,7 +629,7 @@ export default function FieldPage() {
       const sb = sourceBytesRef.current[c.sourceId];
       if (sb) { sourceMeta[c.sourceId] = { name: sb.name }; idbSet('src_'+c.sourceId, sb).catch(err=>console.warn('[idb] save failed', c.sourceId, err)); }
     }
-    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta }));
+    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, key: { lockKey, scaleLock, scaleMode, octave }, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta }));
     const idx = listSongs().filter(s=>s.name!==name); idx.push({name, ts:Date.now()});
     localStorage.setItem('haar_songs_index', JSON.stringify(idx));
     setCurrentSongName(name); setSongMenu(null); setSongName('');
@@ -656,6 +659,13 @@ export default function FieldPage() {
     }
     stopProg(); setProg(data.prog ?? []);  // restore progression (stop any running one first)
     if (data.bpm) { setBpm(data.bpm); microcosmBpm(data.bpm); }  // restore tempo
+    // restore SONG KEY (root + scale-lock + major/minor + octave). Old songs without a key are left as-is.
+    if (data.key) {
+      if (data.key.lockKey) { setLockKey(data.key.lockKey); setPlayNote(data.key.lockKey); }
+      if (typeof data.key.scaleLock === 'boolean') setScaleLock(data.key.scaleLock);
+      if (data.key.scaleMode) setScaleMode(data.key.scaleMode);
+      if (typeof data.key.octave === 'number') setOctave(data.key.octave);
+    }
     // restore tape settings (master, four ingredients, mute) and apply to the engine
     if (data.tape) {
       const tp = data.tape;
