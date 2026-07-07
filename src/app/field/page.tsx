@@ -213,6 +213,8 @@ export default function FieldPage() {
   const [xyMap, setXyMap] = useState<Record<string, XY>>(defaultXY);
   const [lockKey, setLockKey] = useState('C');   // the LOCKED root (yellow), double-click to set
   const [scaleLock, setScaleLock] = useState(false);      // SCALE-LOCK: snap notes to the song key
+  const [selectedDial, setSelectedDial] = useState<null|'note'|'octave'|'scale'>(null);   // which key dial has keyboard focus
+  const lastNoteKey = useRef<{letter:string;t:number}>({letter:'',t:0});   // repeat-letter toggles sharp
   const [scaleMode, setScaleMode] = useState<'major'|'minor'>('major');   // song scale type
   // scale intervals (semitones from root). Snap any semitone offset to the nearest in-key note.
   const SCALE_SEMIS: Record<string, number[]> = { major:[0,2,4,5,7,9,11], minor:[0,2,3,5,7,8,10] };
@@ -247,6 +249,35 @@ export default function FieldPage() {
     return halfBarMs - into;
   }
   useEffect(() => { microcosmBpm(bpm); }, [bpm]);   // push tempo to engine for locked-orb grid
+  // KEY DIALS keyboard control: click a dial to select, then arrows change it; A-G types the note.
+  useEffect(() => {
+    if (!selectedDial) return;
+    const onKey = (e: KeyboardEvent) => {
+      const k = e.key;
+      if (k === 'ArrowUp' || k === 'ArrowDown') {
+        e.preventDefault();
+        const d = k === 'ArrowUp' ? 1 : -1;
+        if (selectedDial === 'note') { setLockKey(prev => NOTES[((NOTES.indexOf(prev)+d)%12+12)%12]); setScaleLock(true); }
+        else if (selectedDial === 'octave') { setOctave(prev => Math.max(-2, Math.min(2, prev+d))); }
+        else if (selectedDial === 'scale') { setScaleMode(m => m==='major'?'minor':'major'); setScaleLock(true); }
+      } else if (selectedDial === 'note' && /^[a-gA-G]$/.test(k)) {
+        e.preventDefault();
+        const letter = k.toUpperCase();
+        const now = Date.now();
+        const repeat = lastNoteKey.current.letter === letter && (now - lastNoteKey.current.t) < 500;
+        // natural note, or its sharp on repeat (if the sharp exists)
+        const natural = letter;
+        const sharp = letter + '#';
+        const target = (repeat && NOTES.includes(sharp)) ? sharp : natural;
+        if (NOTES.includes(target)) { setLockKey(target); setScaleLock(true); }
+        lastNoteKey.current = { letter, t: now };
+      } else if (k === 'Escape') {
+        setSelectedDial(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedDial]);
   const [bpmEditing, setBpmEditing] = useState(false);   // double-click Tempo to type a value
   const [chordsOpen, setChordsOpen] = useState(false);
   const [prog, setProg] = useState<ProgStep[]>([]);     // the sequence
@@ -822,6 +853,16 @@ export default function FieldPage() {
   }, [state]);
 
   // play a note `semis` semitones from the locked root (negative = down, positive = up)
+  // KEY DIALS: vertical scrub (drag up = +1 step, down = -1) like the tempo dial. Calls step(delta).
+  function keyScrub(e: React.PointerEvent, step: (d: number) => void) {
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const y0 = e.clientY; let acc = 0;
+    el.classList.add('dial-active');
+    const move = (ev: PointerEvent) => { const steps = Math.round((y0 - ev.clientY) / 16); if (steps !== acc) { step(steps - acc); acc = steps; } };
+    const up = () => { el.classList.remove('dial-active'); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  }
   function playAt(note: string, semis: number) {
     const rootHz = NOTE_BASE[lockKey] ?? 261.63;
     const snapped = snapToScale(semis);                    // SCALE-LOCK: snap the played note to key
@@ -997,6 +1038,7 @@ export default function FieldPage() {
         .haar-hover:hover .haar-lbl { opacity: 0.85; }
         .haar-sectionlbl { opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
         .haar-section:hover .haar-sectionlbl { opacity: 1; }
+        .dial-active { filter: brightness(1.4); }
       `}</style>
       <div style={{ position:'absolute', inset:0, opacity:0.6, pointerEvents:'none', backgroundImage:'radial-gradient(1px 1px at 20% 14%, rgba(255,255,255,0.5), transparent), radial-gradient(1px 1px at 88% 9%, rgba(255,255,255,0.45), transparent), radial-gradient(1px 1px at 94% 42%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 8% 46%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 50% 8%, rgba(255,255,255,0.3), transparent)' }} />
       <div style={{ position:'absolute', top:24, left:32, fontSize:21, letterSpacing:'0.6em', fontWeight:500 }}>H A A R</div>
@@ -1781,6 +1823,33 @@ export default function FieldPage() {
             </div>
           </div>
           <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 56px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
+            {/* SONG KEY — three glowing-ring dials (note / octave / scale). Scrub up/down. */}
+            <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'center', gap:40, marginBottom:34 }}>
+              {[
+                { cap:'NOTE',   key:'note',   c:'255,210,80',  val: FLAT_NAMES[NOTES.indexOf(lockKey)],
+                  step:(d:number)=>{ setLockKey(prev => NOTES[((NOTES.indexOf(prev)+d)%12+12)%12]); setScaleLock(true); } },
+                { cap:'OCTAVE', key:'octave', c:'170,196,255', val: String(octave+4),
+                  step:(d:number)=>{ setOctave(prev => Math.max(-2, Math.min(2, prev+d))); } },
+                { cap:'SCALE',  key:'scale',  c:'216,166,255', val: scaleMode==='major'?'maj':'min',
+                  step:(d:number)=>{ setScaleMode(m=>m==='major'?'minor':'major'); setScaleLock(true); } },
+              ].map(dial => {
+                const isSel = selectedDial === dial.key;
+                return (
+                <div key={dial.cap} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12 }}>
+                  <div onPointerDown={(e)=>{ setSelectedDial(dial.key as any); keyScrub(e, dial.step); }}
+                    style={{ position:'relative', width:88, height:88, borderRadius:'50%', cursor:'ns-resize', touchAction:'none',
+                      display:'flex', alignItems:'center', justifyContent:'center',
+                      border:`1.5px solid rgba(${dial.c},${isSel?0.95:0.55})`,
+                      boxShadow:`0 0 ${isSel?34:22}px ${isSel?3:1}px rgba(${dial.c},${isSel?0.5:0.28}), inset 0 0 18px 0 rgba(${dial.c},0.10)`,
+                      transition:'box-shadow 0.25s ease, border-color 0.25s ease' }}>
+                    {/* glowing value at the centre */}
+                    <span style={{ fontSize: dial.cap==='SCALE'?18:22, fontWeight:600, letterSpacing:'0.02em',
+                      color:`rgb(${dial.c})`, textShadow:`0 0 16px rgba(${dial.c},0.9), 0 0 6px rgba(${dial.c},0.6)` }}>{dial.val}</span>
+                  </div>
+                  <span style={{ fontSize:9, letterSpacing:'0.22em', color:'rgba(255,255,255,0.32)', fontFamily:'monospace' }}>{dial.cap}</span>
+                </div>
+              );})}
+            </div>
             {/* CONSTELLATION — target an existing one, or create a new one */}
             <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:18, fontFamily:'monospace', textAlign:'center' }}>{currentSongName ? `CONSTELLATIONS · ${currentSongName.toUpperCase()}` : 'CONSTELLATION'}</div>
             <div style={{ display:'flex', gap:14, marginBottom:20, justifyContent:'center', flexWrap:'wrap' }}>
