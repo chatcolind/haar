@@ -19,7 +19,31 @@ export type Binding = {
   actionId: TriggerActionId | ContinuousActionId;
   param?: ActionParam;              // e.g. constellation column
   pickup?: boolean;                 // continuous only; default true
+  layer?: string;                   // 'base' (default) | 'orb' | future layers; untagged fires on all layers? No — see matchesLayer
 };
+
+// ---- LAYERS ----
+// One control can mean different things per layer. The layer key itself is a
+// special binding (actionId 'layer.toggle'). Continuous/trigger bindings tagged
+// with a layer fire only when that layer is active; noterange (keys) bindings
+// are layer-independent (the keyboard is always the conductor).
+let activeLayer = 'base';
+const layerListeners = new Set<(l: string) => void>();
+export function getActiveLayer(): string { return activeLayer; }
+export function setActiveLayer(l: string) {
+  if (l === activeLayer) return;
+  activeLayer = l;
+  // pickup resets on layer switch so no control jumps with a stale engage
+  for (const k in pickupEngaged) delete pickupEngaged[k];
+  layerListeners.forEach(fn => fn(l));
+}
+export function onLayerChange(fn: (l: string) => void): () => void {
+  layerListeners.add(fn); return () => { layerListeners.delete(fn); };
+}
+function matchesLayer(b: Binding): boolean {
+  if (b.source.kind === 'noterange') return true;      // keys are universal
+  return (b.layer ?? 'base') === activeLayer;
+}
 
 const LS_KEY = 'haar_midi_bindings_v1';
 let bindings: Binding[] = [];
@@ -32,8 +56,8 @@ export function loadBindings(): Binding[] {
 export function getBindings(): Binding[] { return bindings; }
 export function saveBindings() { localStorage.setItem(LS_KEY, JSON.stringify(bindings)); }
 export function addBinding(b: Binding) {
-  // one control drives one action: replace any existing binding with the same source
-  bindings = bindings.filter(x => !sameSource(x.source, b.source));
+  // one control drives one action PER LAYER: same source may live on different layers
+  bindings = bindings.filter(x => !(sameSource(x.source, b.source) && (x.layer ?? 'base') === (b.layer ?? 'base')));
   bindings.push(b); saveBindings();
 }
 export function removeBinding(id: string) {
@@ -99,7 +123,7 @@ function handle(m: MidiMessage) {
       : learn.kind === 'continuous' && m.type === 'cc' ? { kind: 'cc', channel: m.channel, cc: m.data1 }
       : null;
     if (!src) return;
-    const b: Binding = { id: 'b' + Date.now(), source: src, actionId: learn.actionId, param: (learn as any).param, pickup: learn.kind === 'continuous' ? true : undefined };
+    const b: Binding = { id: 'b' + Date.now(), source: src, actionId: learn.actionId, param: (learn as any).param, pickup: learn.kind === 'continuous' ? true : undefined, layer: activeLayer };
     addBinding(b); onLearnComplete?.(b); learn = null; onLearnComplete = null;
     return;
   }
@@ -107,7 +131,9 @@ function handle(m: MidiMessage) {
   // Normal dispatch
   for (const b of bindings) {
     const s = b.source;
+    if (!matchesLayer(b) && (b.actionId as string) !== 'layer.toggle') continue;
     if (s.kind === 'note' && m.type === 'noteon' && m.channel === s.channel && m.data1 === s.note) {
+      if ((b.actionId as string) === 'layer.toggle') { setActiveLayer(activeLayer === 'base' ? 'orb' : 'base'); continue; }
       dispatchTrigger(b.actionId as TriggerActionId, b.param);
     } else if (s.kind === 'cc' && m.type === 'cc' && m.channel === s.channel && m.data1 === s.cc) {
       const v = m.data2 / 127;

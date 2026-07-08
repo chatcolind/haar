@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Orb, { ORB_COLORS } from '../../components/field/Orb';
-import { midiInit, midiSubscribe, midiTestGridSweep, midiGridClear, midiGridSet, type MidiMessage } from '../../midi/midi';
+import { midiInit, midiSubscribe, midiTestGridSweep, midiGridClear, midiGridSet, midiGetOutput, type MidiMessage } from '../../midi/midi';
 import { registerActionHandlers } from '../../midi/actions';
-import { startBindingEngine, armLearn, cancelLearn, getBindings, removeBinding, replaceAll, type Binding } from '../../midi/bindings';
+import { startBindingEngine, armLearn, cancelLearn, getBindings, removeBinding, replaceAll, getActiveLayer, onLayerChange, type Binding } from '../../midi/bindings';
 import { ACTION_CATALOGUE } from '../../midi/actions';
 import { apcPaint } from '../../midi/apcFeedback';
 import {
@@ -352,6 +352,44 @@ export default function FieldPage() {
     release: () => { if (progRunning) stopProg(); },
     stop: () => doStop(),
   };
+  // "the focused orb" for hardware: orb-back open ? that orb : the selected orb
+  const orbCtlRef = useRef({ set: (k:string,v:number)=>{}, get: (k:string)=>0, toggleFauve: ()=>{} });
+  orbCtlRef.current = {
+    set: (k, v) => {
+      const id = focused ?? selected; if (!id) return;
+      if (k === 'x' || k === 'y') {
+        const cur = xyRef.current[id] ?? { x:0.5, y:0.5 };
+        const next = { ...xyRef.current, [id]: { x: k==='x'?v:cur.x, y: k==='y'?v:cur.y } };
+        xyRef.current = next; setXyMap(next);
+        microcosmGrainSpread(k==='x'?v:cur.x); microcosmPitchSpread(k==='y'?v:cur.y);
+      }
+      if (k === 'density') { densRef.current[id] = v; microcosmGrainDensity(id, v); forceOrb(x=>x+1); }
+      if (k === 'fauve.disorder') { fauveDisRef.current[id] = v; microcosmFauveParam(id,'disorder',v); forceFauve(x=>x+1); }
+      if (k === 'fauve.repeat')   { fauveRepRef.current[id] = v; microcosmFauveParam(id,'repeat',v); forceFauve(x=>x+1); }
+      if (k === 'fauve.reverse')  { fauveRevRef.current[id] = v; microcosmFauveParam(id,'reverse',v); forceFauve(x=>x+1); }
+      if (k === 'fauve.gaps')     { fauveGapRef.current[id] = v; microcosmFauveParam(id,'gaps',v); forceFauve(x=>x+1); }
+    },
+    toggleFauve: () => {
+      const id = focused ?? selected; if (!id) return;
+      const oc = constRef.current.find(c => c.orbIds.includes(id));
+      if (!oc || oc.sourceId === 'default' || oc.sourceId.startsWith('src_frozen_')) return; // same guard as the screen button
+      const now = !fauveRef.current[id];
+      fauveRef.current[id] = now;
+      if (now) { microcosmFauveOn(id, oc.sourceId); microcosmFauveUpdatePitch(id); } else microcosmFauveOff(id);
+      forceFauve(x=>x+1);
+    },
+    get: (k) => {
+      const id = focused ?? selected; if (!id) return 0;
+      if (k === 'x') return (xyRef.current[id] ?? {x:0.5,y:0.5}).x;
+      if (k === 'y') return (xyRef.current[id] ?? {x:0.5,y:0.5}).y;
+      if (k === 'density') return densRef.current[id] ?? 0.5;
+      if (k === 'fauve.disorder') return fauveDisRef.current[id] ?? 0;
+      if (k === 'fauve.repeat')   return fauveRepRef.current[id] ?? 0;
+      if (k === 'fauve.reverse')  return fauveRevRef.current[id] ?? 0;
+      if (k === 'fauve.gaps')     return fauveGapRef.current[id] ?? 0;
+      return 0;
+    },
+  };
 
   // ── SINGLE PITCH SOURCE OF TRUTH ─────────────────────────────────────────
   // resolveCurrentPitch returns the CURRENT live musical context for a constellation: the moving
@@ -432,6 +470,17 @@ export default function FieldPage() {
   const [controlOpen, setControlOpen] = useState(false); // full-screen CONTROL (MIDI mapping) page
   const [learning, setLearning] = useState<string|null>(null);   // catalogue row id currently armed
   const [bindTick, setBindTick] = useState(0);                   // repaint bindings list
+  const [hwLayer, setHwLayer] = useState('base');
+  useEffect(() => onLayerChange(l => { setHwLayer(l); }), []);
+  // LAYER LED: the layer key's own note lights when orb layer is active (track button red LED)
+  useEffect(() => {
+    const out = midiGetOutput('APC'); if (!out) return;
+    const keys = getBindings().filter(b => (b.actionId as string) === 'layer.toggle' && b.source.kind === 'note');
+    for (const b of keys) {
+      const src = b.source as { channel: number; note: number };
+      out.send([0x90 | (src.channel & 0x0f), src.note, hwLayer === 'orb' ? 1 : 0]);
+    }
+  }, [hwLayer, bindTick]);
   // LED FEEDBACK: repaint bound pads whenever constellation/mute state changes
   useEffect(() => {
     const live = constellations.filter(c => c.orbIds.length > 0);
@@ -472,18 +521,33 @@ export default function FieldPage() {
         if (id === 'chords.engage') transportRef.current.engage();
         if (id === 'chords.release') transportRef.current.release();
         if (id === 'master.stop') transportRef.current.stop();
+        if (id === 'fauve.toggle') orbCtlRef.current.toggleFauve();
       },
       continuous: (id, value, param) => {
         if (id === 'const.level' && typeof param === 'number') {
           const c = constRef.current.filter(x => x.orbIds.length > 0)[param];
           if (c) setConstLevelRef.current(c.id, value);
         }
+        if (id === 'orb.x') orbCtlRef.current.set('x', value);
+        if (id === 'orb.y') orbCtlRef.current.set('y', value);
+        if (id === 'orb.density') orbCtlRef.current.set('density', value);
+        if (id === 'fauve.disorder') orbCtlRef.current.set('fauve.disorder', value);
+        if (id === 'fauve.repeat') orbCtlRef.current.set('fauve.repeat', value);
+        if (id === 'fauve.reverse') orbCtlRef.current.set('fauve.reverse', value);
+        if (id === 'fauve.gaps') orbCtlRef.current.set('fauve.gaps', value);
       },
       readContinuous: (id, param) => {
         if (id === 'const.level' && typeof param === 'number') {
           const c = constRef.current.filter(x => x.orbIds.length > 0)[param];
           return c ? (constLevelRef.current[c.id] ?? 1) : 0;
         }
+        if (id === 'orb.x') return orbCtlRef.current.get('x');
+        if (id === 'orb.y') return orbCtlRef.current.get('y');
+        if (id === 'orb.density') return orbCtlRef.current.get('density');
+        if (id === 'fauve.disorder') return orbCtlRef.current.get('fauve.disorder');
+        if (id === 'fauve.repeat') return orbCtlRef.current.get('fauve.repeat');
+        if (id === 'fauve.reverse') return orbCtlRef.current.get('fauve.reverse');
+        if (id === 'fauve.gaps') return orbCtlRef.current.get('fauve.gaps');
         return 0;
       },
     });
@@ -2269,7 +2333,7 @@ export default function FieldPage() {
               <div style={{ fontSize:12, letterSpacing:'0.25em', fontFamily:'"Space Mono", monospace', marginTop:6,
                 color: midiDevices && midiDevices.inputs.length ? '#7af5c8' : 'rgba(232,226,214,0.35)' }}>
                 {midiDevices && midiDevices.inputs.length
-                  ? ('● CONNECTED' + (midiDevices.outputs.length ? ' · IN / OUT' : ' · IN ONLY'))
+                  ? ('● CONNECTED' + (midiDevices.outputs.length ? ' · IN / OUT' : ' · IN ONLY') + ' · LAYER ' + hwLayer.toUpperCase())
                   : '○ CONNECT A CONTROLLER'}
               </div>
             </div>
@@ -2301,7 +2365,8 @@ export default function FieldPage() {
                 );
               };
               const boundChips = (aid:string, showCol:boolean) => bindingsFor(aid).map(b =>
-                chip(srcLabel(b) + (showCol && typeof b.param==='number' ? ` → COL ${(b.param as number)+1}` : '') + '  ×', '#7af5c8',
+                chip(srcLabel(b) + (showCol && typeof b.param==='number' ? ` → COL ${(b.param as number)+1}` : '') + ((b.layer ?? 'base') === 'orb' ? ' · ORB' : '') + '  ×',
+                  (b.layer ?? 'base') === 'orb' ? '#d46090' : '#7af5c8',
                   () => { removeBinding(b.id); setBindTick(t=>t+1); }));
               const zone = (label:string, color:string, rows:{name:string; right:React.ReactNode}[]) => (
                 <div style={{ border:`1px solid ${color}38`, borderRadius:14, padding:'20px 26px', marginBottom:18 }}>
@@ -2327,13 +2392,22 @@ export default function FieldPage() {
                   { name:'Level', right: <>{boundChips('const.level', true)}{learnChip('const.level','continuous',true)}</> },
                 ])}
                 {zone('ORB · FOCUSED', '#d46090', [
-                  { name:'Knobs follow the focused orb — map once, works for every orb', right: <span style={{ fontFamily:mono, fontSize:10.5, color:'rgba(232,226,214,0.3)', letterSpacing:'0.1em' }}>NEXT BUILD</span> },
+                  { name:'Following', right: <span style={{ fontFamily:mono, fontSize:11, color:'#d46090', letterSpacing:'0.08em' }}>{(focused ?? selected) ? (focused ?? selected).toUpperCase() : 'NO ORB SELECTED'}</span> },
+                  { name:'Spread X', right: <>{boundChips('orb.x', false)}{learnChip('orb.x','continuous',false)}</> },
+                  { name:'Pitch spread Y', right: <>{boundChips('orb.y', false)}{learnChip('orb.y','continuous',false)}</> },
+                  { name:'Density', right: <>{boundChips('orb.density', false)}{learnChip('orb.density','continuous',false)}</> },
+                  { name:'Fauve on / off', right: <>{boundChips('fauve.toggle' as any, false)}{learnChip('fauve.toggle' as any,'trigger',false)}</> },
+                  { name:'Fauve · disorder', right: <>{boundChips('fauve.disorder', false)}{learnChip('fauve.disorder','continuous',false)}</> },
+                  { name:'Fauve · repeat', right: <>{boundChips('fauve.repeat', false)}{learnChip('fauve.repeat','continuous',false)}</> },
+                  { name:'Fauve · reverse', right: <>{boundChips('fauve.reverse', false)}{learnChip('fauve.reverse','continuous',false)}</> },
+                  { name:'Fauve · gaps', right: <>{boundChips('fauve.gaps', false)}{learnChip('fauve.gaps','continuous',false)}</> },
                 ])}
                 {zone('TRANSPORT', '#ffce8a', [
                   { name:'Chords engage', right: <>{boundChips('chords.engage', false)}{learnChip('chords.engage','trigger',false)}</> },
                   { name:'Chords release', right: <>{boundChips('chords.release', false)}{learnChip('chords.release','trigger',false)}</> },
                   { name:'Scale-lock toggle', right: <>{boundChips('scale.toggle', false)}{learnChip('scale.toggle','trigger',false)}</> },
                   { name:'Master stop', right: <>{boundChips('master.stop', false)}{learnChip('master.stop','trigger',false)}</> },
+                  { name:'Layer key (base ↔ orb)', right: <>{boundChips('layer.toggle' as any, false)}{learnChip('layer.toggle' as any,'trigger',false)}</> },
                 ])}
                 {/* PROFILE row */}
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', margin:'6px 2px 18px' }}>

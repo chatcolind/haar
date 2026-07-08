@@ -10,7 +10,9 @@ export type TriggerActionId =
   | 'chords.release'
   | 'master.stop'
   | 'scale.toggle'        // scale-lock on/off live
-  | 'const.freeze';       // param: constellation column index
+  | 'const.freeze'        // param: constellation column index
+  | 'layer.toggle'        // hardware layer key: base <-> orb (handled inside the binding engine)
+  | 'fauve.toggle';       // focused orb: Fauve on/off (WAV-sample orbs only, same guard as the screen button)
 
 export type ContinuousActionId =
   | 'const.level'         // param: constellation column index 0-7, value 0..1
@@ -46,6 +48,7 @@ export function readContinuous(id: ContinuousActionId, param?: ActionParam): num
 /** Human-readable catalogue for the Learn UI. */
 export const ACTION_CATALOGUE: { id: TriggerActionId | ContinuousActionId; kind: 'trigger'|'continuous'|'noterange'; label: string; perColumn?: boolean }[] = [
   { id: 'conductor.note', kind: 'noterange',  label: 'Keys → Conductor' },
+  { id: 'layer.toggle',   kind: 'trigger',    label: 'Layer key (base ↔ orb)' },
   { id: 'const.mute',     kind: 'trigger',    label: 'Constellation mute', perColumn: true },
   { id: 'const.level',    kind: 'continuous', label: 'Constellation level', perColumn: true },
   { id: 'master.level',   kind: 'continuous', label: 'Master level' },
@@ -58,6 +61,7 @@ export const ACTION_CATALOGUE: { id: TriggerActionId | ContinuousActionId; kind:
   { id: 'orb.x',          kind: 'continuous', label: 'Orb: spread X' },
   { id: 'orb.y',          kind: 'continuous', label: 'Orb: pitch spread Y' },
   { id: 'orb.density',    kind: 'continuous', label: 'Orb: density' },
+  { id: 'fauve.toggle',   kind: 'trigger',    label: 'Fauve on / off' },
   { id: 'fauve.disorder', kind: 'continuous', label: 'Fauve: disorder' },
   { id: 'fauve.repeat',   kind: 'continuous', label: 'Fauve: repeat' },
   { id: 'fauve.reverse',  kind: 'continuous', label: 'Fauve: reverse' },
