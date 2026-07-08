@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Orb, { ORB_COLORS } from '../../components/field/Orb';
+import { midiInit, midiSubscribe, type MidiMessage } from '../../midi/midi';
 import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
@@ -411,6 +412,20 @@ export default function FieldPage() {
   const lastTap = useRef<{ key:string; t:number }>({ key:'', t:0 });
   const [palette, setPalette] = useState('open');     // armed flavour palette (global)
   const [createOpen, setCreateOpen] = useState(false);          // orb creation bloom
+  // MIDI monitor (dev tool + foundation for controller rig)
+  const [midiOpen, setMidiOpen] = useState(false);
+  const [midiDevices, setMidiDevices] = useState<{inputs:string[];outputs:string[]}|null>(null);
+  const [midiLog, setMidiLog] = useState<MidiMessage[]>([]);
+  useEffect(() => {
+    let alive = true;
+    let un: (()=>void)|null = null;
+    midiInit().then(d => {
+      if (!alive) return;               // effect already cleaned up — don't subscribe
+      setMidiDevices(d);
+      un = midiSubscribe(m => setMidiLog(prev => [m, ...prev].slice(0, 12)));
+    });
+    return () => { alive = false; if (un) un(); };
+  }, []);
   const [createSrc, setCreateSrc] = useState<'synth'|'sample'|'livein'>('synth');
   const [createEngine, setCreateEngine] = useState<string | null>(null);  // selected engine type
   const createEngineRef = useRef<string | null>(null);   // live mirror so progStep sees preview state (no stale closure)
@@ -2125,6 +2140,37 @@ export default function FieldPage() {
               <input type="range" min={0} max={1} step={0.01} value={(tapeBal as any)[k]}
                 onChange={(e)=>{ const v=parseFloat(e.target.value); setTapeBal(b=>({...b,[k]:v})); microcosmTapeBalance(k, v); }}
                 style={{ width:'100%', height:3, accentColor:'#e8b070', cursor:'pointer' }} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* MIDI monitor — toggle button + live message overlay (controller-rig foundation) */}
+      <div onClick={()=>setMidiOpen(v=>!v)}
+        style={{ position:'fixed', bottom:14, left:14, zIndex:260, padding:'6px 14px', borderRadius:16,
+          cursor:'pointer', fontFamily:'monospace', fontSize:10, letterSpacing:'0.18em',
+          border:`1px solid ${midiDevices && midiDevices.inputs.length ? 'rgba(122,245,200,0.5)' : 'rgba(255,255,255,0.18)'}`,
+          background:'rgba(6,7,13,0.7)',
+          color: midiDevices && midiDevices.inputs.length ? '#7af5c8' : 'rgba(255,255,255,0.35)' }}>
+        MIDI {midiDevices && midiDevices.inputs.length ? '●' : '○'}
+      </div>
+      {midiOpen && (
+        <div style={{ position:'fixed', bottom:56, left:14, zIndex:260, width:340, maxHeight:'55vh', overflowY:'auto',
+          background:'rgba(6,7,13,0.92)', border:'1px solid rgba(216,166,255,0.25)', borderRadius:12,
+          padding:'14px 16px', fontFamily:'"Space Mono", monospace', fontSize:11, color:'rgba(232,226,214,0.85)',
+          boxShadow:'0 0 24px rgba(0,0,0,0.6)' }}>
+          <div style={{ fontSize:10, letterSpacing:'0.2em', color:'#d8a6ff', marginBottom:8 }}>MIDI MONITOR</div>
+          <div style={{ fontSize:10, color:'rgba(255,255,255,0.5)', marginBottom:10 }}>
+            {midiDevices ? (midiDevices.inputs.length ? 'IN: '+midiDevices.inputs.join(', ') : 'no inputs') : 'no Web MIDI access'}
+            {midiDevices && midiDevices.outputs.length ? ' · OUT: '+midiDevices.outputs.join(', ') : ''}
+          </div>
+          {midiLog.length === 0 && <div style={{ color:'rgba(255,255,255,0.3)' }}>press a key / turn a knob…</div>}
+          {midiLog.map((m,i)=>(
+            <div key={m.ts+'-'+i} style={{ display:'flex', gap:10, opacity: 1 - i*0.06, marginBottom:3 }}>
+              <span style={{ color: m.type==='noteon' ? '#7af5c8' : m.type==='noteoff' ? '#d46050' : m.type==='cc' ? '#ffce8a' : '#888', width:52 }}>{m.type.toUpperCase()}</span>
+              <span style={{ width:32 }}>ch{m.channel}</span>
+              <span style={{ width:56 }}>d1 {m.data1}</span>
+              <span>d2 {m.data2}</span>
             </div>
           ))}
         </div>
