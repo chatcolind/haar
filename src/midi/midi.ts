@@ -80,3 +80,28 @@ export function midiGetOutput(nameContains: string): MIDIOutput | null {
   }
   return null;
 }
+
+/** TEST: sweep the APC grid — lights all 40 pads with ascending velocity (colour) values.
+ *  Grid notes 0-39, bottom-left = 0 on APC Key 25. Throwaway diagnostic. */
+export function midiTestGridSweep() {
+  const out = midiGetOutput('APC');
+  if (!out) { console.log('[midi] no APC output found'); return; }
+  for (let n = 0; n < 40; n++) {
+    out.send([0x90, n, (n % 6) + 1]);  // ch0 note-on, velocity cycles 1-6
+  }
+  console.log('[midi] grid sweep sent');
+}
+
+/** Clear all 40 grid pads (velocity 0 = off). */
+export function midiGridClear() {
+  const out = midiGetOutput('APC');
+  if (!out) return;
+  for (let n = 0; n < 40; n++) out.send([0x90, n, 0]);
+}
+
+/** Set one grid pad. col 0-7 (left-right), row 0-4 (bottom-top), color: 0 off, 1 green, 2 green-blink, 3 red, 4 red-blink, 5 yellow, 6 yellow-blink. */
+export function midiGridSet(col: number, row: number, color: number) {
+  const out = midiGetOutput('APC');
+  if (!out) return;
+  out.send([0x90, row * 8 + col, color]);
+}

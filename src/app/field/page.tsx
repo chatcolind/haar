@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Orb, { ORB_COLORS } from '../../components/field/Orb';
-import { midiInit, midiSubscribe, type MidiMessage } from '../../midi/midi';
+import { midiInit, midiSubscribe, midiTestGridSweep, midiGridClear, midiGridSet, type MidiMessage } from '../../midi/midi';
 import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
@@ -2159,7 +2159,13 @@ export default function FieldPage() {
           background:'rgba(6,7,13,0.92)', border:'1px solid rgba(216,166,255,0.25)', borderRadius:12,
           padding:'14px 16px', fontFamily:'"Space Mono", monospace', fontSize:11, color:'rgba(232,226,214,0.85)',
           boxShadow:'0 0 24px rgba(0,0,0,0.6)' }}>
-          <div style={{ fontSize:10, letterSpacing:'0.2em', color:'#d8a6ff', marginBottom:8 }}>MIDI MONITOR</div>
+          <div style={{ fontSize:10, letterSpacing:'0.2em', color:'#d8a6ff', marginBottom:8, display:'flex', justifyContent:'space-between' }}>
+            <span>MIDI MONITOR</span>
+            <span>
+              <span onClick={(e)=>{ e.stopPropagation(); midiGridClear(); midiGridSet(0,0,1); }} style={{ cursor:'pointer', color:'#7af5c8', marginRight:12 }}>ONE PAD</span>
+              <span onClick={(e)=>{ e.stopPropagation(); midiGridClear(); }} style={{ cursor:'pointer', color:'#d46050' }}>CLEAR</span>
+            </span>
+          </div>
           <div style={{ fontSize:10, color:'rgba(255,255,255,0.5)', marginBottom:10 }}>
             {midiDevices ? (midiDevices.inputs.length ? 'IN: '+midiDevices.inputs.join(', ') : 'no inputs') : 'no Web MIDI access'}
             {midiDevices && midiDevices.outputs.length ? ' · OUT: '+midiDevices.outputs.join(', ') : ''}
