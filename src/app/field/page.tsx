@@ -3,6 +3,10 @@
 import { useState, useEffect, useRef } from 'react';
 import Orb, { ORB_COLORS } from '../../components/field/Orb';
 import { midiInit, midiSubscribe, midiTestGridSweep, midiGridClear, midiGridSet, type MidiMessage } from '../../midi/midi';
+import { registerActionHandlers } from '../../midi/actions';
+import { startBindingEngine, armLearn, cancelLearn, getBindings, removeBinding, type Binding } from '../../midi/bindings';
+import { ACTION_CATALOGUE } from '../../midi/actions';
+import { apcPaint } from '../../midi/apcFeedback';
 import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
@@ -418,6 +422,14 @@ export default function FieldPage() {
   const [midiDevices, setMidiDevices] = useState<{inputs:string[];outputs:string[]}|null>(null);
   const [midiLog, setMidiLog] = useState<MidiMessage[]>([]);
   const [constMuteTick, setConstMuteTick] = useState(0);
+  const [midiView, setMidiView] = useState<'monitor'|'map'>('monitor');
+  const [learning, setLearning] = useState<string|null>(null);   // catalogue row id currently armed
+  const [bindTick, setBindTick] = useState(0);                   // repaint bindings list
+  // LED FEEDBACK: repaint bound pads whenever constellation/mute state changes
+  useEffect(() => {
+    const live = constellations.filter(c => c.orbIds.length > 0);
+    apcPaint({ columns: live.map(c => ({ muted: !!constMuteRef.current[c.id] })) });
+  }, [constellations, constMuteTick, bindTick]);
   const lockKeyRefM = useRef(lockKey); useEffect(() => { lockKeyRefM.current = lockKey; }, [lockKey]);
   const heldKeysRef = useRef<number[]>([]);   // MIDI note stack: last-note priority with fallback (SH-101 style) // bumps when constellation mute changes (grid repaint)
   const knobPickupRef = useRef<Record<number, boolean>>({}); // soft-takeover: engaged once knob crosses current value
@@ -432,55 +444,43 @@ export default function FieldPage() {
     return () => { alive = false; if (un) un(); };
   }, []);
 
-  // APC GRID BRIDGE (v1): bottom row = constellation mutes.
-  // Column order = constellation creation order. Green = playing, red = muted.
+  // ACTION HANDLERS: Haar's verbs, exposed to the binding engine. Refs keep them live.
   useEffect(() => {
-    // paint
-    midiGridClear();
-    // Only constellations that actually have orbs — a lit pad must always DO something.
-    const live = constellations.filter(c => c.orbIds.length > 0).slice(0, 8);
-    live.forEach((c, col) => {
-      midiGridSet(col, 0, constMuteRef.current[c.id] ? 3 : 1);  // 3 red, 1 green
-    });
-    // input: bottom-row pad press toggles that column's constellation
-    const un = midiSubscribe(m => {
-      // KNOBS (ch0, CC 48-55) -> constellation levels, column-matched to the grid pads.
-      // PICKUP/soft-takeover: the knob only engages after sweeping past the current level — no jumps.
-      if (m.type === 'cc' && m.channel === 0 && m.data1 >= 48 && m.data1 <= 55) {
-        const col = m.data1 - 48;
-        const c = constRef.current.filter(x => x.orbIds.length > 0)[col];
-        if (!c) return;
-        const knobV = m.data2 / 127;
-        const cur = constLevelRef.current[c.id] ?? 1;
-        if (!knobPickupRef.current[col]) {
-          if (Math.abs(knobV - cur) > 0.04) return;   // not yet at the value — stay silent
-          knobPickupRef.current[col] = true;          // caught it — engage
+    registerActionHandlers({
+      trigger: (id, param) => {
+        const liveConsts = () => constRef.current.filter(x => x.orbIds.length > 0);
+        if (id === 'conductor.note' && typeof param === 'number') {
+          // param = semis from zone rootMidi(60). Re-anchor to the TRUE root key (absolute mapping).
+          const midiNote = 60 + param;
+          const rootPc = NOTES.indexOf(lockKeyRefM.current);
+          let rootMidi = 60 + rootPc; if (rootMidi > 66) rootMidi -= 12;
+          const semis = midiNote - rootMidi;
+          const noteName = NOTES[((midiNote % 12) + 12) % 12];
+          playAtRef.current(noteName, semis);
         }
-        setConstLevel(c.id, knobV);
-        return;
-      }
-      // KEYS (ch1, notes 48-72) -> the conductor. ABSOLUTE mapping (industry standard):
-      // the physical key plays its true pitch; root sits on its real key (Bb minor -> the Bb key).
-      // rootMidi = the locked root's pitch class in the octave nearest MIDI 60.
-      if (m.type === 'noteon' && m.channel === 1) {
-        // Drone conductor: note-on moves the pitch, note-off ignored (the field sustains).
-        const rootPc = NOTES.indexOf(lockKeyRefM.current);
-        let rootMidi = 60 + rootPc;
-        if (rootMidi > 66) rootMidi -= 12;
-        const semis = m.data1 - rootMidi;
-        const noteName = NOTES[((m.data1 % 12) + 12) % 12];
-        playAtRef.current(noteName, semis);
-        return;
-      }
-      // GRID bottom row (ch0, notes 0-7) -> constellation mutes
-      if (m.type !== 'noteon' || m.channel !== 0) return;
-      if (m.data1 > 7) return;
-      const c = constRef.current.filter(x => x.orbIds.length > 0)[m.data1];
-      if (!c) return;
-      toggleConstMute(c.id);
+        if (id === 'const.mute' && typeof param === 'number') {
+          const c = liveConsts()[param]; if (c) toggleConstMuteRef.current(c.id);
+        }
+        if (id === 'scale.toggle') setScaleLock(v => !v);
+      },
+      continuous: (id, value, param) => {
+        if (id === 'const.level' && typeof param === 'number') {
+          const c = constRef.current.filter(x => x.orbIds.length > 0)[param];
+          if (c) setConstLevelRef.current(c.id, value);
+        }
+      },
+      readContinuous: (id, param) => {
+        if (id === 'const.level' && typeof param === 'number') {
+          const c = constRef.current.filter(x => x.orbIds.length > 0)[param];
+          return c ? (constLevelRef.current[c.id] ?? 1) : 0;
+        }
+        return 0;
+      },
     });
-    return un;
-  }, [constellations, constMuteTick]);
+    startBindingEngine();
+  }, []);
+
+
   const [createSrc, setCreateSrc] = useState<'synth'|'sample'|'livein'>('synth');
   const [createEngine, setCreateEngine] = useState<string | null>(null);  // selected engine type
   const createEngineRef = useRef<string | null>(null);   // live mirror so progStep sees preview state (no stale closure)
@@ -909,6 +909,8 @@ export default function FieldPage() {
     constLevelRef.current[constId] = Math.max(0, Math.min(1, v));
     reapplyLevels();
   }
+  const toggleConstMuteRef = useRef(toggleConstMute); toggleConstMuteRef.current = toggleConstMute;
+  const setConstLevelRef = useRef(setConstLevel); setConstLevelRef.current = setConstLevel;
   function activateRack() {
     if (!started.current) return;
     fieldOrbs.forEach(o => {
@@ -2235,18 +2237,55 @@ export default function FieldPage() {
           padding:'14px 16px', fontFamily:'"Space Mono", monospace', fontSize:11, color:'rgba(232,226,214,0.85)',
           boxShadow:'0 0 24px rgba(0,0,0,0.6)' }}>
           <div style={{ fontSize:10, letterSpacing:'0.2em', color:'#d8a6ff', marginBottom:8, display:'flex', justifyContent:'space-between' }}>
-            <span>MIDI MONITOR</span>
             <span>
-              <span onClick={(e)=>{ e.stopPropagation(); midiGridClear(); midiGridSet(0,0,1); }} style={{ cursor:'pointer', color:'#7af5c8', marginRight:12 }}>ONE PAD</span>
-              <span onClick={(e)=>{ e.stopPropagation(); midiGridClear(); }} style={{ cursor:'pointer', color:'#d46050' }}>CLEAR</span>
+              <span onClick={(e)=>{e.stopPropagation(); setMidiView('monitor');}} style={{ cursor:'pointer', color: midiView==='monitor'?'#d8a6ff':'rgba(255,255,255,0.35)', marginRight:12 }}>MONITOR</span>
+              <span onClick={(e)=>{e.stopPropagation(); setMidiView('map');}} style={{ cursor:'pointer', color: midiView==='map'?'#d8a6ff':'rgba(255,255,255,0.35)' }}>MAP</span>
             </span>
+            <span onClick={(e)=>{ e.stopPropagation(); navigator.clipboard.writeText(JSON.stringify(getBindings(), null, 2)); }}
+              title="copy current bindings as a device profile (JSON)"
+              style={{ cursor:'pointer', color:'#7af5c8' }}>EXPORT</span>
           </div>
           <div style={{ fontSize:10, color:'rgba(255,255,255,0.5)', marginBottom:10 }}>
             {midiDevices ? (midiDevices.inputs.length ? 'IN: '+midiDevices.inputs.join(', ') : 'no inputs') : 'no Web MIDI access'}
             {midiDevices && midiDevices.outputs.length ? ' · OUT: '+midiDevices.outputs.join(', ') : ''}
           </div>
-          {midiLog.length === 0 && <div style={{ color:'rgba(255,255,255,0.3)' }}>press a key / turn a knob…</div>}
-          {midiLog.map((m,i)=>(
+          {midiView === 'map' && (
+            <div>
+              {ACTION_CATALOGUE.map(a => {
+                const bound = getBindings().filter(b => b.actionId === a.id);
+                const isLearning = learning === a.id;
+                return (
+                  <div key={a.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:7, gap:8 }}>
+                    <span style={{ fontSize:10.5, color:'rgba(232,226,214,0.8)' }}>{a.label}</span>
+                    <span style={{ display:'flex', gap:8, alignItems:'center' }}>
+                      {bound.map(b => (
+                        <span key={b.id} onClick={()=>{ removeBinding(b.id); setBindTick(t=>t+1); }} title="click to unbind"
+                          style={{ fontSize:9, color:'#7af5c8', border:'1px solid rgba(122,245,200,0.3)', borderRadius:8, padding:'2px 7px', cursor:'pointer' }}>
+                          {b.source.kind==='cc' ? `CC${(b.source as any).cc}` : b.source.kind==='note' ? `N${(b.source as any).note}` : `KEYS ${(b.source as any).low}-${(b.source as any).high}`}
+                          {typeof b.param==='number' ? ` ·${b.param}` : ''} ×
+                        </span>
+                      ))}
+                      <span onClick={()=>{
+                        if (isLearning) { cancelLearn(); setLearning(null); return; }
+                        // perColumn actions: learn binds the NEXT column index not yet bound
+                        const nextCol = a.perColumn ? bound.length : undefined;
+                        armLearn(a.id as any, a.kind, nextCol, () => { setLearning(null); setBindTick(t=>t+1); });
+                        setLearning(a.id);
+                      }}
+                        style={{ fontSize:9, letterSpacing:'0.12em', cursor:'pointer', borderRadius:8, padding:'2px 8px',
+                          color: isLearning ? '#04050a' : '#ffce8a',
+                          background: isLearning ? '#ffce8a' : 'transparent',
+                          border:'1px solid rgba(255,206,138,0.5)' }}>
+                        {isLearning ? (a.kind==='noterange' ? 'LOW…HIGH' : 'MOVE IT…') : (a.perColumn ? `LEARN ${bound.length}` : 'LEARN')}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {midiView === 'monitor' && midiLog.length === 0 && <div style={{ color:'rgba(255,255,255,0.3)' }}>press a key / turn a knob…</div>}
+          {midiView === 'monitor' && midiLog.map((m,i)=>(
             <div key={m.ts+'-'+i} style={{ display:'flex', gap:10, opacity: 1 - i*0.06, marginBottom:3 }}>
               <span style={{ color: m.type==='noteon' ? '#7af5c8' : m.type==='noteoff' ? '#d46050' : m.type==='cc' ? '#ffce8a' : '#888', width:52 }}>{m.type.toUpperCase()}</span>
               <span style={{ width:32 }}>ch{m.channel}</span>
