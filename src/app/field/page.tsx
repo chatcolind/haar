@@ -442,10 +442,15 @@ export default function FieldPage() {
     });
     // input: bottom-row pad press toggles that column's constellation
     const un = midiSubscribe(m => {
-      // KEYS (ch1, notes 48-72) -> the conductor. MIDI 60 = the locked root.
+      // KEYS (ch1, notes 48-72) -> the conductor. ABSOLUTE mapping (industry standard):
+      // the physical key plays its true pitch; root sits on its real key (Bb minor -> the Bb key).
+      // rootMidi = the locked root's pitch class in the octave nearest MIDI 60.
       if (m.type === 'noteon' && m.channel === 1) {
-        const semis = m.data1 - 60;
-        const noteName = NOTES[((NOTES.indexOf(lockKeyRefM.current) + semis) % 12 + 12) % 12];
+        const rootPc = NOTES.indexOf(lockKeyRefM.current);        // 0-11 pitch class of the root
+        let rootMidi = 60 + rootPc;                               // root in the middle octave
+        if (rootMidi > 66) rootMidi -= 12;                        // keep root within a tritone of 60
+        const semis = m.data1 - rootMidi;                         // distance from the TRUE root key
+        const noteName = NOTES[((m.data1 % 12) + 12) % 12];       // the key's real note name
         playAtRef.current(noteName, semis);
         return;
       }
