@@ -420,6 +420,7 @@ export default function FieldPage() {
   const [constMuteTick, setConstMuteTick] = useState(0);
   const lockKeyRefM = useRef(lockKey); useEffect(() => { lockKeyRefM.current = lockKey; }, [lockKey]);
   const heldKeysRef = useRef<number[]>([]);   // MIDI note stack: last-note priority with fallback (SH-101 style) // bumps when constellation mute changes (grid repaint)
+  const knobPickupRef = useRef<Record<number, boolean>>({}); // soft-takeover: engaged once knob crosses current value
   useEffect(() => {
     let alive = true;
     let un: (()=>void)|null = null;
@@ -443,6 +444,21 @@ export default function FieldPage() {
     });
     // input: bottom-row pad press toggles that column's constellation
     const un = midiSubscribe(m => {
+      // KNOBS (ch0, CC 48-55) -> constellation levels, column-matched to the grid pads.
+      // PICKUP/soft-takeover: the knob only engages after sweeping past the current level — no jumps.
+      if (m.type === 'cc' && m.channel === 0 && m.data1 >= 48 && m.data1 <= 55) {
+        const col = m.data1 - 48;
+        const c = constRef.current.filter(x => x.orbIds.length > 0)[col];
+        if (!c) return;
+        const knobV = m.data2 / 127;
+        const cur = constLevelRef.current[c.id] ?? 1;
+        if (!knobPickupRef.current[col]) {
+          if (Math.abs(knobV - cur) > 0.04) return;   // not yet at the value — stay silent
+          knobPickupRef.current[col] = true;          // caught it — engage
+        }
+        setConstLevel(c.id, knobV);
+        return;
+      }
       // KEYS (ch1, notes 48-72) -> the conductor. ABSOLUTE mapping (industry standard):
       // the physical key plays its true pitch; root sits on its real key (Bb minor -> the Bb key).
       // rootMidi = the locked root's pitch class in the octave nearest MIDI 60.
@@ -798,6 +814,7 @@ export default function FieldPage() {
   const volRef = useRef<Record<string, number>>({});   // per-orb volume (default 0.7)
   const densRef = useRef<Record<string, number>>({});  // per-orb density (default 0.5)
   const constMuteRef = useRef<Record<string, boolean>>({}); // per-CONSTELLATION mute (grid/rig tier)
+  const constLevelRef = useRef<Record<string, number>>({}); // per-CONSTELLATION level multiplier 0..1 (default 1)
   const muteRef = useRef<Record<string, boolean>>({});  // per-channel mute (mixer)
   const soloSetRef = useRef<Record<string, boolean>>({}); // per-channel solo (mixer)
 
@@ -878,14 +895,19 @@ export default function FieldPage() {
     if (muteRef.current[id]) return 0;                    // per-channel mute (mixer)
     const oc = constRef.current.find(c => c.orbIds.includes(id));
     if (oc && constMuteRef.current[oc.id]) return 0;   // constellation mute (group tier)
+    const cl = oc ? (constLevelRef.current[oc.id] ?? 1) : 1;  // constellation level (group tier)
     const anySolo = Object.values(soloSetRef.current).some(Boolean);
     if (anySolo && !soloSetRef.current[id]) return 0;     // solo: non-soloed channels silent
-    return volRef.current[id] ?? 0.7;                     // the fader value
+    return (volRef.current[id] ?? 0.7) * cl;                     // the fader value
   }
   function toggleConstMute(constId: string) {
     constMuteRef.current[constId] = !constMuteRef.current[constId];
     reapplyLevels();
     setConstMuteTick(t => t + 1);   // repaint anything showing mute state
+  }
+  function setConstLevel(constId: string, v: number) {
+    constLevelRef.current[constId] = Math.max(0, Math.min(1, v));
+    reapplyLevels();
   }
   function activateRack() {
     if (!started.current) return;
