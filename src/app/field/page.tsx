@@ -341,6 +341,7 @@ export default function FieldPage() {
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
     for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
   }
+  const playAtRef = useRef(playAt); playAtRef.current = playAt;   // live mirror for MIDI closures
 
   // ── SINGLE PITCH SOURCE OF TRUTH ─────────────────────────────────────────
   // resolveCurrentPitch returns the CURRENT live musical context for a constellation: the moving
@@ -416,7 +417,8 @@ export default function FieldPage() {
   const [midiOpen, setMidiOpen] = useState(false);
   const [midiDevices, setMidiDevices] = useState<{inputs:string[];outputs:string[]}|null>(null);
   const [midiLog, setMidiLog] = useState<MidiMessage[]>([]);
-  const [constMuteTick, setConstMuteTick] = useState(0); // bumps when constellation mute changes (grid repaint)
+  const [constMuteTick, setConstMuteTick] = useState(0);
+  const lockKeyRefM = useRef(lockKey); useEffect(() => { lockKeyRefM.current = lockKey; }, [lockKey]); // bumps when constellation mute changes (grid repaint)
   useEffect(() => {
     let alive = true;
     let un: (()=>void)|null = null;
@@ -440,8 +442,16 @@ export default function FieldPage() {
     });
     // input: bottom-row pad press toggles that column's constellation
     const un = midiSubscribe(m => {
+      // KEYS (ch1, notes 48-72) -> the conductor. MIDI 60 = the locked root.
+      if (m.type === 'noteon' && m.channel === 1) {
+        const semis = m.data1 - 60;
+        const noteName = NOTES[((NOTES.indexOf(lockKeyRefM.current) + semis) % 12 + 12) % 12];
+        playAtRef.current(noteName, semis);
+        return;
+      }
+      // GRID bottom row (ch0, notes 0-7) -> constellation mutes
       if (m.type !== 'noteon' || m.channel !== 0) return;
-      if (m.data1 > 7) return;                       // bottom row only (notes 0-7)
+      if (m.data1 > 7) return;
       const c = constRef.current.filter(x => x.orbIds.length > 0)[m.data1];
       if (!c) return;
       toggleConstMute(c.id);
