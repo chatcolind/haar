@@ -353,7 +353,7 @@ export default function FieldPage() {
     stop: () => doStop(),
   };
   // "the focused orb" for hardware: orb-back open ? that orb : the selected orb
-  const orbCtlRef = useRef({ set: (k:string,v:number)=>{}, get: (k:string)=>0, toggleFauve: ()=>{} });
+  const orbCtlRef = useRef({ set: (k:string,v:number)=>{}, get: (k:string)=>0, toggleFauve: ()=>{}, cycleFlavour: ()=>{} });
   orbCtlRef.current = {
     set: (k, v) => {
       const id = focused ?? selected; if (!id) return;
@@ -364,10 +364,20 @@ export default function FieldPage() {
         microcosmGrainSpread(k==='x'?v:cur.x); microcosmPitchSpread(k==='y'?v:cur.y);
       }
       if (k === 'density') { densRef.current[id] = v; microcosmGrainDensity(id, v); forceOrb(x=>x+1); }
+      if (k === 'flavour.amount') { amountRef.current[id] = v; microcosmEngineAmount(id, v); forceOrb(x=>x+1); }
       if (k === 'fauve.disorder') { fauveDisRef.current[id] = v; microcosmFauveParam(id,'disorder',v); forceFauve(x=>x+1); }
       if (k === 'fauve.repeat')   { fauveRepRef.current[id] = v; microcosmFauveParam(id,'repeat',v); forceFauve(x=>x+1); }
       if (k === 'fauve.reverse')  { fauveRevRef.current[id] = v; microcosmFauveParam(id,'reverse',v); forceFauve(x=>x+1); }
       if (k === 'fauve.gaps')     { fauveGapRef.current[id] = v; microcosmFauveParam(id,'gaps',v); forceFauve(x=>x+1); }
+    },
+    cycleFlavour: () => {
+      const id = focused ?? selected; if (!id) return;
+      const cur = flavourRef.current[id] ?? 'open';
+      const i = FLAVOURS.findIndex(f => f.id === cur);
+      const next = FLAVOURS[(i + 1) % FLAVOURS.length].id;
+      flavourRef.current[id] = next;
+      microcosmOrbPalette(id, next);
+      forceOrb(x=>x+1);
     },
     toggleFauve: () => {
       const id = focused ?? selected; if (!id) return;
@@ -383,6 +393,7 @@ export default function FieldPage() {
       if (k === 'x') return (xyRef.current[id] ?? {x:0.5,y:0.5}).x;
       if (k === 'y') return (xyRef.current[id] ?? {x:0.5,y:0.5}).y;
       if (k === 'density') return densRef.current[id] ?? 0.5;
+      if (k === 'flavour.amount') return amountRef.current[id] ?? 0;
       if (k === 'fauve.disorder') return fauveDisRef.current[id] ?? 0;
       if (k === 'fauve.repeat')   return fauveRepRef.current[id] ?? 0;
       if (k === 'fauve.reverse')  return fauveRevRef.current[id] ?? 0;
@@ -522,6 +533,7 @@ export default function FieldPage() {
         if (id === 'chords.release') transportRef.current.release();
         if (id === 'master.stop') transportRef.current.stop();
         if (id === 'fauve.toggle') orbCtlRef.current.toggleFauve();
+        if (id === 'flavour.cycle') orbCtlRef.current.cycleFlavour();
       },
       continuous: (id, value, param) => {
         if (id === 'const.level' && typeof param === 'number') {
@@ -531,6 +543,7 @@ export default function FieldPage() {
         if (id === 'orb.x') orbCtlRef.current.set('x', value);
         if (id === 'orb.y') orbCtlRef.current.set('y', value);
         if (id === 'orb.density') orbCtlRef.current.set('density', value);
+        if (id === 'flavour.amount') orbCtlRef.current.set('flavour.amount', value);
         if (id === 'fauve.disorder') orbCtlRef.current.set('fauve.disorder', value);
         if (id === 'fauve.repeat') orbCtlRef.current.set('fauve.repeat', value);
         if (id === 'fauve.reverse') orbCtlRef.current.set('fauve.reverse', value);
@@ -544,6 +557,7 @@ export default function FieldPage() {
         if (id === 'orb.x') return orbCtlRef.current.get('x');
         if (id === 'orb.y') return orbCtlRef.current.get('y');
         if (id === 'orb.density') return orbCtlRef.current.get('density');
+        if (id === 'flavour.amount') return orbCtlRef.current.get('flavour.amount');
         if (id === 'fauve.disorder') return orbCtlRef.current.get('fauve.disorder');
         if (id === 'fauve.repeat') return orbCtlRef.current.get('fauve.repeat');
         if (id === 'fauve.reverse') return orbCtlRef.current.get('fauve.reverse');
@@ -2396,6 +2410,8 @@ export default function FieldPage() {
                   { name:'Spread X', right: <>{boundChips('orb.x', false)}{learnChip('orb.x','continuous',false)}</> },
                   { name:'Pitch spread Y', right: <>{boundChips('orb.y', false)}{learnChip('orb.y','continuous',false)}</> },
                   { name:'Density', right: <>{boundChips('orb.density', false)}{learnChip('orb.density','continuous',false)}</> },
+                  { name:'Flavour · next', right: <>{boundChips('flavour.cycle' as any, false)}{learnChip('flavour.cycle' as any,'trigger',false)}</> },
+                  { name:'Flavour · amount', right: <>{boundChips('flavour.amount' as any, false)}{learnChip('flavour.amount' as any,'continuous',false)}</> },
                   { name:'Fauve on / off', right: <>{boundChips('fauve.toggle' as any, false)}{learnChip('fauve.toggle' as any,'trigger',false)}</> },
                   { name:'Fauve · disorder', right: <>{boundChips('fauve.disorder', false)}{learnChip('fauve.disorder','continuous',false)}</> },
                   { name:'Fauve · repeat', right: <>{boundChips('fauve.repeat', false)}{learnChip('fauve.repeat','continuous',false)}</> },

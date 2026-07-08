@@ -12,13 +12,15 @@ export type TriggerActionId =
   | 'scale.toggle'        // scale-lock on/off live
   | 'const.freeze'        // param: constellation column index
   | 'layer.toggle'        // hardware layer key: base <-> orb (handled inside the binding engine)
-  | 'fauve.toggle';       // focused orb: Fauve on/off (WAV-sample orbs only, same guard as the screen button)
+  | 'fauve.toggle'        // focused orb: Fauve on/off (WAV-sample orbs only, same guard as the screen button)
+  | 'flavour.cycle';      // focused orb: step to the next flavour palette (wraps)
 
 export type ContinuousActionId =
   | 'const.level'         // param: constellation column index 0-7, value 0..1
   | 'master.level'        // value 0..1
   | 'orb.x' | 'orb.y'     // selected orb XY, value 0..1
   | 'orb.density'         // selected orb, value 0..1
+  | 'flavour.amount'      // focused orb: flavour amount 0..1
   | 'fauve.disorder' | 'fauve.repeat' | 'fauve.reverse' | 'fauve.gaps'; // selected orb
 
 export type ActionParam = number | { col: number; row: number } | undefined;
@@ -61,6 +63,8 @@ export const ACTION_CATALOGUE: { id: TriggerActionId | ContinuousActionId; kind:
   { id: 'orb.x',          kind: 'continuous', label: 'Orb: spread X' },
   { id: 'orb.y',          kind: 'continuous', label: 'Orb: pitch spread Y' },
   { id: 'orb.density',    kind: 'continuous', label: 'Orb: density' },
+  { id: 'flavour.cycle',  kind: 'trigger',    label: 'Flavour · next' },
+  { id: 'flavour.amount', kind: 'continuous', label: 'Flavour · amount' },
   { id: 'fauve.toggle',   kind: 'trigger',    label: 'Fauve on / off' },
   { id: 'fauve.disorder', kind: 'continuous', label: 'Fauve: disorder' },
   { id: 'fauve.repeat',   kind: 'continuous', label: 'Fauve: repeat' },
