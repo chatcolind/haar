@@ -211,6 +211,7 @@ export default function FieldPage() {
   const [mixOpen, setMixOpen] = useState(false);   // mix desk visible
   const [mixShown, setMixShown] = useState(false); // drives the desk slide transition
   const [masterVol, setMasterVol] = useState(0.85);  // master fader
+  const masterVolRef = useRef(0.85); useEffect(() => { masterVolRef.current = masterVol; }, [masterVol]);
   const lastOrbTap = useRef<{ id:string; t:number }>({ id:'', t:0 });
   const [dim, setDim] = useState({ w: 1440, h: 900 });
   const [state, setState] = useState<'idle'|'playing'|'stopped'>('idle');
@@ -367,6 +368,7 @@ export default function FieldPage() {
       }
       if (k === 'density') { densRef.current[id] = v; microcosmGrainDensity(id, v); forceOrb(x=>x+1); }
       if (k === 'flavour.amount') { amountRef.current[id] = v; microcosmEngineAmount(id, v); forceOrb(x=>x+1); }
+      if (k === 'pan') { const p2 = v*2-1; panRef.current[id] = p2; microcosmEnginePan(id, p2); forceOrb(x=>x+1); }
       if (k === 'fauve.disorder') { fauveDisRef.current[id] = v; microcosmFauveParam(id,'disorder',v); forceFauve(x=>x+1); }
       if (k === 'fauve.repeat')   { fauveRepRef.current[id] = v; microcosmFauveParam(id,'repeat',v); forceFauve(x=>x+1); }
       if (k === 'fauve.reverse')  { fauveRevRef.current[id] = v; microcosmFauveParam(id,'reverse',v); forceFauve(x=>x+1); }
@@ -396,6 +398,7 @@ export default function FieldPage() {
       if (k === 'y') return (xyRef.current[id] ?? {x:0.5,y:0.5}).y;
       if (k === 'density') return densRef.current[id] ?? 0.5;
       if (k === 'flavour.amount') return amountRef.current[id] ?? 0;
+      if (k === 'pan') return ((panRef.current[id] ?? 0)+1)/2;
       if (k === 'fauve.disorder') return fauveDisRef.current[id] ?? 0;
       if (k === 'fauve.repeat')   return fauveRepRef.current[id] ?? 0;
       if (k === 'fauve.reverse')  return fauveRevRef.current[id] ?? 0;
@@ -549,6 +552,8 @@ export default function FieldPage() {
         if (id === 'orb.y') orbCtlRef.current.set('y', value);
         if (id === 'orb.density') orbCtlRef.current.set('density', value);
         if (id === 'flavour.amount') orbCtlRef.current.set('flavour.amount', value);
+        if (id === 'orb.pan') orbCtlRef.current.set('pan', value);
+        if (id === 'master.level') { setMasterVol(value); microcosmMasterLevel(value); }
         if (id === 'fauve.disorder') orbCtlRef.current.set('fauve.disorder', value);
         if (id === 'fauve.repeat') orbCtlRef.current.set('fauve.repeat', value);
         if (id === 'fauve.reverse') orbCtlRef.current.set('fauve.reverse', value);
@@ -563,6 +568,8 @@ export default function FieldPage() {
         if (id === 'orb.y') return orbCtlRef.current.get('y');
         if (id === 'orb.density') return orbCtlRef.current.get('density');
         if (id === 'flavour.amount') return orbCtlRef.current.get('flavour.amount');
+        if (id === 'orb.pan') return orbCtlRef.current.get('pan');
+        if (id === 'master.level') return masterVolRef.current;
         if (id === 'fauve.disorder') return orbCtlRef.current.get('fauve.disorder');
         if (id === 'fauve.repeat') return orbCtlRef.current.get('fauve.repeat');
         if (id === 'fauve.reverse') return orbCtlRef.current.get('fauve.reverse');
@@ -2411,12 +2418,14 @@ export default function FieldPage() {
                       <span key={c.id} style={{ fontFamily:mono, fontSize:10.5, color:CONST_TINTS[i % CONST_TINTS.length], letterSpacing:'0.08em' }}>{(i+1)+' · '+c.name.toUpperCase()}</span>))}</span> },
                   { name:'Mute', right: <>{boundChips('const.mute', true)}{learnChip('const.mute','trigger',true)}</> },
                   { name:'Level', right: <>{boundChips('const.level', true)}{learnChip('const.level','continuous',true)}</> },
+                  { name:'Master level', right: <>{boundChips('master.level', false)}{learnChip('master.level','continuous',false)}</> },
                 ])}
                 {zone('ORB · FOCUSED', '#d46090', [
                   { name:'Following', right: <span style={{ fontFamily:mono, fontSize:11, color:'#d46090', letterSpacing:'0.08em' }}>{(focused ?? selected) ? (focused ?? selected).toUpperCase() : 'NO ORB SELECTED'}</span> },
                   { name:'Spread X', right: <>{boundChips('orb.x', false)}{learnChip('orb.x','continuous',false)}</> },
                   { name:'Pitch spread Y', right: <>{boundChips('orb.y', false)}{learnChip('orb.y','continuous',false)}</> },
                   { name:'Density', right: <>{boundChips('orb.density', false)}{learnChip('orb.density','continuous',false)}</> },
+                  { name:'Pan', right: <>{boundChips('orb.pan' as any, false)}{learnChip('orb.pan' as any,'continuous',false)}</> },
                   { name:'Flavour · next', right: <>{boundChips('flavour.cycle' as any, false)}{learnChip('flavour.cycle' as any,'trigger',false)}</> },
                   { name:'Flavour · amount', right: <>{boundChips('flavour.amount' as any, false)}{learnChip('flavour.amount' as any,'continuous',false)}</> },
                   { name:'Fauve on / off', right: <>{boundChips('fauve.toggle' as any, false)}{learnChip('fauve.toggle' as any,'trigger',false)}</> },

@@ -23,6 +23,7 @@ export type ContinuousActionId =
   | 'master.level'        // value 0..1
   | 'orb.x' | 'orb.y'     // selected orb XY, value 0..1
   | 'orb.density'         // selected orb, value 0..1
+  | 'orb.pan'             // focused orb: pan (CC 0..1 mapped to -1..1, knob centre = centre)
   | 'flavour.amount'      // focused orb: flavour amount 0..1
   | 'fauve.disorder' | 'fauve.repeat' | 'fauve.reverse' | 'fauve.gaps'; // selected orb
 
@@ -69,6 +70,7 @@ export const ACTION_CATALOGUE: { id: TriggerActionId | ContinuousActionId; kind:
   { id: 'orb.x',          kind: 'continuous', label: 'Orb: spread X' },
   { id: 'orb.y',          kind: 'continuous', label: 'Orb: pitch spread Y' },
   { id: 'orb.density',    kind: 'continuous', label: 'Orb: density' },
+  { id: 'orb.pan',        kind: 'continuous', label: 'Orb: pan' },
   { id: 'flavour.cycle',  kind: 'trigger',    label: 'Flavour · next' },
   { id: 'flavour.amount', kind: 'continuous', label: 'Flavour · amount' },
   { id: 'fauve.toggle',   kind: 'trigger',    label: 'Fauve on / off' },
