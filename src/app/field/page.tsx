@@ -416,6 +416,7 @@ export default function FieldPage() {
   const [midiOpen, setMidiOpen] = useState(false);
   const [midiDevices, setMidiDevices] = useState<{inputs:string[];outputs:string[]}|null>(null);
   const [midiLog, setMidiLog] = useState<MidiMessage[]>([]);
+  const [constMuteTick, setConstMuteTick] = useState(0); // bumps when constellation mute changes (grid repaint)
   useEffect(() => {
     let alive = true;
     let un: (()=>void)|null = null;
@@ -426,6 +427,27 @@ export default function FieldPage() {
     });
     return () => { alive = false; if (un) un(); };
   }, []);
+
+  // APC GRID BRIDGE (v1): bottom row = constellation mutes.
+  // Column order = constellation creation order. Green = playing, red = muted.
+  useEffect(() => {
+    // paint
+    midiGridClear();
+    // Only constellations that actually have orbs — a lit pad must always DO something.
+    const live = constellations.filter(c => c.orbIds.length > 0).slice(0, 8);
+    live.forEach((c, col) => {
+      midiGridSet(col, 0, constMuteRef.current[c.id] ? 3 : 1);  // 3 red, 1 green
+    });
+    // input: bottom-row pad press toggles that column's constellation
+    const un = midiSubscribe(m => {
+      if (m.type !== 'noteon' || m.channel !== 0) return;
+      if (m.data1 > 7) return;                       // bottom row only (notes 0-7)
+      const c = constRef.current.filter(x => x.orbIds.length > 0)[m.data1];
+      if (!c) return;
+      toggleConstMute(c.id);
+    });
+    return un;
+  }, [constellations, constMuteTick]);
   const [createSrc, setCreateSrc] = useState<'synth'|'sample'|'livein'>('synth');
   const [createEngine, setCreateEngine] = useState<string | null>(null);  // selected engine type
   const createEngineRef = useRef<string | null>(null);   // live mirror so progStep sees preview state (no stale closure)
@@ -752,6 +774,7 @@ export default function FieldPage() {
   const amountRef = useRef<Record<string, number>>({}); // per-orb flavour amount (default 0)
   const volRef = useRef<Record<string, number>>({});   // per-orb volume (default 0.7)
   const densRef = useRef<Record<string, number>>({});  // per-orb density (default 0.5)
+  const constMuteRef = useRef<Record<string, boolean>>({}); // per-CONSTELLATION mute (grid/rig tier)
   const muteRef = useRef<Record<string, boolean>>({});  // per-channel mute (mixer)
   const soloSetRef = useRef<Record<string, boolean>>({}); // per-channel solo (mixer)
 
@@ -830,9 +853,16 @@ export default function FieldPage() {
   function orbLevel(id: string): number {
     if (mutedRef.current) return 0;
     if (muteRef.current[id]) return 0;                    // per-channel mute (mixer)
+    const oc = constRef.current.find(c => c.orbIds.includes(id));
+    if (oc && constMuteRef.current[oc.id]) return 0;   // constellation mute (group tier)
     const anySolo = Object.values(soloSetRef.current).some(Boolean);
     if (anySolo && !soloSetRef.current[id]) return 0;     // solo: non-soloed channels silent
     return volRef.current[id] ?? 0.7;                     // the fader value
+  }
+  function toggleConstMute(constId: string) {
+    constMuteRef.current[constId] = !constMuteRef.current[constId];
+    reapplyLevels();
+    setConstMuteTick(t => t + 1);   // repaint anything showing mute state
   }
   function activateRack() {
     if (!started.current) return;
