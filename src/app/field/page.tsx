@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Orb, { ORB_COLORS } from '../../components/field/Orb';
 import { midiInit, midiSubscribe, midiTestGridSweep, midiGridClear, midiGridSet, type MidiMessage } from '../../midi/midi';
 import { registerActionHandlers } from '../../midi/actions';
-import { startBindingEngine, armLearn, cancelLearn, getBindings, removeBinding, type Binding } from '../../midi/bindings';
+import { startBindingEngine, armLearn, cancelLearn, getBindings, removeBinding, replaceAll, type Binding } from '../../midi/bindings';
 import { ACTION_CATALOGUE } from '../../midi/actions';
 import { apcPaint } from '../../midi/apcFeedback';
 import {
@@ -423,6 +423,7 @@ export default function FieldPage() {
   const [midiLog, setMidiLog] = useState<MidiMessage[]>([]);
   const [constMuteTick, setConstMuteTick] = useState(0);
   const [midiView, setMidiView] = useState<'monitor'|'map'>('monitor');
+  const [controlOpen, setControlOpen] = useState(false); // full-screen CONTROL (MIDI mapping) page
   const [learning, setLearning] = useState<string|null>(null);   // catalogue row id currently armed
   const [bindTick, setBindTick] = useState(0);                   // repaint bindings list
   // LED FEEDBACK: repaint bound pads whenever constellation/mute state changes
@@ -1810,6 +1811,26 @@ export default function FieldPage() {
                 </div>
                 <div className="haar-lbl" style={{ fontSize:12.5, color:'#ffdcb0', marginTop:8 }}>Swell</div>
               </div>
+              <div className="haar-hover" onClick={()=>setControlOpen(true)} title="control — hardware mapping"
+                style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%',
+                  border:`1px solid ${(midiDevices && midiDevices.inputs.length) ? '#7af5c8' : 'rgba(122,245,200,0.35)'}`,
+                  background:`rgba(122,245,200,${(midiDevices && midiDevices.inputs.length) ? 0.14 : 0.05})`,
+                  boxShadow:(midiDevices && midiDevices.inputs.length)
+                    ? '0 0 24px 5px rgba(122,245,200,0.55), inset 0 0 14px rgba(122,245,200,0.2)'
+                    : '0 0 14px 2px rgba(122,245,200,0.25), inset 0 0 12px rgba(122,245,200,0.1)',
+                  display:'flex', alignItems:'center', justifyContent:'center', transition:'box-shadow 0.3s, background 0.3s' }}>
+                  <svg width="24" height="24" viewBox="0 0 20 20"><g stroke="#a6fff2" strokeWidth="1.2" fill="none" opacity="0.9">
+                    <circle cx="10" cy="10" r="7"/>
+                    <circle cx="10" cy="6.2" r="0.9" fill="#a6fff2"/>
+                    <circle cx="6.4" cy="9" r="0.9" fill="#a6fff2"/>
+                    <circle cx="13.6" cy="9" r="0.9" fill="#a6fff2"/>
+                    <circle cx="7.4" cy="13" r="0.9" fill="#a6fff2"/>
+                    <circle cx="12.6" cy="13" r="0.9" fill="#a6fff2"/>
+                  </g></svg>
+                </div>
+                <div className="haar-lbl" style={{ fontSize:12.5, color:'#a6fff2', marginTop:8 }}>Control</div>
+              </div>
               <div className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ position:'relative', width:62, height:62 }}>
                   <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:`radial-gradient(circle, rgba(216,166,255,${0.4+life*0.5}) 0%, rgba(138,61,245,${0.15+life*0.3}) 50%, transparent 72%)`, filter:'blur(2px)' }} />
@@ -2222,79 +2243,101 @@ export default function FieldPage() {
         </div>
       )}
 
-      {/* MIDI monitor — toggle button + live message overlay (controller-rig foundation) */}
-      <div onClick={()=>setMidiOpen(v=>!v)}
-        style={{ position:'fixed', bottom:14, left:14, zIndex:260, padding:'6px 14px', borderRadius:16,
-          cursor:'pointer', fontFamily:'monospace', fontSize:10, letterSpacing:'0.18em',
-          border:`1px solid ${midiDevices && midiDevices.inputs.length ? 'rgba(122,245,200,0.5)' : 'rgba(255,255,255,0.18)'}`,
-          background:'rgba(6,7,13,0.7)',
-          color: midiDevices && midiDevices.inputs.length ? '#7af5c8' : 'rgba(255,255,255,0.35)' }}>
-        MIDI {midiDevices && midiDevices.inputs.length ? '●' : '○'}
-      </div>
-      {midiOpen && (
-        <div style={{ position:'fixed', bottom:56, left:14, zIndex:260, width:340, maxHeight:'55vh', overflowY:'auto',
-          background:'rgba(6,7,13,0.92)', border:'1px solid rgba(216,166,255,0.25)', borderRadius:12,
-          padding:'14px 16px', fontFamily:'"Space Mono", monospace', fontSize:11, color:'rgba(232,226,214,0.85)',
-          boxShadow:'0 0 24px rgba(0,0,0,0.6)' }}>
-          <div style={{ fontSize:10, letterSpacing:'0.2em', color:'#d8a6ff', marginBottom:8, display:'flex', justifyContent:'space-between' }}>
-            <span>
-              <span onClick={(e)=>{e.stopPropagation(); setMidiView('monitor');}} style={{ cursor:'pointer', color: midiView==='monitor'?'#d8a6ff':'rgba(255,255,255,0.35)', marginRight:12 }}>MONITOR</span>
-              <span onClick={(e)=>{e.stopPropagation(); setMidiView('map');}} style={{ cursor:'pointer', color: midiView==='map'?'#d8a6ff':'rgba(255,255,255,0.35)' }}>MAP</span>
-            </span>
-            <span onClick={(e)=>{ e.stopPropagation(); navigator.clipboard.writeText(JSON.stringify(getBindings(), null, 2)); }}
-              title="copy current bindings as a device profile (JSON)"
-              style={{ cursor:'pointer', color:'#7af5c8' }}>EXPORT</span>
+      {/* CONTROL — full-screen hardware mapping page (instrument-grade) */}
+      {controlOpen && (
+        <div style={{ position:'fixed', inset:0, zIndex:310, background:'radial-gradient(ellipse at 50% 32%, #0c1018 0%, #06070d 60%, #030409 100%)', display:'flex', flexDirection:'column', fontFamily:'Rajdhani, sans-serif' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'34px 56px 0' }}>
+            <span style={{ fontSize:15, letterSpacing:'0.4em', color:'#d8a6ff', fontFamily:'monospace', fontWeight:600 }}>H A A R</span>
+            <div onClick={()=>{ cancelLearn(); setLearning(null); setControlOpen(false); }} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>
           </div>
-          <div style={{ fontSize:10, color:'rgba(255,255,255,0.5)', marginBottom:10 }}>
-            {midiDevices ? (midiDevices.inputs.length ? 'IN: '+midiDevices.inputs.join(', ') : 'no inputs') : 'no Web MIDI access'}
-            {midiDevices && midiDevices.outputs.length ? ' · OUT: '+midiDevices.outputs.join(', ') : ''}
-          </div>
-          {midiView === 'map' && (
-            <div>
-              {ACTION_CATALOGUE.map(a => {
-                const bound = getBindings().filter(b => b.actionId === a.id);
-                const isLearning = learning === a.id;
-                return (
-                  <div key={a.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:7, gap:8 }}>
-                    <span style={{ fontSize:10.5, color:'rgba(232,226,214,0.8)' }}>{a.label}</span>
-                    <span style={{ display:'flex', gap:8, alignItems:'center' }}>
-                      {bound.map(b => (
-                        <span key={b.id} onClick={()=>{ removeBinding(b.id); setBindTick(t=>t+1); }} title="click to unbind"
-                          style={{ fontSize:9, color:'#7af5c8', border:'1px solid rgba(122,245,200,0.3)', borderRadius:8, padding:'2px 7px', cursor:'pointer' }}>
-                          {b.source.kind==='cc' ? `CC${(b.source as any).cc}` : b.source.kind==='note' ? `N${(b.source as any).note}` : `KEYS ${(b.source as any).low}-${(b.source as any).high}`}
-                          {typeof b.param==='number' ? ` ·${b.param}` : ''} ×
-                        </span>
-                      ))}
-                      <span onClick={()=>{
-                        if (isLearning) { cancelLearn(); setLearning(null); return; }
-                        // perColumn actions: learn binds the NEXT column index not yet bound
-                        const nextCol = a.perColumn ? bound.length : undefined;
-                        armLearn(a.id as any, a.kind, nextCol, () => { setLearning(null); setBindTick(t=>t+1); });
-                        setLearning(a.id);
-                      }}
-                        style={{ fontSize:9, letterSpacing:'0.12em', cursor:'pointer', borderRadius:8, padding:'2px 8px',
-                          color: isLearning ? '#04050a' : '#ffce8a',
-                          background: isLearning ? '#ffce8a' : 'transparent',
-                          border:'1px solid rgba(255,206,138,0.5)' }}>
-                        {isLearning ? (a.kind==='noterange' ? 'LOW…HIGH' : 'MOVE IT…') : (a.perColumn ? `LEARN ${bound.length}` : 'LEARN')}
-                      </span>
-                    </span>
-                  </div>
+          <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'flex-start', padding:'28px 56px 48px', maxWidth:980, width:'100%', margin:'0 auto', boxSizing:'border-box', overflowY:'auto', minHeight:0 }}>
+            {/* DEVICE HEADLINE */}
+            <div style={{ textAlign:'center', marginBottom:36 }}>
+              <div style={{ fontSize:11, letterSpacing:'0.35em', color:'rgba(232,226,214,0.4)', fontFamily:'"Space Mono", monospace', marginBottom:10 }}>CONTROL</div>
+              <div style={{ fontSize:26, letterSpacing:'0.12em', color:'#E8E2D6', fontWeight:500 }}>
+                {midiDevices && midiDevices.inputs.length ? midiDevices.inputs[0].toUpperCase() : 'NO DEVICE'}
+              </div>
+              <div style={{ fontSize:12, letterSpacing:'0.25em', fontFamily:'"Space Mono", monospace', marginTop:6,
+                color: midiDevices && midiDevices.inputs.length ? '#7af5c8' : 'rgba(232,226,214,0.35)' }}>
+                {midiDevices && midiDevices.inputs.length
+                  ? ('● CONNECTED' + (midiDevices.outputs.length ? ' · IN / OUT' : ' · IN ONLY'))
+                  : '○ CONNECT A CONTROLLER'}
+              </div>
+            </div>
+            {/* shared chip helpers rendered inline */}
+            {(() => {
+              const mono = '"Space Mono", monospace';
+              const chip = (txt:string, color:string, onClick?:()=>void, solid?:boolean) => (
+                <span key={txt+color} onClick={onClick}
+                  style={{ fontFamily:mono, fontSize:11, letterSpacing:'0.06em', cursor:onClick?'pointer':'default',
+                    color: solid ? '#04050a' : color, background: solid ? color : 'transparent',
+                    border:`1px solid ${solid ? color : color.replace(')', ',0.45)').replace('rgb','rgba')}`,
+                    borderRadius:20, padding:'5px 13px', boxShadow: solid ? `0 0 16px 2px ${color}55` : 'none',
+                    animation: solid ? 'haarPulse 1.1s ease-in-out infinite' : 'none' }}>{txt}</span>
+              );
+              const bindingsFor = (aid:string) => getBindings().filter(b => b.actionId === aid);
+              const srcLabel = (b:Binding) => b.source.kind==='cc' ? `CC${(b.source as any).cc}` : b.source.kind==='note' ? `PAD ${(b.source as any).note}` : `KEYS ${(b.source as any).low}–${(b.source as any).high}`;
+              const learnChip = (aid:any, kind:any, perColumn:boolean) => {
+                const bound = bindingsFor(aid);
+                const isL = learning === aid;
+                return chip(
+                  isL ? (kind==='noterange' ? 'LOW … HIGH' : 'MOVE IT…') : (perColumn ? `+ LEARN COL ${bound.length+1}` : bound.length ? 'RELEARN' : '+ LEARN'),
+                  '#ffce8a',
+                  () => {
+                    if (isL) { cancelLearn(); setLearning(null); return; }
+                    armLearn(aid, kind, perColumn ? bound.length : undefined, () => { setLearning(null); setBindTick(t=>t+1); });
+                    setLearning(aid);
+                  },
+                  isL,
                 );
-              })}
-            </div>
-          )}
-          {midiView === 'monitor' && midiLog.length === 0 && <div style={{ color:'rgba(255,255,255,0.3)' }}>press a key / turn a knob…</div>}
-          {midiView === 'monitor' && midiLog.map((m,i)=>(
-            <div key={m.ts+'-'+i} style={{ display:'flex', gap:10, opacity: 1 - i*0.06, marginBottom:3 }}>
-              <span style={{ color: m.type==='noteon' ? '#7af5c8' : m.type==='noteoff' ? '#d46050' : m.type==='cc' ? '#ffce8a' : '#888', width:52 }}>{m.type.toUpperCase()}</span>
-              <span style={{ width:32 }}>ch{m.channel}</span>
-              <span style={{ width:56 }}>d1 {m.data1}</span>
-              <span>d2 {m.data2}</span>
-            </div>
-          ))}
+              };
+              const boundChips = (aid:string, showCol:boolean) => bindingsFor(aid).map(b =>
+                chip(srcLabel(b) + (showCol && typeof b.param==='number' ? ` → COL ${(b.param as number)+1}` : '') + '  ×', '#7af5c8',
+                  () => { removeBinding(b.id); setBindTick(t=>t+1); }));
+              const zone = (label:string, color:string, rows:{name:string; right:React.ReactNode}[]) => (
+                <div style={{ border:`1px solid ${color}38`, borderRadius:14, padding:'20px 26px', marginBottom:18 }}>
+                  <div style={{ fontSize:11, letterSpacing:'0.3em', color:`${color}c8`, fontFamily:mono, marginBottom:16 }}>{label}</div>
+                  {rows.map(r => (
+                    <div key={r.name} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, gap:16, flexWrap:'wrap' }}>
+                      <span style={{ fontSize:15.5, color:'rgba(232,226,214,0.85)' }}>{r.name}</span>
+                      <span style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', justifyContent:'flex-end' }}>{r.right}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+              const liveConsts = constellations.filter(c => c.orbIds.length > 0);
+              return (<>
+                <style>{`@keyframes haarPulse { 0%,100%{opacity:1} 50%{opacity:0.55} }`}</style>
+                {zone('CONDUCTOR', '#d8a6ff', [
+                  { name:'Keys → conductor', right: <>{boundChips('conductor.note', false)}{learnChip('conductor.note','noterange',false)}</> },
+                ])}
+                {zone('CONSTELLATIONS', '#7af5c8', [
+                  { name:'Columns now', right: <span style={{ display:'flex', gap:10 }}>{liveConsts.map((c,i)=>(
+                      <span key={c.id} style={{ fontFamily:mono, fontSize:10.5, color:CONST_TINTS[i % CONST_TINTS.length], letterSpacing:'0.08em' }}>{(i+1)+' · '+c.name.toUpperCase()}</span>))}</span> },
+                  { name:'Mute', right: <>{boundChips('const.mute', true)}{learnChip('const.mute','trigger',true)}</> },
+                  { name:'Level', right: <>{boundChips('const.level', true)}{learnChip('const.level','continuous',true)}</> },
+                ])}
+                {zone('ORB · FOCUSED', '#d46090', [
+                  { name:'Knobs follow the focused orb — map once, works for every orb', right: <span style={{ fontFamily:mono, fontSize:10.5, color:'rgba(232,226,214,0.3)', letterSpacing:'0.1em' }}>NEXT BUILD</span> },
+                ])}
+                {zone('TRANSPORT', '#ffce8a', [
+                  { name:'Engage · release · scale-lock · stop', right: <span style={{ fontFamily:mono, fontSize:10.5, color:'rgba(232,226,214,0.3)', letterSpacing:'0.1em' }}>NEXT BUILD</span> },
+                ])}
+                {/* PROFILE row */}
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', margin:'6px 2px 18px' }}>
+                  <span style={{ fontFamily:mono, fontSize:11, letterSpacing:'0.2em', color:'rgba(232,226,214,0.4)' }}>PROFILE</span>
+                  <span style={{ display:'flex', gap:10 }}>
+                    {chip('EXPORT', '#7af5c8', () => { navigator.clipboard.writeText(JSON.stringify(getBindings(), null, 2)); })}
+                    {chip('RESET', '#d46050', () => { if (confirm('Remove ALL bindings?')) { replaceAll([]); setBindTick(t=>t+1); } })}
+                  </span>
+                </div>
+              </>);
+            })()}
+          </div>
         </div>
       )}
+
+
     </main>
   );
 }

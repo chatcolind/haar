@@ -42,7 +42,7 @@ function wireInputs() {
       if (key === _lastKey) return;
       _lastKey = key;
       const msg = parse(input.name ?? 'unknown', d, e.timeStamp);
-      listeners.forEach(fn => fn(msg));
+      listeners.forEach(fn => { try { fn(msg); } catch (err) { console.error('[midi] listener error:', err); } });
     };
   });
 }
