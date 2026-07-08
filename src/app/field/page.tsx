@@ -346,11 +346,13 @@ export default function FieldPage() {
     for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
   }
   const playAtRef = useRef(playAt); playAtRef.current = playAt;   // live mirror for MIDI closures
-  const transportRef = useRef({ engage: () => {}, release: () => {}, stop: () => {} });
+  const transportRef = useRef({ engage: () => {}, release: () => {}, stop: () => {}, playpause: () => {}, octave: (d:number) => {} });
   transportRef.current = {
     engage: () => { if (prog.length && !progRunning) runProg(); },
     release: () => { if (progRunning) stopProg(); },
     stop: () => doStop(),
+    playpause: () => { if (state === 'playing') doStop(); else doStart(); },
+    octave: (d: number) => setOctave(prev => Math.max(-2, Math.min(2, prev + d))),
   };
   // "the focused orb" for hardware: orb-back open ? that orb : the selected orb
   const orbCtlRef = useRef({ set: (k:string,v:number)=>{}, get: (k:string)=>0, toggleFauve: ()=>{}, cycleFlavour: ()=>{} });
@@ -532,6 +534,9 @@ export default function FieldPage() {
         if (id === 'chords.engage') transportRef.current.engage();
         if (id === 'chords.release') transportRef.current.release();
         if (id === 'master.stop') transportRef.current.stop();
+        if (id === 'transport.playpause') transportRef.current.playpause();
+        if (id === 'conductor.octaveUp') transportRef.current.octave(1);
+        if (id === 'conductor.octaveDown') transportRef.current.octave(-1);
         if (id === 'fauve.toggle') orbCtlRef.current.toggleFauve();
         if (id === 'flavour.cycle') orbCtlRef.current.cycleFlavour();
       },
@@ -2398,6 +2403,8 @@ export default function FieldPage() {
                 <style>{`@keyframes haarPulse { 0%,100%{opacity:1} 50%{opacity:0.55} }`}</style>
                 {zone('CONDUCTOR', '#d8a6ff', [
                   { name:'Keys → conductor', right: <>{boundChips('conductor.note', false)}{learnChip('conductor.note','noterange',false)}</> },
+                  { name:'Octave up', right: <>{boundChips('conductor.octaveUp' as any, false)}{learnChip('conductor.octaveUp' as any,'trigger',false)}</> },
+                  { name:'Octave down', right: <>{boundChips('conductor.octaveDown' as any, false)}{learnChip('conductor.octaveDown' as any,'trigger',false)}</> },
                 ])}
                 {zone('CONSTELLATIONS', '#7af5c8', [
                   { name:'Columns now', right: <span style={{ display:'flex', gap:10 }}>{liveConsts.map((c,i)=>(
@@ -2419,6 +2426,7 @@ export default function FieldPage() {
                   { name:'Fauve · gaps', right: <>{boundChips('fauve.gaps', false)}{learnChip('fauve.gaps','continuous',false)}</> },
                 ])}
                 {zone('TRANSPORT', '#ffce8a', [
+                  { name:'Play / pause', right: <>{boundChips('transport.playpause' as any, false)}{learnChip('transport.playpause' as any,'trigger',false)}</> },
                   { name:'Chords engage', right: <>{boundChips('chords.engage', false)}{learnChip('chords.engage','trigger',false)}</> },
                   { name:'Chords release', right: <>{boundChips('chords.release', false)}{learnChip('chords.release','trigger',false)}</> },
                   { name:'Scale-lock toggle', right: <>{boundChips('scale.toggle', false)}{learnChip('scale.toggle','trigger',false)}</> },

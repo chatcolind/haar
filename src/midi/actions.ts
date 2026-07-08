@@ -13,7 +13,10 @@ export type TriggerActionId =
   | 'const.freeze'        // param: constellation column index
   | 'layer.toggle'        // hardware layer key: base <-> orb (handled inside the binding engine)
   | 'fauve.toggle'        // focused orb: Fauve on/off (WAV-sample orbs only, same guard as the screen button)
-  | 'flavour.cycle';      // focused orb: step to the next flavour palette (wraps)
+  | 'flavour.cycle'       // focused orb: step to the next flavour palette (wraps)
+  | 'transport.playpause' // toggle play/stop
+  | 'conductor.octaveUp'
+  | 'conductor.octaveDown';
 
 export type ContinuousActionId =
   | 'const.level'         // param: constellation column index 0-7, value 0..1
@@ -54,6 +57,9 @@ export const ACTION_CATALOGUE: { id: TriggerActionId | ContinuousActionId; kind:
   { id: 'const.mute',     kind: 'trigger',    label: 'Constellation mute', perColumn: true },
   { id: 'const.level',    kind: 'continuous', label: 'Constellation level', perColumn: true },
   { id: 'master.level',   kind: 'continuous', label: 'Master level' },
+  { id: 'transport.playpause', kind: 'trigger', label: 'Play / pause' },
+  { id: 'conductor.octaveUp',  kind: 'trigger', label: 'Octave up' },
+  { id: 'conductor.octaveDown', kind: 'trigger', label: 'Octave down' },
   { id: 'chords.engage',  kind: 'trigger',    label: 'Chords ENGAGE' },
   { id: 'chords.release', kind: 'trigger',    label: 'Chords RELEASE' },
   { id: 'master.stop',    kind: 'trigger',    label: 'Master stop' },
