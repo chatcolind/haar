@@ -535,6 +535,21 @@ export default function FieldPage() {
           const c = liveConsts()[param]; if (c) toggleConstMuteRef.current(c.id);
         }
         if (id === 'scale.toggle') setScaleLock(v => !v);
+        if (id === 'orb.select' && param && typeof param === 'object') {
+          const c = constRef.current.filter(x => x.orbIds.length > 0)[param.col];
+          const oid = c?.orbIds[param.row];
+          if (oid) { setSelected(oid); setFocused(oid); }   // comes to the front: orb-back opens
+        }
+        if (id === ('orb.muteToggle' as any) && param && typeof param === 'object') {
+          const c = constRef.current.filter(x => x.orbIds.length > 0)[(param as any).col];
+          const oid = c?.orbIds[(param as any).row];
+          if (oid) { muteRef.current[oid] = !muteRef.current[oid]; reapplyLevelsRef.current(); }
+        }
+        if (id === ('const.select' as any) && typeof param === 'number') {
+          const c = constRef.current.filter(x => x.orbIds.length > 0)[param];
+          const oid = c?.orbIds[0];
+          if (oid) { setSelected(oid); setFocused(oid); }   // minimal true thing until State-B exists
+        }
         if (id === 'chords.engage') transportRef.current.engage();
         if (id === 'chords.release') transportRef.current.release();
         if (id === 'master.stop') transportRef.current.stop();
@@ -1010,6 +1025,7 @@ export default function FieldPage() {
     constLevelRef.current[constId] = Math.max(0, Math.min(1, v));
     reapplyLevels();
   }
+  const reapplyLevelsRef = useRef(reapplyLevels); reapplyLevelsRef.current = reapplyLevels;
   const toggleConstMuteRef = useRef(toggleConstMute); toggleConstMuteRef.current = toggleConstMute;
   const setConstLevelRef = useRef(setConstLevel); setConstLevelRef.current = setConstLevel;
   function activateRack() {
@@ -2376,12 +2392,12 @@ export default function FieldPage() {
                     animation: solid ? 'haarPulse 1.1s ease-in-out infinite' : 'none' }}>{txt}</span>
               );
               const bindingsFor = (aid:string) => getBindings().filter(b => b.actionId === aid);
-              const srcLabel = (b:Binding) => b.source.kind==='cc' ? `CC${(b.source as any).cc}` : b.source.kind==='note' ? `PAD ${(b.source as any).note}` : `KEYS ${(b.source as any).low}–${(b.source as any).high}`;
+              const srcLabel = (b:Binding) => b.source.kind==='cc' ? `CC${(b.source as any).cc}` : b.source.kind==='note' ? `PAD ${(b.source as any).note}` : b.source.kind===('gridmatrix' as any) ? `GRID ${(b.source as any).cols}×${(b.source as any).rows}` : `KEYS ${(b.source as any).low}–${(b.source as any).high}`;
               const learnChip = (aid:any, kind:any, perColumn:boolean) => {
                 const bound = bindingsFor(aid);
                 const isL = learning === aid;
                 return chip(
-                  isL ? (kind==='noterange' ? 'LOW … HIGH' : 'MOVE IT…') : (perColumn ? `+ LEARN COL ${bound.length+1}` : bound.length ? 'RELEARN' : '+ LEARN'),
+                  isL ? (kind==='noterange' ? 'LOW … HIGH' : kind===('gridmatrix' as any) ? 'TOP-LEFT … BOTTOM-RIGHT' : 'MOVE IT…') : (perColumn ? `+ LEARN COL ${bound.length+1}` : bound.length ? 'RELEARN' : '+ LEARN'),
                   '#ffce8a',
                   () => {
                     if (isL) { cancelLearn(); setLearning(null); return; }
@@ -2417,6 +2433,7 @@ export default function FieldPage() {
                 {zone('CONSTELLATIONS', '#7af5c8', [
                   { name:'Columns now', right: <span style={{ display:'flex', gap:10 }}>{liveConsts.map((c,i)=>(
                       <span key={c.id} style={{ fontFamily:mono, fontSize:10.5, color:CONST_TINTS[i % CONST_TINTS.length], letterSpacing:'0.08em' }}>{(i+1)+' · '+c.name.toUpperCase()}</span>))}</span> },
+                  { name:'Pad matrix', right: <>{boundChips('grid.matrix' as any, false)}{learnChip('grid.matrix' as any,'gridmatrix' as any,false)}</> },
                   { name:'Mute', right: <>{boundChips('const.mute', true)}{learnChip('const.mute','trigger',true)}</> },
                   { name:'Level', right: <>{boundChips('const.level', true)}{learnChip('const.level','continuous',true)}</> },
                   { name:'Master level', right: <>{boundChips('master.level', false)}{learnChip('master.level','continuous',false)}</> },

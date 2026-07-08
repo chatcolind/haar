@@ -5,7 +5,9 @@
 export type TriggerActionId =
   | 'conductor.note'      // param: semis offset within the bound range (special: fed by noterange bindings)
   | 'const.mute'          // param: constellation column index 0-7
-  | 'orb.select'          // param: { col, row } orb matrix position
+  | 'orb.select'          // param: { col, row } orb matrix position — TAP on grid rows 1-4: orb comes to the front
+  | 'orb.muteToggle'      // param: { col, row } — HOLD on grid rows 1-4: mute exactly that orb
+  | 'const.select'        // param: col — TAP on grid row 0: select the constellation (first orb until State-B exists)
   | 'chords.engage'
   | 'chords.release'
   | 'master.stop'
@@ -66,7 +68,7 @@ export const ACTION_CATALOGUE: { id: TriggerActionId | ContinuousActionId; kind:
   { id: 'master.stop',    kind: 'trigger',    label: 'Master stop' },
   { id: 'scale.toggle',   kind: 'trigger',    label: 'Scale-lock toggle' },
   { id: 'const.freeze',   kind: 'trigger',    label: 'Freeze constellation', perColumn: true },
-  { id: 'orb.select',     kind: 'trigger',    label: 'Select orb (grid)', perColumn: true },
+  { id: 'grid.matrix' as any, kind: 'gridmatrix' as any, label: 'Pad matrix (constellations × orbs)' },
   { id: 'orb.x',          kind: 'continuous', label: 'Orb: spread X' },
   { id: 'orb.y',          kind: 'continuous', label: 'Orb: pitch spread Y' },
   { id: 'orb.density',    kind: 'continuous', label: 'Orb: density' },

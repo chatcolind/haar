@@ -11,7 +11,8 @@ import {
 export type BindingSource =
   | { kind: 'note'; channel: number; note: number }                        // one pad/button
   | { kind: 'cc'; channel: number; cc: number }                            // one knob/fader
-  | { kind: 'noterange'; channel: number; low: number; high: number; rootMidi: number }; // key zone
+  | { kind: 'noterange'; channel: number; low: number; high: number; rootMidi: number }  // key zone
+  | { kind: 'gridmatrix'; channel: number; origin: number; cols: number; rows: number }; // pad rectangle: note = origin + row*cols + col (row 0 = TOP)
 
 export type Binding = {
   id: string;                       // unique
@@ -20,7 +21,16 @@ export type Binding = {
   param?: ActionParam;              // e.g. constellation column
   pickup?: boolean;                 // continuous only; default true
   layer?: string;                   // 'base' (default) | 'orb' | future layers; untagged fires on all layers? No — see matchesLayer
+  holdActionId?: TriggerActionId;   // optional: long-press (>=500ms) fires THIS instead of actionId (tap)
+  holdParam?: ActionParam;
 };
+
+// ---- TAP vs HOLD ----
+// For bindings with holdActionId: note-on arms a timer; note-off <500ms = TAP (actionId);
+// timer firing first = HOLD (holdActionId) and the eventual note-off is swallowed.
+const HOLD_MS = 500;
+const holdTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+const holdFired: Record<string, boolean> = {};
 
 // ---- LAYERS ----
 // One control can mean different things per layer. The layer key itself is a
@@ -91,6 +101,8 @@ export function armLearn(
 ) {
   learn = kind === 'noterange'
     ? { actionId: 'conductor.note', kind: 'noterange' }
+    : kind === ('gridmatrix' as any)
+    ? ({ actionId, kind: 'gridmatrix' } as any)
     : { actionId, kind, param } as LearnState;
   onLearnComplete = done;
 }
@@ -101,6 +113,24 @@ export function learnArmed(): boolean { return learn !== null; }
 function handle(m: MidiMessage) {
   // Learn intercepts everything first
   if (learn) {
+    if ((learn as any).kind === 'gridmatrix') {
+      if (m.type !== 'noteon') return;
+      const L: any = learn;
+      if (!L.first) { L.first = { channel: m.channel, note: m.data1 }; return; }   // TOP-LEFT pad
+      if (m.channel !== L.first.channel) return;
+      // APC grid: note 0 bottom-left, row*8+col upward. TOP-LEFT press has the HIGHER note.
+      const tl = L.first.note, br = m.data1;
+      const cols = (br % 8) - (tl % 8) + 1;
+      const rows = Math.floor(tl / 8) - Math.floor(br / 8) + 1;
+      if (cols < 1 || rows < 1) return;   // presses out of order/shape — ignore, keep waiting
+      const b: Binding = {
+        id: 'b' + Date.now(),
+        source: { kind: 'gridmatrix', channel: L.first.channel, origin: tl, cols, rows },
+        actionId: 'grid.matrix' as any,
+      };
+      addBinding(b); onLearnComplete?.(b); learn = null; onLearnComplete = null;
+      return;
+    }
     if (learn.kind === 'noterange') {
       if (m.type !== 'noteon') return;
       if (!('low' in learn) || !learn.low) {
@@ -132,7 +162,21 @@ function handle(m: MidiMessage) {
   for (const b of bindings) {
     const s = b.source;
     if (!matchesLayer(b) && (b.actionId as string) !== 'layer.toggle') continue;
-    if (s.kind === 'note' && m.type === 'noteon' && m.channel === s.channel && m.data1 === s.note) {
+    if (s.kind === 'note' && (m.type === 'noteon' || m.type === 'noteoff') && m.channel === s.channel && m.data1 === s.note) {
+      if (b.holdActionId) {
+        if (m.type === 'noteon') {
+          holdFired[b.id] = false;
+          holdTimers[b.id] = setTimeout(() => {
+            holdFired[b.id] = true;
+            dispatchTrigger(b.holdActionId as TriggerActionId, b.holdParam ?? b.param);
+          }, HOLD_MS);
+        } else {
+          clearTimeout(holdTimers[b.id]);
+          if (!holdFired[b.id]) dispatchTrigger(b.actionId as TriggerActionId, b.param);  // quick release = TAP
+        }
+        continue;
+      }
+      if (m.type !== 'noteon') continue;   // plain bindings: noteon only, as before
       if ((b.actionId as string) === 'layer.toggle') { setActiveLayer(activeLayer === 'base' ? 'orb' : 'base'); continue; }
       dispatchTrigger(b.actionId as TriggerActionId, b.param);
     } else if (s.kind === 'cc' && m.type === 'cc' && m.channel === s.channel && m.data1 === s.cc) {
@@ -145,6 +189,28 @@ function handle(m: MidiMessage) {
         }
       }
       dispatchContinuous(b.actionId as ContinuousActionId, v, b.param);
+    } else if (s.kind === 'gridmatrix' && (m.type === 'noteon' || m.type === 'noteoff') && m.channel === s.channel) {
+      // origin = TOP-LEFT note. APC notes grow upward, so visual row r (0=top) sits at note origin - r*8.
+      const col = (m.data1 % 8) - (s.origin % 8);
+      const vrow = Math.floor(s.origin / 8) - Math.floor(m.data1 / 8);
+      if (col < 0 || col >= s.cols || vrow < 0 || vrow >= s.rows) continue;   // outside the rectangle
+      const key = b.id + ':' + m.data1;
+      if (m.type === 'noteon') {
+        holdFired[key] = false;
+        holdTimers[key] = setTimeout(() => {
+          holdFired[key] = true;
+          // HOLD: row 0 = mute whole constellation, rows 1+ = mute that orb
+          if (vrow === 0) dispatchTrigger('const.mute', col);
+          else dispatchTrigger('orb.muteToggle' as TriggerActionId, { col, row: vrow - 1 });
+        }, HOLD_MS);
+      } else {
+        clearTimeout(holdTimers[key]);
+        if (!holdFired[key]) {
+          // TAP: row 0 = select constellation, rows 1+ = select that orb (comes to the front)
+          if (vrow === 0) dispatchTrigger('const.select' as TriggerActionId, col);
+          else dispatchTrigger('orb.select', { col, row: vrow - 1 });
+        }
+      }
     } else if (s.kind === 'noterange' && m.type === 'noteon' && m.channel === s.channel
                && m.data1 >= s.low && m.data1 <= s.high) {
       dispatchTrigger('conductor.note', m.data1 - s.rootMidi);  // semis from zone root; absolute-key handling stays in the handler
