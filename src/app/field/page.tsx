@@ -11,7 +11,7 @@ import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
-  microcosmGrainSpread, microcosmPitchSpread, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
+  microcosmGrainSpread, microcosmPitchSpread, microcosmOrbXY, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
   microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmOrbAbsence, microcosmOrbChaos, microcosmFreezeSource, microcosmFauveOn, microcosmFauveOff, microcosmFauveOffAll, microcosmFauveParam, microcosmFauveUpdatePitch, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
@@ -362,9 +362,10 @@ export default function FieldPage() {
       const id = focused ?? selected; if (!id) return;
       if (k === 'x' || k === 'y') {
         const cur = xyRef.current[id] ?? { x:0.5, y:0.5 };
-        const next = { ...xyRef.current, [id]: { x: k==='x'?v:cur.x, y: k==='y'?v:cur.y } };
+        const nx = k==='x'?v:cur.x, ny = k==='y'?v:cur.y;
+        const next = { ...xyRef.current, [id]: { x: nx, y: ny } };
         xyRef.current = next; setXyMap(next);
-        microcosmGrainSpread(k==='x'?v:cur.x); microcosmPitchSpread(k==='y'?v:cur.y);
+        microcosmOrbXY(id, nx, ny);   // PER-ORB
       }
       if (k === 'density') { densRef.current[id] = v; microcosmGrainDensity(id, v); forceOrb(x=>x+1); }
       if (k === 'flavour.amount') { amountRef.current[id] = v; microcosmEngineAmount(id, v); forceOrb(x=>x+1); }
@@ -1019,8 +1020,8 @@ export default function FieldPage() {
       microcosmEngineActive(o.id, on);
       if (on) microcosmEngineLevel(o.id, orbLevel(o.id));
     });
-    const v = xyRef.current[selected] ?? { x:0.5, y:0.5 };
-    microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
+    // PER-ORB XY restore: every orb gets its own stored shaping (no global wipe)
+    fieldOrbs.forEach(o => { const v = xyRef.current[o.id] ?? { x:0.5, y:0.5 }; microcosmOrbXY(o.id, v.x, v.y); });
     // FAUVE: re-activate for orbs whose setting is on (stop silenced them but kept the ref)
     for (const oid in fauveRef.current) {
       if (!fauveRef.current[oid]) continue;
@@ -1144,7 +1145,7 @@ export default function FieldPage() {
       if (orbs.some(v => v.id === o.id)) microcosmEngineLevel(o.id, orbLevel(o.id));
     });
     const v = xyRef.current[id] ?? { x:0.5, y:0.5 };
-    microcosmGrainSpread(v.x); microcosmPitchSpread(v.y);
+    microcosmOrbXY(id, v.x, v.y);   // PER-ORB: selection no longer wipes other orbs' shaping
   }
   const [swelling, setSwelling] = useState(false);
   const swellRAF = useRef<number>(0);
@@ -1198,7 +1199,7 @@ export default function FieldPage() {
     const id = selected;
     const next = { ...xyRef.current, [id]: { x:nx, y:ny } };
     xyRef.current = next; setXyMap(next);
-    microcosmGrainSpread(nx); microcosmPitchSpread(ny);
+    microcosmOrbXY(id, nx, ny);   // PER-ORB: only this orb's grains change; others keep their shaping
   }
   async function doStart() {
     if (!started.current) { await ensureStarted(); return; }

@@ -28,8 +28,13 @@ export class Microcosm {
   // Mosaic engine driver
   private mosaicTimer: number | null = null;
   private activity = 0.5;     // 0..1 density
-  private grainSpread = 0.5;  // X: 0 = small/tight, 1 = large/diffuse
-  private pitchSpread = 0.5;  // Y: 0 = unison, 1 = full octave-stack
+  private _globalX = 0.5;  // X fallback: 0 = small/tight, 1 = large/diffuse
+  private _globalY = 0.5;  // Y fallback: 0 = unison, 1 = full octave-stack
+  private engineXY: Record<string, { x: number; y: number }> = {};  // PER-ORB XY spread (like engineDensity)
+  // Per-orb resolution at grain-spawn: _currentEngine IS the orb id when schedulers read these,
+  // so every existing read site becomes per-orb through these getters. Global = fallback (preview/default).
+  private get grainSpread(): number { return this.engineXY[this._currentEngine]?.x ?? this._globalX; }
+  private get pitchSpread(): number { return this.engineXY[this._currentEngine]?.y ?? this._globalY; }
   private density = 0.5;      // TEST: 0 = sparse single notes, 1 = dense cluster
   // Engine rack — each independently on/off with its own fader level
   // rack now keyed by ORB ID (still =engine-type for the 12 defaults until page.tsx mints ids).
@@ -470,6 +475,7 @@ export class Microcosm {
     };
     if (this.engineTickAccum[orbId] === undefined) this.engineTickAccum[orbId] = 0;
     if (this.engineDensity[orbId] === undefined) this.engineDensity[orbId] = 0.5;  // seed per-orb density
+    if (this.engineXY[orbId] === undefined) this.engineXY[orbId] = { x: 0.5, y: 0.5 };  // seed per-orb XY
     if (this.enginePalette[orbId] === undefined) this.enginePalette[orbId] = 'open';  // seed per-orb palette
     if (this.engineHome[orbId] === undefined) this.engineHome[orbId] = 0;  // seed per-orb home pitch (0 = no transpose)
     if (this.engineLocked[orbId] === undefined) this.engineLocked[orbId] = false;  // born FREE
@@ -763,8 +769,11 @@ export class Microcosm {
   setActivity(a: number): void { this.activity = Math.max(0, Math.min(1, a)); }
   // per-orb density for the engine currently ticking (rack-by-orb-id)
   private get curDensity(): number { return this.engineDensity[this._currentEngine] ?? 0.5; }
-  setGrainSpread(x: number): void { this.grainSpread = Math.max(0, Math.min(1, x)); }
-  setPitchSpread(y: number): void { this.pitchSpread = Math.max(0, Math.min(1, y)); }
+  setGrainSpread(x: number): void { this._globalX = Math.max(0, Math.min(1, x)); }
+  setPitchSpread(y: number): void { this._globalY = Math.max(0, Math.min(1, y)); }
+  setOrbXY(id: string, x: number, y: number): void {
+    this.engineXY[id] = { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
+  }
   setDensity(id: string, d: number): void { this.engineDensity[id] = Math.max(0, Math.min(1, d)); }
 
   dispose(): void {
