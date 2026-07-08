@@ -418,7 +418,8 @@ export default function FieldPage() {
   const [midiDevices, setMidiDevices] = useState<{inputs:string[];outputs:string[]}|null>(null);
   const [midiLog, setMidiLog] = useState<MidiMessage[]>([]);
   const [constMuteTick, setConstMuteTick] = useState(0);
-  const lockKeyRefM = useRef(lockKey); useEffect(() => { lockKeyRefM.current = lockKey; }, [lockKey]); // bumps when constellation mute changes (grid repaint)
+  const lockKeyRefM = useRef(lockKey); useEffect(() => { lockKeyRefM.current = lockKey; }, [lockKey]);
+  const heldKeysRef = useRef<number[]>([]);   // MIDI note stack: last-note priority with fallback (SH-101 style) // bumps when constellation mute changes (grid repaint)
   useEffect(() => {
     let alive = true;
     let un: (()=>void)|null = null;
@@ -446,11 +447,12 @@ export default function FieldPage() {
       // the physical key plays its true pitch; root sits on its real key (Bb minor -> the Bb key).
       // rootMidi = the locked root's pitch class in the octave nearest MIDI 60.
       if (m.type === 'noteon' && m.channel === 1) {
-        const rootPc = NOTES.indexOf(lockKeyRefM.current);        // 0-11 pitch class of the root
-        let rootMidi = 60 + rootPc;                               // root in the middle octave
-        if (rootMidi > 66) rootMidi -= 12;                        // keep root within a tritone of 60
-        const semis = m.data1 - rootMidi;                         // distance from the TRUE root key
-        const noteName = NOTES[((m.data1 % 12) + 12) % 12];       // the key's real note name
+        // Drone conductor: note-on moves the pitch, note-off ignored (the field sustains).
+        const rootPc = NOTES.indexOf(lockKeyRefM.current);
+        let rootMidi = 60 + rootPc;
+        if (rootMidi > 66) rootMidi -= 12;
+        const semis = m.data1 - rootMidi;
+        const noteName = NOTES[((m.data1 % 12) + 12) % 12];
         playAtRef.current(noteName, semis);
         return;
       }
@@ -720,6 +722,12 @@ export default function FieldPage() {
       if (typeof data.key.scaleLock === 'boolean') setScaleLock(data.key.scaleLock);
       if (data.key.scaleMode) setScaleMode(data.key.scaleMode);
       if (typeof data.key.octave === 'number') setOctave(data.key.octave);
+      // TUNE THE ENGINE to the restored key now — state alone doesn't move the source,
+      // so without this a loaded song hums at the previous/default pitch (C) until a key press.
+      const _rootHz = NOTE_BASE[data.key.lockKey ?? 'C'] ?? 261.63;
+      const _oct = typeof data.key.octave === 'number' ? data.key.octave : 0;
+      microcosmSourceFreq(_rootHz * Math.pow(2, _oct));
+      setPlaySemi(0);
     }
     // restore tape settings (master, four ingredients, mute) and apply to the engine
     if (data.tape) {
