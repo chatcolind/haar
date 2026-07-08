@@ -346,6 +346,12 @@ export default function FieldPage() {
     for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
   }
   const playAtRef = useRef(playAt); playAtRef.current = playAt;   // live mirror for MIDI closures
+  const transportRef = useRef({ engage: () => {}, release: () => {}, stop: () => {} });
+  transportRef.current = {
+    engage: () => { if (prog.length && !progRunning) runProg(); },
+    release: () => { if (progRunning) stopProg(); },
+    stop: () => doStop(),
+  };
 
   // ── SINGLE PITCH SOURCE OF TRUTH ─────────────────────────────────────────
   // resolveCurrentPitch returns the CURRENT live musical context for a constellation: the moving
@@ -463,6 +469,9 @@ export default function FieldPage() {
           const c = liveConsts()[param]; if (c) toggleConstMuteRef.current(c.id);
         }
         if (id === 'scale.toggle') setScaleLock(v => !v);
+        if (id === 'chords.engage') transportRef.current.engage();
+        if (id === 'chords.release') transportRef.current.release();
+        if (id === 'master.stop') transportRef.current.stop();
       },
       continuous: (id, value, param) => {
         if (id === 'const.level' && typeof param === 'number') {
@@ -2321,7 +2330,10 @@ export default function FieldPage() {
                   { name:'Knobs follow the focused orb — map once, works for every orb', right: <span style={{ fontFamily:mono, fontSize:10.5, color:'rgba(232,226,214,0.3)', letterSpacing:'0.1em' }}>NEXT BUILD</span> },
                 ])}
                 {zone('TRANSPORT', '#ffce8a', [
-                  { name:'Engage · release · scale-lock · stop', right: <span style={{ fontFamily:mono, fontSize:10.5, color:'rgba(232,226,214,0.3)', letterSpacing:'0.1em' }}>NEXT BUILD</span> },
+                  { name:'Chords engage', right: <>{boundChips('chords.engage', false)}{learnChip('chords.engage','trigger',false)}</> },
+                  { name:'Chords release', right: <>{boundChips('chords.release', false)}{learnChip('chords.release','trigger',false)}</> },
+                  { name:'Scale-lock toggle', right: <>{boundChips('scale.toggle', false)}{learnChip('scale.toggle','trigger',false)}</> },
+                  { name:'Master stop', right: <>{boundChips('master.stop', false)}{learnChip('master.stop','trigger',false)}</> },
                 ])}
                 {/* PROFILE row */}
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', margin:'6px 2px 18px' }}>
