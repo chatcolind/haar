@@ -512,6 +512,7 @@ export default function FieldPage() {
     midiInit().then(d => {
       if (!alive) return;               // effect already cleaned up — don't subscribe
       setMidiDevices(d);
+      midiGridClear();                  // start from a dark grid — no stale LEDs from previous sessions
       un = midiSubscribe(m => setMidiLog(prev => [m, ...prev].slice(0, 12)));
     });
     return () => { alive = false; if (un) un(); };
