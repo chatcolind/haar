@@ -60,12 +60,74 @@ const defaultXY = (): Record<string, XY> =>
 
 // Seeded-random scatter with VARIED sizes + collision rejection.
 // Organic look, but guaranteed no overlap (uses visible-glow radii).
-function satelliteSlots(count: number, W: number, H: number, centreSize: number) {
+// ── MUSIC OF THE SPHERES (Slice 6) ────────────────────────────────────────────
+// Each constellation = an orbital SYSTEM: a faint source star at centre, orbs on
+// elliptical orbits around it. Systems laid out left→right in GRID COLUMN ORDER
+// (the field mirrors the Akai). Deterministic per orb: stable ellipse + phase.
+type OrbitSpec = {
+  orbId: string; constId: string; tint: string; sysIdx: number;
+  cx: number; cy: number;          // system centre (the source star)
+  rx: number; ry: number;          // ellipse radii
+  tilt: number;                    // ellipse rotation (radians)
+  phase0: number;                  // starting angle
+  periodBars: number;              // 4 / 8 / 16 — one revolution per N bars
+  size: number;                    // orb visual size
+};
+function orbitalField(
+  consts: { id: string; orbIds: string[] }[],
+  tints: string[],
+  W: number, H: number,
+): { systems: { constId: string; tint: string; cx: number; cy: number; label: number }[]; orbits: OrbitSpec[] } {
+  const live = consts.filter(c => c.orbIds.length > 0);
+  const n = live.length;
+  const systems: { constId: string; tint: string; cx: number; cy: number; label: number }[] = [];
+  const orbits: OrbitSpec[] = [];
+  if (n === 0) return { systems, orbits };
+  // System centres: spread across the field, gentle vertical stagger so it reads celestial not gridded
+  // Each system's footprint = its outermost ring; size rings so every system FITS
+  // its share of the width with a margin, and keep centres clear of the edges.
+  const maxOrbs = Math.max(...live.map(c => c.orbIds.length));
+  const slotW = W / n;                                     // each system's horizontal territory
+  const outerMax = slotW * 0.33;                           // outermost ring well inside the territory — neighbouring systems keep clear space
+  const GOLDEN = 2.399963;                                 // golden angle: system-mates spread apart, never bunch
+  live.forEach((c, si) => {
+    const cx = slotW * si + slotW * 0.5;
+    const cy = H * (0.46 + 0.10 * Math.sin(si * 2.1));     // gentler stagger
+    const tint = tints[si % tints.length];
+    systems.push({ constId: c.id, tint, cx, cy, label: si + 1 });
+    const m = c.orbIds.length;
+    c.orbIds.forEach((oid, oi) => {
+      let seed = 7; for (let k = 0; k < oid.length; k++) seed = (seed * 31 + oid.charCodeAt(k)) & 0x7fffffff;
+      const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+      // rings spaced evenly from ~45% to 100% of the system's allowed radius
+      const t = m === 1 ? 1 : oi / (m - 1);
+      const rx = outerMax * (0.45 + 0.55 * t) * (0.96 + rnd() * 0.08);
+      const ry = rx * (0.22 + rnd() * 0.08);               // FLAT — strong perspective, reads as orbits
+      const tilt = (rnd() - 0.5) * 0.32;
+      const phase0 = oi * GOLDEN + rnd() * 0.4;            // golden-angle spread: no bunching
+      const periods = [4, 8, 8, 16, 16];
+      const periodBars = periods[Math.min(oi, periods.length - 1)];
+      const size = Math.min(84, slotW * 0.16) - oi * 4;
+      orbits.push({ orbId: oid, constId: c.id, tint, sysIdx: si, cx, cy, rx, ry, tilt, phase0, periodBars, size });
+    });
+  });
+  return { systems, orbits };
+}
+/** Position on the ellipse at musical time t (bars elapsed). */
+function orbitPos(o: OrbitSpec, bars: number): { x: number; y: number; z: number } {
+  const a = o.phase0 + (bars / o.periodBars) * Math.PI * 2;
+  const ex = Math.cos(a) * o.rx, ey = Math.sin(a) * o.ry;
+  const x = o.cx + ex * Math.cos(o.tilt) - ey * Math.sin(o.tilt);
+  const y = o.cy + ex * Math.sin(o.tilt) + ey * Math.cos(o.tilt);
+  return { x, y, z: Math.sin(a) };   // z: -1 = far side (behind the star), +1 = near side
+}
+
+function satelliteSlots(count: number, W: number, H: number, centreSize: number, salt: number = 0) {
   const n = count - 1;
   if (n <= 0) return [];
 
   // deterministic PRNG so positions are stable per count (no jitter each render)
-  let seed = 1000 + n * 97;
+  let seed = 1000 + n * 97 + salt * 7919;   // salt: different constellations get different scatters
   const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
 
   const cx = W * 0.5, cy = H * 0.5;
@@ -246,6 +308,7 @@ export default function FieldPage() {
     return (NOTES.indexOf(st.note) - NOTES.indexOf(lockKey)) + (st.oct - (octave + 4)) * 12;
   }
   const [bpm, setBpm] = useState(92);   // master tempo — reference frame for progression clock + locked orbs
+  const bpmRef = useRef(92); useEffect(() => { bpmRef.current = bpm; }, [bpm]);
   const barAnchorRef = useRef(0);   // performance.now() timestamp of a known bar boundary (free-running clock)
   const barAudioAnchorRef = useRef(0);   // audio-clock time of the same bar boundary (for sample-accurate metro sync)
   const freezeArmRef = useRef<any>(null);   // pending quantized-freeze timer
@@ -483,6 +546,30 @@ export default function FieldPage() {
   const [midiDevices, setMidiDevices] = useState<{inputs:string[];outputs:string[]}|null>(null);
   const [midiLog, setMidiLog] = useState<MidiMessage[]>([]);
   const [constMuteTick, setConstMuteTick] = useState(0);
+  const [hoverConst, setHoverConst] = useState<string|null>(null); // cosmos: system under the pointer
+  const [forwardConst, setForwardConst] = useState<string|null>(null); // constellation brought forward (interior view = the pre-Spheres field)
+  const fieldClickConst = (e: React.MouseEvent) => {
+    if (!cosmosActive) return;                         // cosmos taps only exist in the cosmos
+    if ((e.target as HTMLElement).closest('[data-orb]')) return;  // orb clicks keep their own meaning
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    if (py > fh) return;                               // below the field (keyboard/panels)
+    for (const sys of fieldRef2.current.systems) {
+      const d = Math.hypot(px - sys.cx, py - sys.cy);
+      if (d < dim.w / Math.max(fieldRef2.current.systems.length, 1) * 0.45) { setForwardConst(sys.constId); return; }
+    }
+  };
+  const fieldHover = (e: React.PointerEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    let best: string|null = null, bestD = Infinity;
+    for (const sys of fieldRef2.current.systems) {
+      const d = Math.hypot(px - sys.cx, py - sys.cy);
+      if (d < bestD) { bestD = d; best = sys.constId; }
+    }
+    const territory = dim.w / Math.max(fieldRef2.current.systems.length, 1) * 0.45;
+    setHoverConst(bestD < territory ? best : null);
+  };
   const [midiView, setMidiView] = useState<'monitor'|'map'>('monitor');
   const [controlOpen, setControlOpen] = useState(false); // full-screen CONTROL (MIDI mapping) page
   const [learning, setLearning] = useState<string|null>(null);   // catalogue row id currently armed
@@ -679,7 +766,7 @@ export default function FieldPage() {
     stopPreview();
     setCreateConstName('');
     setPendingWav(null);
-    setCreateOpen(false);   // auto-exit to field after adding
+    setCreateOpen(false); setForwardConst(null); setFocused(null);   // auto-exit to field after adding
   }
   // exit the creation screen without adding — reset all pending selections cleanly
   function cancelCreate() {
@@ -690,7 +777,7 @@ export default function FieldPage() {
     setPendingWav(null);
     setCreateConstTarget('__new__');
     setCreateSrc('synth');
-    setCreateOpen(false);
+    setCreateOpen(false); setForwardConst(null); setFocused(null);
   }
   // FREEZE a synth constellation: snapshot the live ring into a static source, convert the
   // constellation to it, re-route its orbs. It then behaves exactly like a WAV constellation
@@ -1237,18 +1324,121 @@ export default function FieldPage() {
   const mixerH = dim.h * MIXER_H;          // mixer territory height
   const bottomBarH = dim.h * 0.30;         // the keyboard/field/system bar height (field state)
   // ──────────────────────────────────────────────────────────────
-  const sats = satelliteSlots(count, dim.w, fh, CENTRE.size);
-  const others = orbs.filter(o => o.id !== selected);
+  // SPHERES layout: systems + orbits replace the scatter. Static (bars=0) in A1; A2 animates.
+  const liveConstCount = constellations.filter(c => c.orbIds.length > 0).length;
+  const cosmosActive = liveConstCount >= 2 && !forwardConst;   // cosmos ONLY with 2+ constellations; one constellation = the original field
+  const field = cosmosActive ? orbitalField(constellations, CONST_TINTS, dim.w, fh) : { systems: [], orbits: [] };
+  // A2: ORBIT DRIVER — one rAF loop moves positioning wrappers imperatively (React stays out of the 60fps path).
+  const orbWrapRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const fieldWrapRefs = useRef<Record<string, HTMLDivElement | null>>({}); // interior/single-field orbs: idle drift + centre breath
+  const fieldRef2 = useRef(field); fieldRef2.current = field;
+  const selectedRef2 = useRef(selected); selectedRef2.current = selected;
+  useEffect(() => {
+    let raf = 0;
+    const barSec = () => (60 / (bpmRef.current || 92)) * 4;   // 4/4 bar length in seconds
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const bars = (now - t0) / 1000 / barSec();
+      for (const o of fieldRef2.current.orbits) {
+        const el = orbWrapRefs.current[o.orbId];
+        if (!el) continue;
+        // (no selection exemption: in the cosmos every orb orbits)
+        const p = orbitPos(o, bars);
+        el.style.transformOrigin = `${o.cx}px ${o.cy}px`;      // scale pivots on the ORB, not the screen corner
+        const near = (p.z + 1) / 2;                            // 0 far .. 1 near
+        const scale = 0.78 + near * 0.34;                      // far shrinks, near grows
+        el.style.transform = `translate(${(p.x - o.cx).toFixed(1)}px, ${(p.y - o.cy).toFixed(1)}px) scale(${scale.toFixed(3)})`;
+        el.style.opacity = (0.55 + near * 0.45).toFixed(3);    // far dims
+        el.style.zIndex = p.z < 0 ? '4' : '12';                // far side passes BEHIND the source star (star svg z=1? star sits behind; use orb layering)
+      }
+      // FIELD MODE idle drift: micro-orbits around each slot (a few px, tempo-locked) + centre orb breath
+      if (Math.floor(now / 5000) !== (window as any).__driftTick) {
+        (window as any).__driftTick = Math.floor(now / 5000);
+        const conn = Object.values(fieldWrapRefs.current).filter(e => e && e.isConnected);
+        console.log('[drift] refs:', Object.keys(fieldWrapRefs.current).length, 'connected:', conn.length,
+          'sample transform:', conn[0] ? (conn[0] as HTMLElement).style.transform : 'n/a');
+      }
+      for (const oid in fieldWrapRefs.current) {
+        const el = fieldWrapRefs.current[oid];
+        if (!el || !el.isConnected) continue;
+        let h = 7; for (let k = 0; k < oid.length; k++) h = (h * 31 + oid.charCodeAt(k)) & 0x7fffffff;
+        const phase = (h % 628) / 100;                       // stable per-orb phase
+        const isCentre = el.dataset.centre === '1';
+        if (isCentre) {
+          el.style.transform = '';                            // the workbench holds still
+        } else {
+          const a = (bars / 8) * Math.PI * 2 + phase;        // one micro-orbit per 8 bars
+          const dx = Math.cos(a) * 7, dy = Math.sin(a * 1.3 + phase) * 5;
+          el.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+        }
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, []);
   const centrePos = { x: CENTRE.fx * dim.w, y: CENTRE.fy * fh, size: CENTRE.size };
-  const slotFor = (id: string) => {
+  // INTERIOR layout (faithful to pre-Spheres original, scoped to the forward constellation):
+  // sats from TOTAL member count; selected takes centrePos; others index into sats.
+  const iMembers = forwardConst ? orbs.filter(x => constFor(x.id)?.id === forwardConst) : orbs;
+  const iSalt = forwardConst ? Array.from(forwardConst).reduce((a,ch)=>a+ch.charCodeAt(0),0) : 0;  // single constellation: salt 0 = EXACT original layout
+  const iSats = satelliteSlots(iMembers.length, dim.w, fh, CENTRE.size, iSalt);
+  const iOthers = iMembers.filter(o => o.id !== selected);
+  const interiorSlotFor = (id: string) => {
     if (id === selected) return centrePos;
-    const idx = others.findIndex(o => o.id === id);
-    return sats[idx] ?? centrePos;
+    const idx = iOthers.findIndex(o => o.id === id);
+    return iSats[idx] ?? centrePos;
+  };
+  const slotFor = (id: string) => {
+    if (id === selected) return centrePos;               // interim: Slice B makes this orbital
+    const o = field.orbits.find(ob => ob.orbId === id);
+    if (!o) return centrePos;
+    const p = orbitPos(o, 0);
+    return { x: p.x, y: p.y, size: o.size };
   };
   const zlabel: React.CSSProperties = { fontSize:11.5, fontWeight:500, letterSpacing:'0.25em', color:'rgba(255,255,255,0.3)', marginBottom:14 };
 
   return (
-    <main style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'radial-gradient(ellipse at 50% 28%, #10131f 0%, #070810 66%, #04050a 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
+    <main onPointerMove={fieldHover} onClick={fieldClickConst} style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'radial-gradient(ellipse at 50% 28%, #10131f 0%, #070810 66%, #04050a 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
+      {/* SPHERES: source stars + orbit paths (behind everything) */}
+      {cosmosActive && <svg style={{ position:'absolute', left:0, top:0, width:'100%', height:fh, pointerEvents:'none', zIndex:1 }}>
+        {field.systems.map(sys => {
+          const name = constellations.find(c => c.id === sys.constId)?.name ?? '';
+          const hov = hoverConst === sys.constId;
+          return (
+          <g key={sys.constId}>
+            <circle cx={sys.cx} cy={sys.cy} r={26} fill={sys.tint} opacity={hov ? 0.18 : 0.10} />
+            <circle cx={sys.cx} cy={sys.cy} r={10} fill={sys.tint} opacity={0.22} />
+            <circle cx={sys.cx} cy={sys.cy} r={3} fill="#fff" opacity={0.65} />
+            <text x={sys.cx} y={sys.cy - 40} textAnchor="middle"
+              fontFamily='"Space Mono", monospace' fontSize={13} letterSpacing="0.3em"
+              fill={sys.tint} opacity={hov ? 0.9 : 0} style={{ transition:'opacity 0.5s' }}>
+              {name.toUpperCase()}
+            </text>
+          </g>
+          );
+        })}
+        {field.orbits.map(o => (
+          <ellipse key={o.orbId} cx={o.cx} cy={o.cy} rx={o.rx} ry={o.ry}
+            transform={`rotate(${(o.tilt*180/Math.PI).toFixed(1)} ${o.cx} ${o.cy})`}
+            fill="none" stroke={o.tint} strokeOpacity={0.14} strokeWidth={0.8} />
+        ))}
+      </svg>}
+      {forwardConst && liveConstCount >= 2 && (
+        <>
+          <div style={{ position:'absolute', top:26, left:0, right:0, textAlign:'center', zIndex:2, pointerEvents:'none' }}>
+            <span style={{ fontFamily:'"Space Mono", monospace', fontSize:13, letterSpacing:'0.35em', color: CONST_TINTS[Math.max(0, constellations.filter(c=>c.orbIds.length>0).findIndex(c=>c.id===forwardConst)) % CONST_TINTS.length], opacity:0.9 }}>
+              {(constellations.find(c=>c.id===forwardConst)?.name ?? '').toUpperCase()}
+            </span>
+          </div>
+          <div onClick={()=>{ setForwardConst(null); setFocused(null); }}
+            title="back to the cosmos"
+            style={{ position:'absolute', top:22, left:320, zIndex:260, display:'flex', alignItems:'center', gap:9, cursor:'pointer', padding:'8px 18px', borderRadius:20, border:'0.5px solid rgba(255,255,255,0.22)', color:'rgba(232,226,214,0.7)' }}>
+            <span style={{ fontSize:15 }}>←</span>
+            <span style={{ fontFamily:'"Space Mono", monospace', fontSize:10, letterSpacing:'0.25em' }}>COSMOS</span>
+          </div>
+        </>
+      )}
       {/* tap-out backdrop: when a panel is open, a click on empty field dismisses it */}
       {(tapeOpen || chordsOpen || mixOpen) && (
         <div onClick={closePanels} style={{ position:'absolute', inset:0, zIndex:200, background:'transparent' }} />
@@ -1273,6 +1463,36 @@ export default function FieldPage() {
 
       {orbs.map((o) => {
         if (focused === o.id) return null;   // hide the focused orb in the field — it lives in the back
+        if (!cosmosActive) {
+          // FIELD MODE: the original pre-Spheres behaviour. Inside a constellation -> its members;
+          // single constellation -> ALL orbs, exact original layout (salt 0).
+          if (forwardConst && !(constFor(o.id)?.id === forwardConst)) return null;
+          const slot = interiorSlotFor(o.id);
+          return (
+            <div key={o.id} ref={el => { fieldWrapRefs.current[o.id] = el; }}
+              data-centre={selected===o.id ? '1' : '0'}
+              style={{ position:'absolute', left:0, top:0, willChange:'transform' }}>
+              <Orb id={o.id} label={o.label} colorKey={o.colorKey}
+                subLabel={constFor(o.id)?.name} tint={tintFor(o.id)}
+                x={slot.x} y={slot.y} size={slot.size} volume={0.7}
+                selected={selected===o.id} xy={xyMap[o.id]} onSelect={handleSelect} onXY={handleXY} />
+            </div>
+          );
+        }
+        const spec = field.orbits.find(ob => ob.orbId === o.id);
+        const isSel = false;  // cosmos: selection never centre-stages; systems only (interior owns selection)
+        // SPHERES: orb renders AT its system centre inside a wrapper; the rAF driver
+        // translates the wrapper along the orbit (selected orb: wrapper untouched, slotFor centres it).
+        if (spec && !isSel) return (
+          <div key={o.id} ref={el => { orbWrapRefs.current[o.id] = el; }}
+            style={{ position:'absolute', left:0, top:0, willChange:'transform, opacity' }}>
+            <Orb id={o.id} label={o.label} colorKey={o.colorKey}
+              subLabel={constFor(o.id)?.name} tint={tintFor(o.id)}
+              x={spec.cx} y={spec.cy} size={spec.size} volume={0.7} glowScale={0.45}
+              hideLabel hideWave
+              selected={false} xy={xyMap[o.id]} onSelect={handleSelect} onXY={handleXY} />
+          </div>
+        );
         const slot = slotFor(o.id);
         return (
           <Orb key={o.id} id={o.id} label={o.label} colorKey={o.colorKey}

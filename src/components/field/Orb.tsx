@@ -25,6 +25,8 @@ type OrbProps = {
   hideLabel?: boolean;
   subLabel?: string;   // constellation name (source identity)
   tint?: string;       // per-constellation tint colour
+  glowScale?: number;  // 1 = full bloom (forward/close); <1 tightens the halo (distant field view)
+  hideWave?: boolean;  // suppress the wave squiggle (wordless celestial field view)
 };
 
 const BOX = 600;
@@ -33,7 +35,8 @@ const TRAVEL = 0.42;
 export default function Orb({
   id, label, colorKey, x, y,
   size = 130, volume = 0.7, selected = false,
-  xy = { x: 0.5, y: 0.5 }, onSelect, onXY, hideLabel = false, subLabel, tint,
+  xy = { x: 0.5, y: 0.5 },
+  onSelect, onXY, hideLabel = false, subLabel, tint, glowScale = 1, hideWave = false,
 }: OrbProps) {
   const c = ORB_COLORS[colorKey];
   const waveRef = useRef<SVGPathElement>(null);
@@ -97,7 +100,7 @@ export default function Orb({
         <defs>
           <radialGradient id={`fill-${id}`} cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor={c.core} stopOpacity={selected ? 1 : 0.8} />
-            <stop offset="46%" stopColor={c.mid} stopOpacity={selected ? 0.68 : 0.46} />
+            <stop offset={`${Math.round(46 + (1 - glowScale) * 34)}%`} stopColor={c.mid} stopOpacity={(selected ? 0.68 : 0.46) * (0.55 + glowScale * 0.45)} />
             <stop offset="100%" stopColor={c.glow} stopOpacity="0" />
           </radialGradient>
           <radialGradient id={`star-${id}`} cx="50%" cy="50%" r="50%">
@@ -113,9 +116,9 @@ export default function Orb({
           <g style={{ pointerEvents: 'none' }}>
             <ellipse cx="0" cy="0" rx={r} ry={r} fill={`url(#fill-${id})`} />
             <circle cx="0" cy="0" r={haloR} fill="none" stroke={c.mid}
-              strokeWidth={haloW} opacity={selected ? 0.3 : 0.18} filter={`url(#halo-${id})`} />
-            <path ref={waveRef} transform={`translate(${coreX} ${coreY})`} d="M -44 0 Q -22 0 0 0 T 44 0"
-              fill="none" stroke={c.core} strokeWidth="1.5" opacity="0.6" />
+              strokeWidth={haloW * (0.4 + glowScale * 0.6)} opacity={(selected ? 0.3 : 0.18) * (0.5 + glowScale * 0.5)} filter={`url(#halo-${id})`} />
+            {!hideWave && <path ref={waveRef} transform={`translate(${coreX} ${coreY})`} d="M -44 0 Q -22 0 0 0 T 44 0"
+              fill="none" stroke={c.core} strokeWidth="1.5" opacity="0.6" />}
           </g>
           {/* select disc — bounded to visible body */}
           <circle cx="0" cy="0" r={hitR} fill="transparent"
