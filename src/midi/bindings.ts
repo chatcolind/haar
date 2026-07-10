@@ -38,6 +38,17 @@ const holdFired: Record<string, boolean> = {};
 // with a layer fire only when that layer is active; noterange (keys) bindings
 // are layer-independent (the keyboard is always the conductor).
 let activeLayer = 'base';
+// ---- CONTEXT ----
+// The desk follows the screen: 'cosmos' (universe view) | 'interior' (inside a constellation).
+// Bindings keep their ids; HANDLERS resolve meaning per context. Pickup resets on switch
+// so no control jumps when the world changes.
+let activeContext = 'interior';
+export function getActiveContext(): string { return activeContext; }
+export function setActiveContext(c: string) {
+  if (c === activeContext) return;
+  activeContext = c;
+  for (const k in pickupEngaged) delete pickupEngaged[k];
+}
 const layerListeners = new Set<(l: string) => void>();
 export function getActiveLayer(): string { return activeLayer; }
 export function setActiveLayer(l: string) {

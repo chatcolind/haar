@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Orb, { ORB_COLORS } from '../../components/field/Orb';
 import { midiInit, midiSubscribe, midiTestGridSweep, midiGridClear, midiGridSet, midiGetOutput, type MidiMessage } from '../../midi/midi';
 import { registerActionHandlers } from '../../midi/actions';
-import { startBindingEngine, armLearn, cancelLearn, getBindings, removeBinding, replaceAll, getActiveLayer, onLayerChange, type Binding } from '../../midi/bindings';
+import { startBindingEngine, armLearn, cancelLearn, getBindings, removeBinding, replaceAll, getActiveLayer, onLayerChange, setActiveContext, type Binding } from '../../midi/bindings';
 import { ACTION_CATALOGUE } from '../../midi/actions';
 import { apcPaint } from '../../midi/apcFeedback';
 import {
@@ -220,7 +220,8 @@ export default function FieldPage() {
       }));
       // read the source from the up-to-date array (avoids stale-closure lookup)
       if (routed == null) { const c = next.find(x => x.id === constId); routed = c ? c.sourceId : 'default'; }
-      return next;
+      // PRUNE: a constellation with no orbs ceases to exist (default synth exempt — structural)
+      return next.filter(c => c.orbIds.length > 0 || c.id === DEFAULT_CONST_ID);
     });
     if (routed != null) microcosmEngineSource(orbId, routed);
   }
@@ -266,6 +267,10 @@ export default function FieldPage() {
     microcosmEngineActive(id, false);
     microcosmRemoveOrb(id);
     setFieldOrbs(prev => prev.filter(o => o.id !== id));
+    // membership cleanup + PRUNE: no ghost ids; empty constellations cease to exist (default exempt)
+    setConstellations(prev => prev
+      .map(c => ({ ...c, orbIds: c.orbIds.filter(o => o !== id) }))
+      .filter(c => c.orbIds.length > 0 || c.id === DEFAULT_CONST_ID));
   }
   const [selected, setSelected] = useState<string>('');
   const [focused, setFocused] = useState<string | null>(null); // orb in focused (controls-beside) view
@@ -548,6 +553,12 @@ export default function FieldPage() {
   const [constMuteTick, setConstMuteTick] = useState(0);
   const [hoverConst, setHoverConst] = useState<string|null>(null); // cosmos: system under the pointer
   const [forwardConst, setForwardConst] = useState<string|null>(null); // constellation brought forward (interior view = the pre-Spheres field)
+  const forwardConstRef = useRef<string|null>(null); useEffect(() => { forwardConstRef.current = forwardConst; }, [forwardConst]);
+  useEffect(() => {
+    if (!forwardConst) return;
+    const alive = constellations.some(c => c.id === forwardConst && c.orbIds.length > 0);
+    if (!alive) { setForwardConst(null); setFocused(null); }   // ghost interior: fall back (view rule picks cosmos or field)
+  }, [constellations, forwardConst]);
   const fieldClickConst = (e: React.MouseEvent) => {
     if (!cosmosActive) return;                         // cosmos taps only exist in the cosmos
     if ((e.target as HTMLElement).closest('[data-orb]')) return;  // orb clicks keep their own meaning
@@ -620,7 +631,12 @@ export default function FieldPage() {
           playAtRef.current(noteName, semis);
         }
         if (id === 'const.mute' && typeof param === 'number') {
-          const c = liveConsts()[param]; if (c) toggleConstMuteRef.current(c.id);
+          if (forwardConstRef.current) {
+            const oid = interiorOrderRef.current[param];
+            if (oid) { muteRef.current[oid] = !muteRef.current[oid]; reapplyLevelsRef.current(); }
+          } else {
+            const c = liveConsts()[param]; if (c) toggleConstMuteRef.current(c.id);
+          }
         }
         if (id === 'scale.toggle') setScaleLock(v => !v);
         if (id === 'orb.select' && param && typeof param === 'object') {
@@ -649,8 +665,14 @@ export default function FieldPage() {
       },
       continuous: (id, value, param) => {
         if (id === 'const.level' && typeof param === 'number') {
-          const c = constRef.current.filter(x => x.orbIds.length > 0)[param];
-          if (c) setConstLevelRef.current(c.id, value);
+          if (forwardConstRef.current) {
+            // INTERIOR: knob N = member orb N's own volume (slot order, centre first)
+            const oid = interiorOrderRef.current[param];
+            if (oid) { volRef.current[oid] = value; reapplyLevelsRef.current(); forceOrb(x=>x+1); }
+          } else {
+            const c = constRef.current.filter(x => x.orbIds.length > 0)[param];
+            if (c) setConstLevelRef.current(c.id, value);
+          }
         }
         if (id === 'orb.x') orbCtlRef.current.set('x', value);
         if (id === 'orb.y') orbCtlRef.current.set('y', value);
@@ -665,6 +687,10 @@ export default function FieldPage() {
       },
       readContinuous: (id, param) => {
         if (id === 'const.level' && typeof param === 'number') {
+          if (forwardConstRef.current) {
+            const oid = interiorOrderRef.current[param];
+            return oid ? (volRef.current[oid] ?? 0.7) : 0;
+          }
           const c = constRef.current.filter(x => x.orbIds.length > 0)[param];
           return c ? (constLevelRef.current[c.id] ?? 1) : 0;
         }
@@ -1114,6 +1140,7 @@ export default function FieldPage() {
     reapplyLevels();
   }
   const reapplyLevelsRef = useRef(reapplyLevels); reapplyLevelsRef.current = reapplyLevels;
+  const orbLevelRef = useRef(orbLevel); orbLevelRef.current = orbLevel;   // driver reads live levels for amplitude glow
   const toggleConstMuteRef = useRef(toggleConstMute); toggleConstMuteRef.current = toggleConstMute;
   const setConstLevelRef = useRef(setConstLevel); setConstLevelRef.current = setConstLevel;
   function activateRack() {
@@ -1327,6 +1354,7 @@ export default function FieldPage() {
   // SPHERES layout: systems + orbits replace the scatter. Static (bars=0) in A1; A2 animates.
   const liveConstCount = constellations.filter(c => c.orbIds.length > 0).length;
   const cosmosActive = liveConstCount >= 2 && !forwardConst;   // cosmos ONLY with 2+ constellations; one constellation = the original field
+  useEffect(() => { setActiveContext(cosmosActive ? 'cosmos' : 'interior'); }, [cosmosActive]);
   const field = cosmosActive ? orbitalField(constellations, CONST_TINTS, dim.w, fh) : { systems: [], orbits: [] };
   // A2: ORBIT DRIVER — one rAF loop moves positioning wrappers imperatively (React stays out of the 60fps path).
   const orbWrapRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1348,7 +1376,11 @@ export default function FieldPage() {
         const near = (p.z + 1) / 2;                            // 0 far .. 1 near
         const scale = 0.78 + near * 0.34;                      // far shrinks, near grows
         el.style.transform = `translate(${(p.x - o.cx).toFixed(1)}px, ${(p.y - o.cy).toFixed(1)}px) scale(${scale.toFixed(3)})`;
-        el.style.opacity = (0.55 + near * 0.45).toFixed(3);    // far dims
+        el.style.opacity = (0.55 + near * 0.45).toFixed(3);    // far dims (depth)
+        // AMPLITUDE GLOW in the cosmos too: light = what you'd hear, both worlds one truth
+        const clv = Math.sqrt(Math.max(0, Math.min(1, orbLevelRef.current(o.orbId))));
+        el.style.filter = `brightness(${(0.18 + clv * 1.17).toFixed(3)})`;
+        if (!el.style.transition) el.style.transition = 'filter 0.6s ease';
         el.style.zIndex = p.z < 0 ? '4' : '12';                // far side passes BEHIND the source star (star svg z=1? star sits behind; use orb layering)
       }
       // FIELD MODE idle drift: micro-orbits around each slot (a few px, tempo-locked) + centre orb breath
@@ -1364,11 +1396,16 @@ export default function FieldPage() {
         let h = 7; for (let k = 0; k < oid.length; k++) h = (h * 31 + oid.charCodeAt(k)) & 0x7fffffff;
         const phase = (h % 628) / 100;                       // stable per-orb phase
         const isCentre = el.dataset.centre === '1';
+        // AMPLITUDE GLOW: light follows the mixer's truth. Full level = full burn;
+        // muted/silent = ember (25%). Smoothed by CSS transition on filter.
+        const lv = Math.sqrt(Math.max(0, Math.min(1, orbLevelRef.current(oid))));   // perceptual: 50% vol reads ~74% light
+        el.style.filter = `brightness(${(0.18 + lv * 1.17).toFixed(3)})`;   // headroom: full level BURNS (~1.35), default (~0.84 after sqrt) ~= full colour   // 5% ember .. 100% full colour
+        if (!el.style.transition) el.style.transition = 'filter 0.6s ease';
         if (isCentre) {
           el.style.transform = '';                            // the workbench holds still
         } else {
-          const a = (bars / 8) * Math.PI * 2 + phase;        // one micro-orbit per 8 bars
-          const dx = Math.cos(a) * 7, dy = Math.sin(a * 1.3 + phase) * 5;
+          const a = (bars / 4) * Math.PI * 2 + phase;        // one wander per 4 bars — visible, unhurried
+          const dx = Math.cos(a) * 26, dy = Math.sin(a * 1.3 + phase) * 16;
           el.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
         }
       }
@@ -1384,6 +1421,11 @@ export default function FieldPage() {
   const iSalt = forwardConst ? Array.from(forwardConst).reduce((a,ch)=>a+ch.charCodeAt(0),0) : 0;  // single constellation: salt 0 = EXACT original layout
   const iSats = satelliteSlots(iMembers.length, dim.w, fh, CENTRE.size, iSalt);
   const iOthers = iMembers.filter(o => o.id !== selected);
+  const interiorOrderRef = useRef<string[]>([]);
+  interiorOrderRef.current = (() => {
+    const sel = iMembers.find(o => o.id === selected)?.id;
+    return sel ? [sel, ...iMembers.filter(o => o.id !== sel).map(o => o.id)] : iMembers.map(o => o.id);
+  })();
   const interiorSlotFor = (id: string) => {
     if (id === selected) return centrePos;
     const idx = iOthers.findIndex(o => o.id === id);
@@ -1488,7 +1530,7 @@ export default function FieldPage() {
             style={{ position:'absolute', left:0, top:0, willChange:'transform, opacity' }}>
             <Orb id={o.id} label={o.label} colorKey={o.colorKey}
               subLabel={constFor(o.id)?.name} tint={tintFor(o.id)}
-              x={spec.cx} y={spec.cy} size={spec.size} volume={0.7} glowScale={0.45}
+              x={spec.cx} y={spec.cy} size={spec.size} volume={0.7} glowScale={0.7}
               hideLabel hideWave
               selected={false} xy={xyMap[o.id]} onSelect={handleSelect} onXY={handleXY} />
           </div>
