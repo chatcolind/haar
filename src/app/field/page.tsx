@@ -11,7 +11,7 @@ import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
-  microcosmGrainSpread, microcosmPitchSpread, microcosmOrbXY, microcosmOnGrain, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
+  microcosmGrainSpread, microcosmPitchSpread, microcosmOrbXY, microcosmOnGrain, microcosmDrainGrains, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
   microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmOrbAbsence, microcosmOrbChaos, microcosmFreezeSource, microcosmFauveOn, microcosmFauveOff, microcosmFauveOffAll, microcosmFauveParam, microcosmFauveUpdatePitch, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
@@ -1367,6 +1367,7 @@ export default function FieldPage() {
   useEffect(() => { setActiveContext(cosmosActive ? 'cosmos' : 'interior'); }, [cosmosActive]);
   const field = cosmosActive ? orbitalField(constellations, CONST_TINTS, dim.w, fh) : { systems: [], orbits: [] };
   // A2: ORBIT DRIVER — one rAF loop moves positioning wrappers imperatively (React stays out of the 60fps path).
+  const DEPTH_BLUR = false;   // EXPERIMENT: true = atmospheric blur for far orbs, false = crisp bodies (depth via scale+light only)
   const orbWrapRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const fieldWrapRefs = useRef<Record<string, HTMLDivElement | null>>({}); // interior/single-field orbs: idle drift + centre breath
   // GRAIN COMETS: pool of real-grain sparks drawn on one canvas by the driver
@@ -1385,24 +1386,24 @@ export default function FieldPage() {
     spriteCache.current[tint] = sp;
     return sp;
   };
+  const starfieldRef = useRef<{ w:number; layers:{x:number;y:number;r:number;a:number}[][] } | null>(null);
   const cometsRef = useRef<{ x:number;y:number;vx:number;vy:number;born:number;life:number;tint:string;g:number }[]>([]);
   const orbScreenPosRef = useRef<Record<string,{x:number;y:number}>>({});   // driver publishes positions here each frame
-  useEffect(() => {
-    microcosmOnGrain((orbId, gain) => {
-      const pos = orbScreenPosRef.current[orbId];
-      if (!pos) return;
-      const pool = cometsRef.current;
-      if (pool.length > 300) pool.splice(0, pool.length - 300);   // recycle oldest
-      // coherent ejection: each orb streams in a slowly-rotating direction, grains scatter in a cone around it
-      let h = 3; for (let k = 0; k < orbId.length; k++) h = (h * 31 + orbId.charCodeAt(k)) & 0x7fffffff;
-      const stream = (h % 628) / 100 + performance.now() / 9000;          // per-orb base angle, drifting slowly
-      const a = stream + (Math.random() - 0.5) * 0.7;                     // ~40-degree cone — reads as a STREAM
-      const sp = 60 + Math.random() * 140 * (0.4 + gain);                 // real velocity — clears the halo
-      pool.push({ x: pos.x, y: pos.y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
-        born: performance.now(), life: 1200 + Math.random()*900, tint: tintFor(orbId) ?? '#8ab6ff', g: gain });
-    });
-    return () => microcosmOnGrain(null);
-  }, []);
+  const spawnComet = (orbId: string, gain: number) => {
+    const pos = orbScreenPosRef.current[orbId];
+    if (!pos) return;
+    const pool = cometsRef.current;
+    if (pool.length > 300) pool.splice(0, pool.length - 300);
+    let h = 3; for (let k = 0; k < orbId.length; k++) h = (h * 31 + orbId.charCodeAt(k)) & 0x7fffffff;
+    const stream = (h % 628) / 100 + performance.now() / 9000;
+    const a = stream + (Math.random() - 0.5) * 0.7;
+    const depth = (pos as any).d ?? 0.7;
+    const sp = (60 + Math.random() * 140 * (0.4 + gain)) * (0.6 + depth * 0.7);
+    pool.push({ x: pos.x, y: pos.y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
+      born: performance.now(), life: 1200 + Math.random()*900, tint: tintFor(orbId) ?? '#8ab6ff',
+      g: gain * (0.45 + depth * 0.9) });
+  };
+  const spawnCometRef = useRef(spawnComet); spawnCometRef.current = spawnComet;
   const fieldRef2 = useRef(field); fieldRef2.current = field;
   const selectedRef2 = useRef(selected); selectedRef2.current = selected;
   useEffect(() => {
@@ -1411,6 +1412,7 @@ export default function FieldPage() {
     const t0 = performance.now();
     const step = (now: number) => {
       const bars = (now - t0) / 1000 / barSec();
+      for (const gq of microcosmDrainGrains()) spawnCometRef.current(gq.id, gq.g);   // visuals pay, audio never does
       for (const o of fieldRef2.current.orbits) {
         const el = orbWrapRefs.current[o.orbId];
         if (!el) continue;
@@ -1418,14 +1420,14 @@ export default function FieldPage() {
         const p = orbitPos(o, bars);
         el.style.transformOrigin = `${o.cx}px ${o.cy}px`;      // scale pivots on the ORB, not the screen corner
         const near = (p.z + 1) / 2;                            // 0 far .. 1 near
-        const scale = 0.78 + near * 0.34;                      // far shrinks, near grows
+        const scale = 0.55 + near * 1.05;                      // CINEMA range: far 0.55x .. near 1.6x — parallax you feel
         el.style.transform = `translate(${(p.x - o.cx).toFixed(1)}px, ${(p.y - o.cy).toFixed(1)}px) scale(${scale.toFixed(3)})`;
         el.style.opacity = (0.55 + near * 0.45).toFixed(3);    // far dims (depth)
-        orbScreenPosRef.current[o.orbId] = { x: p.x, y: p.y };
+        orbScreenPosRef.current[o.orbId] = { x: p.x, y: p.y, d: near } as any;
         // one filter: amplitude brightness + DEPTH BLUR (far = atmospheric diffuse, near = crisp)
         const clv = Math.sqrt(Math.max(0, Math.min(1, orbLevelRef.current(o.orbId))));
-        const blur = (1 - near) * 2.6;                          // px: far side softens into distance
-        el.style.filter = `brightness(${(0.18 + clv * 1.17).toFixed(3)}) blur(${blur.toFixed(2)}px)`;
+        const blur = DEPTH_BLUR ? (1 - near) * 2.6 : 0;
+        el.style.filter = `brightness(${(0.18 + clv * 1.17).toFixed(3)})` + (blur > 0.05 ? ` blur(${blur.toFixed(2)}px)` : '');
         if (!el.style.transition) el.style.transition = 'filter 0.6s ease';
         el.style.zIndex = p.z < 0 ? '4' : '12';                // far side passes BEHIND the source star (star svg z=1? star sits behind; use orb layering)
       }
@@ -1458,13 +1460,45 @@ export default function FieldPage() {
         const r = el.getBoundingClientRect();
         orbScreenPosRef.current[oid] = { x: r.left + r.width/2, y: r.top + r.height/2 };
       }
+      // PARALLAX STARFIELD: three layers sliding at different rates with the world's turn
+      {
+        const cv2 = cometCanvasRef.current;
+        if (cv2) {
+          const ctx2 = cv2.getContext('2d');
+          if (ctx2) {
+            ctx2.clearRect(0, 0, cv2.width, cv2.height);
+            ctx2.globalCompositeOperation = 'source-over';
+            if (!starfieldRef.current || starfieldRef.current.w !== cv2.width) {
+              const layers = [] as { x:number;y:number;r:number;a:number }[][];
+              let sd = 42;
+              const rnd = () => { sd = (sd * 1103515245 + 12345) & 0x7fffffff; return sd / 0x7fffffff; };
+              for (let L = 0; L < 3; L++) {
+                const stars = [] as { x:number;y:number;r:number;a:number }[];
+                for (let i = 0; i < 70; i++) stars.push({ x: rnd()*cv2.width, y: rnd()*cv2.height, r: 0.5 + rnd()*(L===2?1.4:0.8), a: 0.12 + rnd()*0.3 });
+                layers.push(stars);
+              }
+              starfieldRef.current = { w: cv2.width, layers };
+            }
+            const drift = bars * 6;                              // world-turn drives the slide
+            starfieldRef.current.layers.forEach((stars, L) => {
+              const par = (L + 1) * 0.35;                        // deeper layers slide less
+              ctx2.fillStyle = '#cfd8ff';
+              for (const st of stars) {
+                const sx = (st.x + drift * par) % cv2.width;
+                ctx2.globalAlpha = st.a * (0.7 + 0.3 * Math.sin(now / 900 + st.x));   // gentle twinkle
+                ctx2.beginPath(); ctx2.arc(sx, st.y, st.r, 0, Math.PI * 2); ctx2.fill();
+              }
+            });
+            ctx2.globalAlpha = 1;
+          }
+        }
+      }
       // COMET DRAW: one canvas, additive sparks decaying along their flight
       const cv = cometCanvasRef.current;
       if (cv) {
         const ctx = cv.getContext('2d');
         if (ctx) {
-          ctx.clearRect(0, 0, cv.width, cv.height);
-          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalCompositeOperation = 'lighter';   // starfield pass cleared + drew beneath
           const pool = cometsRef.current;
           for (let i = pool.length - 1; i >= 0; i--) {
             const c = pool[i];
@@ -1644,7 +1678,7 @@ export default function FieldPage() {
         return (
           <div style={{ position:'absolute', inset:0, zIndex:150, pointerEvents:'none' }}>
             {/* dim scrim — visual only, stops above the keyboard so it stays playable */}
-            <div style={{ position:'absolute', left:0, right:0, top:0, bottom: dim.h*0.30, background:'rgba(6,4,12,0.82)', backdropFilter:'blur(5px)', opacity: focusShown?1:0, transition:'opacity 0.42s ease' }} />
+            <div style={{ position:'absolute', left:0, right:0, top:0, bottom: consoleUp ? dim.h*0.30 : dim.h*0.06, background:'rgba(6,4,12,0.82)', backdropFilter:'blur(5px)', opacity: focusShown?1:0, transition:'opacity 0.42s ease, bottom 0.55s cubic-bezier(0.34,0.01,0.2,1)' }} />
 
             {/* breadcrumb + close */}
             <div style={{ position:'absolute', top:18, left:24, zIndex:3, display:'flex', alignItems:'center', gap:9, opacity: focusShown?1:0, transition:'opacity 0.42s ease', pointerEvents:'auto' }}>
@@ -1696,7 +1730,7 @@ export default function FieldPage() {
             })()}
 
             {/* LEFT COLUMN — level + voices (distributed) */}
-            <div style={{ position:'absolute', left:'3%', top:64, bottom: dim.h*0.30 + 16, width:'26%', maxWidth:340, boxSizing:'border-box', paddingLeft:18, overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
+            <div style={{ position:'absolute', left:'3%', top:64, bottom: (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', paddingLeft:18, overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
               {/* LEVEL */}
               <div>
@@ -1785,7 +1819,7 @@ export default function FieldPage() {
             </div>
 
             {/* RIGHT COLUMN — signal path + flavour (distributed) */}
-            <div style={{ position:'absolute', right:'3%', top:64, bottom: dim.h*0.30 + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
+            <div style={{ position:'absolute', right:'3%', top:64, bottom: (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
               {/* SIGNAL PATH — effect-orbs on a thread of light; tap to edit (UI ready, not yet audible) */}
               <div>

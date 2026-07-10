@@ -315,8 +315,9 @@ export class Microcosm {
     const absEng = this.engineAbsence[this._currentEngine] || 0;
     const chaosEng = this.engineChaos[this._currentEngine] || 0;
     this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine, source, position: posEng, spray: sprayEng, absence: absEng, chaos: chaosEng });
-    // GRAIN COMETS: notify the visual layer of the true grain spawn (orb id + energy)
-    if (__onGrain) { try { __onGrain(this._currentEngine, (spec as any).gain ?? 0.5); } catch {} }
+    // GRAIN COMETS: queue the spawn notification — drained by the UI's own loop.
+    // NEVER do visual work inside the grain scheduler; the audio path pays for nothing.
+    if (__grainQueue.length < 400) __grainQueue.push({ id: this._currentEngine, g: (spec as any).gain ?? 0.5 });
   }
   // per-orb SOURCE (constellation): which loaded source buffer this orb's grains read.
   private engineSource: Record<string, string> = {};
@@ -789,5 +790,10 @@ export class Microcosm {
 
 // ── GRAIN COMET HOOK ─────────────────────────────────────────────────────────
 // The field renders every REAL grain as a spark. Set once by the UI; null to detach.
-let __onGrain: ((orbId: string, gain: number) => void) | null = null;
-export function setOnGrain(cb: ((orbId: string, gain: number) => void) | null) { __onGrain = cb; }
+const __grainQueue: { id: string; g: number }[] = [];
+export function drainGrainQueue(): { id: string; g: number }[] {
+  if (__grainQueue.length === 0) return [];
+  return __grainQueue.splice(0, __grainQueue.length);
+}
+// legacy setter kept as no-op shim so engine.ts bridge stays valid
+export function setOnGrain(_cb: ((orbId: string, gain: number) => void) | null) {}
