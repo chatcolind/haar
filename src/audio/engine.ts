@@ -685,6 +685,8 @@ export function microcosmActivity(a: number): void { microcosmCore?.setActivity(
 export function microcosmGrainSpread(x: number): void { microcosmCore?.setGrainSpread(x); }
 export function microcosmPitchSpread(y: number): void { microcosmCore?.setPitchSpread(y); }
 export function microcosmOrbXY(id: string, x: number, y: number): void { (microcosmCore as any)?.setOrbXY(id, x, y); }
+import { setOnGrain as __setOnGrain } from './microcosm';
+export function microcosmOnGrain(cb: ((orbId: string, gain: number) => void) | null): void { __setOnGrain(cb); }
 export function microcosmSetFilter(hz: number): void { microcosmCore?.setFilter(hz); }
 export function microcosmSweep(hz: number, q: number): void { (microcosmCore as any)?.setSweep(hz, q); }
 export function microcosmResetFilter(): void { (microcosmCore as any)?.resetFilter(); }

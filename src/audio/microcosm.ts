@@ -315,6 +315,8 @@ export class Microcosm {
     const absEng = this.engineAbsence[this._currentEngine] || 0;
     const chaosEng = this.engineChaos[this._currentEngine] || 0;
     this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine, source, position: posEng, spray: sprayEng, absence: absEng, chaos: chaosEng });
+    // GRAIN COMETS: notify the visual layer of the true grain spawn (orb id + energy)
+    if (__onGrain) { try { __onGrain(this._currentEngine, (spec as any).gain ?? 0.5); } catch {} }
   }
   // per-orb SOURCE (constellation): which loaded source buffer this orb's grains read.
   private engineSource: Record<string, string> = {};
@@ -783,3 +785,9 @@ export class Microcosm {
       .forEach(n => { try { n.disconnect(); } catch {} });
   }
 }
+
+
+// ── GRAIN COMET HOOK ─────────────────────────────────────────────────────────
+// The field renders every REAL grain as a spark. Set once by the UI; null to detach.
+let __onGrain: ((orbId: string, gain: number) => void) | null = null;
+export function setOnGrain(cb: ((orbId: string, gain: number) => void) | null) { __onGrain = cb; }

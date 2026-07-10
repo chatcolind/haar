@@ -11,7 +11,7 @@ import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
-  microcosmGrainSpread, microcosmPitchSpread, microcosmOrbXY, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
+  microcosmGrainSpread, microcosmPitchSpread, microcosmOrbXY, microcosmOnGrain, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
   microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmOrbAbsence, microcosmOrbChaos, microcosmFreezeSource, microcosmFauveOn, microcosmFauveOff, microcosmFauveOffAll, microcosmFauveParam, microcosmFauveUpdatePitch, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
@@ -88,7 +88,7 @@ function orbitalField(
   // its share of the width with a margin, and keep centres clear of the edges.
   const maxOrbs = Math.max(...live.map(c => c.orbIds.length));
   const slotW = W / n;                                     // each system's horizontal territory
-  const outerMax = slotW * 0.33;                           // outermost ring well inside the territory — neighbouring systems keep clear space
+  const outerMax = slotW * 0.46;                           // orbits FILL the system's territory (the bleed disc) — grand, not huddled
   const GOLDEN = 2.399963;                                 // golden angle: system-mates spread apart, never bunch
   live.forEach((c, si) => {
     const cx = slotW * si + slotW * 0.5;
@@ -102,7 +102,7 @@ function orbitalField(
       // rings spaced evenly from ~45% to 100% of the system's allowed radius
       const t = m === 1 ? 1 : oi / (m - 1);
       const rx = outerMax * (0.45 + 0.55 * t) * (0.96 + rnd() * 0.08);
-      const ry = rx * (0.22 + rnd() * 0.08);               // FLAT — strong perspective, reads as orbits
+      const ry = rx * (0.30 + rnd() * 0.10);               // fuller sweep vertically, still clearly orbital
       const tilt = (rnd() - 0.5) * 0.32;
       const phase0 = oi * GOLDEN + rnd() * 0.4;            // golden-angle spread: no bunching
       const periods = [4, 8, 8, 16, 16];
@@ -639,6 +639,7 @@ export default function FieldPage() {
           }
         }
         if (id === 'scale.toggle') setScaleLock(v => !v);
+        if (id === ('view.console' as any)) setConsoleUp(v => !v);
         if (id === 'orb.select' && param && typeof param === 'object') {
           const c = constRef.current.filter(x => x.orbIds.length > 0)[param.col];
           const oid = c?.orbIds[param.row];
@@ -1346,8 +1347,17 @@ export default function FieldPage() {
   // The screen has two territories: TOP (field-or-focus) and BOTTOM (mixer, when open).
   // Opening the mixer shrinks the TOP; the field re-lays-out into the smaller height.
   const MIXER_H = 0.40;                    // mixer occupies 40% of screen when open
-  const topFrac = mixOpen ? (1 - MIXER_H) : FIELD_H;  // top territory as fraction of screen
-  const fh = dim.h * topFrac;              // field height drives ALL orb positions (auto re-layout)
+  const [consoleUp, setConsoleUp] = useState(true);   // bottom console (keyboard/tokens): up = working, down = full sky
+  const topFrac = mixOpen ? (1 - MIXER_H) : consoleUp ? FIELD_H : 0.93;  // console down -> the cosmos takes the window
+  const fh = dim.h * topFrac;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
+      if (e.key === 'c' || e.key === 'C') setConsoleUp(v => !v);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);              // field height drives ALL orb positions (auto re-layout)
   const mixerH = dim.h * MIXER_H;          // mixer territory height
   const bottomBarH = dim.h * 0.30;         // the keyboard/field/system bar height (field state)
   // ──────────────────────────────────────────────────────────────
@@ -1359,6 +1369,40 @@ export default function FieldPage() {
   // A2: ORBIT DRIVER — one rAF loop moves positioning wrappers imperatively (React stays out of the 60fps path).
   const orbWrapRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const fieldWrapRefs = useRef<Record<string, HTMLDivElement | null>>({}); // interior/single-field orbs: idle drift + centre breath
+  // GRAIN COMETS: pool of real-grain sparks drawn on one canvas by the driver
+  const cometCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const spriteCache = useRef<Record<string, HTMLCanvasElement>>({});
+  const glowSprite = (tint: string): HTMLCanvasElement => {
+    let sp = spriteCache.current[tint];
+    if (sp) return sp;
+    sp = document.createElement('canvas'); sp.width = 64; sp.height = 64;
+    const c = sp.getContext('2d')!;
+    const g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, tint);                 // tint-hot centre — colour IS the light
+    g.addColorStop(0.55, tint);              // saturated body holds
+    g.addColorStop(1, 'rgba(0,0,0,0)');      // soft falloff
+    c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+    spriteCache.current[tint] = sp;
+    return sp;
+  };
+  const cometsRef = useRef<{ x:number;y:number;vx:number;vy:number;born:number;life:number;tint:string;g:number }[]>([]);
+  const orbScreenPosRef = useRef<Record<string,{x:number;y:number}>>({});   // driver publishes positions here each frame
+  useEffect(() => {
+    microcosmOnGrain((orbId, gain) => {
+      const pos = orbScreenPosRef.current[orbId];
+      if (!pos) return;
+      const pool = cometsRef.current;
+      if (pool.length > 300) pool.splice(0, pool.length - 300);   // recycle oldest
+      // coherent ejection: each orb streams in a slowly-rotating direction, grains scatter in a cone around it
+      let h = 3; for (let k = 0; k < orbId.length; k++) h = (h * 31 + orbId.charCodeAt(k)) & 0x7fffffff;
+      const stream = (h % 628) / 100 + performance.now() / 9000;          // per-orb base angle, drifting slowly
+      const a = stream + (Math.random() - 0.5) * 0.7;                     // ~40-degree cone — reads as a STREAM
+      const sp = 60 + Math.random() * 140 * (0.4 + gain);                 // real velocity — clears the halo
+      pool.push({ x: pos.x, y: pos.y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
+        born: performance.now(), life: 1200 + Math.random()*900, tint: tintFor(orbId) ?? '#8ab6ff', g: gain });
+    });
+    return () => microcosmOnGrain(null);
+  }, []);
   const fieldRef2 = useRef(field); fieldRef2.current = field;
   const selectedRef2 = useRef(selected); selectedRef2.current = selected;
   useEffect(() => {
@@ -1377,9 +1421,11 @@ export default function FieldPage() {
         const scale = 0.78 + near * 0.34;                      // far shrinks, near grows
         el.style.transform = `translate(${(p.x - o.cx).toFixed(1)}px, ${(p.y - o.cy).toFixed(1)}px) scale(${scale.toFixed(3)})`;
         el.style.opacity = (0.55 + near * 0.45).toFixed(3);    // far dims (depth)
-        // AMPLITUDE GLOW in the cosmos too: light = what you'd hear, both worlds one truth
+        orbScreenPosRef.current[o.orbId] = { x: p.x, y: p.y };
+        // one filter: amplitude brightness + DEPTH BLUR (far = atmospheric diffuse, near = crisp)
         const clv = Math.sqrt(Math.max(0, Math.min(1, orbLevelRef.current(o.orbId))));
-        el.style.filter = `brightness(${(0.18 + clv * 1.17).toFixed(3)})`;
+        const blur = (1 - near) * 2.6;                          // px: far side softens into distance
+        el.style.filter = `brightness(${(0.18 + clv * 1.17).toFixed(3)}) blur(${blur.toFixed(2)}px)`;
         if (!el.style.transition) el.style.transition = 'filter 0.6s ease';
         el.style.zIndex = p.z < 0 ? '4' : '12';                // far side passes BEHIND the source star (star svg z=1? star sits behind; use orb layering)
       }
@@ -1407,6 +1453,46 @@ export default function FieldPage() {
           const a = (bars / 4) * Math.PI * 2 + phase;        // one wander per 4 bars — visible, unhurried
           const dx = Math.cos(a) * 26, dy = Math.sin(a * 1.3 + phase) * 16;
           el.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+        }
+        // publish interior position for comets: wrapper origin is the slot; Orb centres itself at slot x/y
+        const r = el.getBoundingClientRect();
+        orbScreenPosRef.current[oid] = { x: r.left + r.width/2, y: r.top + r.height/2 };
+      }
+      // COMET DRAW: one canvas, additive sparks decaying along their flight
+      const cv = cometCanvasRef.current;
+      if (cv) {
+        const ctx = cv.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, cv.width, cv.height);
+          ctx.globalCompositeOperation = 'lighter';
+          const pool = cometsRef.current;
+          for (let i = pool.length - 1; i >= 0; i--) {
+            const c = pool[i];
+            const t = (now - c.born) / c.life;
+            if (t >= 1) { pool.splice(i, 1); continue; }
+            const curl = 0.9 * t;                              // velocity slowly rotates: organic arcs
+            const cvx = c.vx * Math.cos(curl) - c.vy * Math.sin(curl);
+            const cvy = c.vx * Math.sin(curl) + c.vy * Math.cos(curl);
+            const x = c.x + cvx * t, y = c.y + cvy * t;
+            const alpha = (1 - t) * (0.55 + c.g * 0.45);
+            const sp = glowSprite(c.tint);
+            // tail: fading sprite ghosts along the recent path (soft light, not vector)
+            for (let k = 1; k <= 3; k++) {
+              const tk = Math.max(0, t - k * 0.07);
+              const gx = c.x + cvx * tk, gy = c.y + cvy * tk;
+              const gs = (7 + c.g * 8) * (1 - k * 0.22);
+              ctx.globalAlpha = alpha * 0.18 * (1 - k * 0.25);
+              ctx.drawImage(sp, gx - gs/2, gy - gs/2, gs, gs);
+            }
+            // head: big faint aura + small bright core, both from the tinted sprite
+            const hs = 14 + c.g * 14;
+            ctx.globalAlpha = alpha * 0.5;
+            ctx.drawImage(sp, x - hs/2, y - hs/2, hs, hs);
+            const cs = 5 + c.g * 5;
+            ctx.globalAlpha = alpha;
+            ctx.drawImage(sp, x - cs/2, y - cs/2, cs, cs);
+          }
+          ctx.globalAlpha = 1;
         }
       }
       raf = requestAnimationFrame(step);
@@ -1449,9 +1535,13 @@ export default function FieldPage() {
           const hov = hoverConst === sys.constId;
           return (
           <g key={sys.constId}>
-            <circle cx={sys.cx} cy={sys.cy} r={26} fill={sys.tint} opacity={hov ? 0.18 : 0.10} />
-            <circle cx={sys.cx} cy={sys.cy} r={10} fill={sys.tint} opacity={0.22} />
-            <circle cx={sys.cx} cy={sys.cy} r={3} fill="#fff" opacity={0.65} />
+            {/* AMBIENT BLEED: the system's light staining surrounding space */}
+            <circle cx={sys.cx} cy={sys.cy} r={Math.min(dim.w / Math.max(field.systems.length,1) * 0.52, 420)} fill={sys.tint} opacity={0.035} />
+            {/* SOURCE STAR: a true luminary — layered corona, hot core, faint spill into the void */}
+            <circle cx={sys.cx} cy={sys.cy} r={90} fill={sys.tint} opacity={hov ? 0.10 : 0.06} />
+            <circle cx={sys.cx} cy={sys.cy} r={44} fill={sys.tint} opacity={0.14} />
+            <circle cx={sys.cx} cy={sys.cy} r={16} fill={sys.tint} opacity={0.5} />
+            <circle cx={sys.cx} cy={sys.cy} r={6.5} fill="#fff" opacity={0.95} />
             <text x={sys.cx} y={sys.cy - 40} textAnchor="middle"
               fontFamily='"Space Mono", monospace' fontSize={13} letterSpacing="0.3em"
               fill={sys.tint} opacity={hov ? 0.9 : 0} style={{ transition:'opacity 0.5s' }}>
@@ -1463,7 +1553,7 @@ export default function FieldPage() {
         {field.orbits.map(o => (
           <ellipse key={o.orbId} cx={o.cx} cy={o.cy} rx={o.rx} ry={o.ry}
             transform={`rotate(${(o.tilt*180/Math.PI).toFixed(1)} ${o.cx} ${o.cy})`}
-            fill="none" stroke={o.tint} strokeOpacity={0.14} strokeWidth={0.8} />
+            fill="none" stroke={o.tint} strokeOpacity={0.055} strokeWidth={0.7} />
         ))}
       </svg>}
       {forwardConst && liveConstCount >= 2 && (
@@ -1481,6 +1571,9 @@ export default function FieldPage() {
           </div>
         </>
       )}
+      {/* GRAIN COMETS canvas — every real grain, drawn as a spark */}
+      <canvas ref={cometCanvasRef} width={dim.w} height={fh}
+        style={{ position:'absolute', left:0, top:0, width:dim.w, height:fh, pointerEvents:'none', zIndex:20 }} />
       {/* tap-out backdrop: when a panel is open, a click on empty field dismisses it */}
       {(tapeOpen || chordsOpen || mixOpen) && (
         <div onClick={closePanels} style={{ position:'absolute', inset:0, zIndex:200, background:'transparent' }} />
@@ -2102,8 +2195,16 @@ export default function FieldPage() {
         </div>
       )}
 
+      {/* CONSOLE HANDLE: raise/lower the bottom console — the sky takes the window when down (key: C) */}
+      <div onClick={()=>setConsoleUp(v=>!v)} title={consoleUp ? 'lower the console (C)' : 'raise the console (C)'}
+        style={{ position:'absolute', left:'50%', bottom: 6, transform:'translateX(-50%)', zIndex:250,
+          width:52, height:20, borderRadius:11, display:'flex', alignItems:'center', justifyContent:'center',
+          cursor:'pointer', border:'0.5px solid rgba(232,226,214,0.18)', background:'rgba(6,7,13,0.6)',
+          color:'rgba(232,226,214,0.5)', fontSize:11, transition:'opacity 0.3s' }}>
+        {consoleUp ? '▾' : '▴'}
+      </div>
       {/* BOTTOM CONTROLS — two tiers: keyboard on top, FIELD/Flavour/SYSTEM beneath */}
-      <div style={{ position:'absolute', left:0, right:0, bottom: mixOpen ? mixerH : 0, height: dim.h*0.30, display:'flex', flexDirection:'column', justifyContent:'center', gap:18, padding:'0 40px', boxSizing:'border-box', transition:'bottom 0.4s cubic-bezier(0.34,0.01,0.2,1)', zIndex: mixOpen ? 180 : 'auto' }}>
+      <div style={{ position:'absolute', left:0, right:0, bottom: mixOpen ? mixerH : 0, height: dim.h*0.30, display:'flex', flexDirection:'column', justifyContent:'center', gap:18, padding:'0 40px', boxSizing:'border-box', transition:'bottom 0.4s cubic-bezier(0.34,0.01,0.2,1), transform 0.55s cubic-bezier(0.34,0.01,0.2,1), opacity 0.4s ease', zIndex: mixOpen ? 180 : 'auto', transform: consoleUp ? 'translateY(0)' : 'translateY(110%)', opacity: consoleUp ? 1 : 0, pointerEvents: consoleUp ? 'auto' : 'none' }}>
 
         {/* TIER 1 — full-width keyboard */}
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
@@ -2721,6 +2822,7 @@ export default function FieldPage() {
                   { name:'Chords release', right: <>{boundChips('chords.release', false)}{learnChip('chords.release','trigger',false)}</> },
                   { name:'Scale-lock toggle', right: <>{boundChips('scale.toggle', false)}{learnChip('scale.toggle','trigger',false)}</> },
                   { name:'Master stop', right: <>{boundChips('master.stop', false)}{learnChip('master.stop','trigger',false)}</> },
+                  { name:'Console up / down', right: <>{boundChips('view.console' as any, false)}{learnChip('view.console' as any,'trigger',false)}</> },
                   { name:'Layer key (base ↔ orb)', right: <>{boundChips('layer.toggle' as any, false)}{learnChip('layer.toggle' as any,'trigger',false)}</> },
                 ])}
                 {/* PROFILE row */}

@@ -18,7 +18,8 @@ export type TriggerActionId =
   | 'flavour.cycle'       // focused orb: step to the next flavour palette (wraps)
   | 'transport.playpause' // toggle play/stop
   | 'conductor.octaveUp'
-  | 'conductor.octaveDown';
+  | 'conductor.octaveDown'
+  | 'view.console';        // raise/lower the bottom console (full-sky toggle)
 
 export type ContinuousActionId =
   | 'const.level'         // param: constellation column index 0-7, value 0..1
@@ -67,6 +68,7 @@ export const ACTION_CATALOGUE: { id: TriggerActionId | ContinuousActionId; kind:
   { id: 'chords.release', kind: 'trigger',    label: 'Chords RELEASE' },
   { id: 'master.stop',    kind: 'trigger',    label: 'Master stop' },
   { id: 'scale.toggle',   kind: 'trigger',    label: 'Scale-lock toggle' },
+  { id: 'view.console',   kind: 'trigger',    label: 'Console up / down' },
   { id: 'const.freeze',   kind: 'trigger',    label: 'Freeze constellation', perColumn: true },
   { id: 'grid.matrix' as any, kind: 'gridmatrix' as any, label: 'Pad matrix (constellations × orbs)' },
   { id: 'orb.x',          kind: 'continuous', label: 'Orb: spread X' },
