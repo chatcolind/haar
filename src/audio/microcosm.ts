@@ -159,11 +159,14 @@ export class Microcosm {
     if (this.ctx.state !== 'running') { try { await this.ctx.resume(); } catch {} }
     await this.ctx.audioWorklet.addModule('/microcosm-processor.js?v=' + Date.now());
     this.node = new AudioWorkletNode(this.ctx, 'microcosm-processor', {
-      numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+      numberOfInputs: 1, numberOfOutputs: 9, outputChannelCount: [2,2,2,2,2,2,2,2,2],   // 0 = default, 1..8 = constellation reels
     });
     // nativeIn → worklet → filter → [dry + reverb→wet] → nativeOut
     this.nativeIn.connect(this.node);
-    this.node.connect(this.filter);
+    this.node.connect(this.filter);   // slot 0: default/unrouted, exactly today's path
+    // CONSTELLATION REELS: slots 1..8 each get their own TapeUnit -> shared filter.
+    // Lazy: built on first routing; zero-cost and bit-identical until a constellation is routed.
+    this.constTapes = new Array(9).fill(null);
     this.filter.connect(this.reverbDry);
     this.filter.connect(this.reverb);
     this.reverb.connect(this.reverbWet);
@@ -179,6 +182,9 @@ export class Microcosm {
   get isReady(): boolean { return this.ready; }
 
   // ── TAPE character (native nodes in the Microcosm's own context) ──
+  // ── TAPE UNIT ────────────────────────────────────────────────────────────────
+  // One reel: wobbleDelay -> sat -> rolloff -> makeup, with hiss feeding the rolloff.
+  // Extracted verbatim from the original buildTape so a unit can exist PER CONSTELLATION.
   private tapeWobbleDelay: DelayNode | null = null;   // modulated delay = wow/flutter
   private tapeWobbleLFO: OscillatorNode | null = null;
   private tapeWobbleDepth: GainNode | null = null;
@@ -186,6 +192,21 @@ export class Microcosm {
   private tapeRolloff: BiquadFilterNode | null = null; // HF loss
   private tapeHissGain: GainNode | null = null;       // hiss level
   private tapeBuilt = false;
+  private constTapes: (TapeUnit | null)[] = [];
+  /** Route an orb's audio to a constellation slot (1..8), or 0 for the default bus. */
+  setOrbSlot(orbId: string, slot: number): void {
+    const sl = Math.max(0, Math.min(8, Math.floor(slot)));
+    if (sl > 0 && !this.constTapes[sl]) {
+      const t = new TapeUnit(this.ctx);
+      t.setMaster(1);                            // individual balances are the controls; all default 0 = clean
+      this.node?.connect(t.input, sl);           // worklet output[sl] -> reel
+      t.output.connect(this.filter);             // reel -> shared chain (space stays communal)
+      this.constTapes[sl] = t;
+    }
+    this.node?.port.postMessage({ type: 'orbSlot', orbId, slot: sl });
+  }
+  setConstTape(slot: number, amount: number): void { this.constTapes[slot]?.setMaster(amount); }
+  setConstTapeBalance(slot: number, k: 'hiss'|'sat'|'wow'|'roll', v: number): void { this.constTapes[slot]?.setBalance(k, v); }
   private buildTape(): void {
     if (this.tapeBuilt) return;
     const c = this.ctx;
@@ -797,3 +818,49 @@ export function drainGrainQueue(): { id: string; g: number }[] {
 }
 // legacy setter kept as no-op shim so engine.ts bridge stays valid
 export function setOnGrain(_cb: ((orbId: string, gain: number) => void) | null) {}
+
+
+// ── TapeUnit: a complete tape reel as a reusable native-node chain ─────────────
+export class TapeUnit {
+  input: DelayNode; output: GainNode;
+  private lfo: OscillatorNode; private depth: GainNode;
+  private sat: WaveShaperNode; private roll: BiquadFilterNode;
+  private hissGain: GainNode; private makeup: GainNode;
+  private bal = { hiss: 0, sat: 0, wow: 0, roll: 0 };
+  private master = 1; private muted = false;
+  constructor(c: AudioContext) {
+    this.input = c.createDelay(0.05); this.input.delayTime.value = 0.004;
+    this.lfo = c.createOscillator(); this.lfo.frequency.value = 0.7;
+    this.depth = c.createGain(); this.depth.gain.value = 0;
+    this.lfo.connect(this.depth); this.depth.connect(this.input.delayTime); this.lfo.start();
+    this.sat = c.createWaveShaper(); this.sat.curve = TapeUnit.satCurve(0);
+    this.roll = c.createBiquadFilter(); this.roll.type = 'lowpass'; this.roll.frequency.value = 20000;
+    const hb = c.createBuffer(1, c.sampleRate * 2, c.sampleRate);
+    const hd = hb.getChannelData(0);
+    for (let i = 0; i < hd.length; i++) hd[i] = (Math.random() * 2 - 1) * 0.5;
+    const hn = c.createBufferSource(); hn.buffer = hb; hn.loop = true;
+    this.hissGain = c.createGain(); this.hissGain.gain.value = 0;
+    hn.connect(this.hissGain); this.hissGain.connect(this.roll);
+    this.makeup = c.createGain(); this.makeup.gain.value = 1;
+    this.input.connect(this.sat); this.sat.connect(this.roll); this.roll.connect(this.makeup);
+    hn.start();
+    this.output = this.makeup;
+  }
+  setBalance(k: 'hiss'|'sat'|'wow'|'roll', v: number) { this.bal[k] = Math.max(0, Math.min(1, v)); this.apply(); }
+  setMaster(a: number) { this.master = Math.max(0, Math.min(1, a)); this.apply(); }
+  setMute(on: boolean) { this.muted = on; this.apply(); }
+  private apply() {
+    const m = this.muted ? 0 : this.master;
+    const t = { hiss: this.bal.hiss*m, sat: this.bal.sat*m, wow: this.bal.wow*m, roll: this.bal.roll*m };
+    this.depth.gain.value = t.wow * 0.0025;
+    this.sat.curve = TapeUnit.satCurve(t.sat * 0.5);
+    this.makeup.gain.value = 1 / (1 + t.sat * 1.2);
+    this.roll.frequency.value = 20000 - t.roll * 17000;
+    this.hissGain.gain.value = t.hiss * 0.03;
+  }
+  static satCurve(amt: number): Float32Array {
+    const n = 1024, curve = new Float32Array(n), k = amt * 40;
+    for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; curve[i] = k > 0 ? ((1 + k) * x) / (1 + k * Math.abs(x)) : x; }
+    return curve;
+  }
+}

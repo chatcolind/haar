@@ -11,7 +11,7 @@ import {
   startAudio, microcosmStart, microcosmStopEngine,
   microcosmEngineActive, microcosmEngineLevel, microcosmFadeInEngine, microcosmMasterLevel, microcosmEnginePan, microcosmEngineEQ,
   microcosmAddOrb, microcosmRemoveOrb,
-  microcosmGrainSpread, microcosmPitchSpread, microcosmOrbXY, microcosmOnGrain, microcosmDrainGrains, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
+  microcosmGrainSpread, microcosmPitchSpread, microcosmOrbXY, microcosmOnGrain, microcosmDrainGrains, microcosmOrbSlot, microcosmConstTape, microcosmConstTapeBalance, microcosmSourceFreq, microcosmTape, microcosmTapeBalance, microcosmTapeMute,
   microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmOrbAbsence, microcosmOrbChaos, microcosmFreezeSource, microcosmFauveOn, microcosmFauveOff, microcosmFauveOffAll, microcosmFauveParam, microcosmFauveUpdatePitch, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
@@ -554,6 +554,20 @@ export default function FieldPage() {
   const [hoverConst, setHoverConst] = useState<string|null>(null); // cosmos: system under the pointer
   const [forwardConst, setForwardConst] = useState<string|null>(null); // constellation brought forward (interior view = the pre-Spheres field)
   const forwardConstRef = useRef<string|null>(null); useEffect(() => { forwardConstRef.current = forwardConst; }, [forwardConst]);
+  const constTapeRef = useRef<Record<string, number>>({});   // per-constellation tape amount (0..1)
+  const constTapeBalRef = useRef<Record<string, { wow:number; sat:number; roll:number; hiss:number }>>({});
+  useEffect(() => {
+    // CONSTELLATION REELS: slot = live-constellation index + 1 (stable while membership order holds).
+    const live = constellations.filter(c => c.orbIds.length > 0);
+    live.forEach((c, ci) => {
+      const slot = c.id === DEFAULT_CONST_ID ? 0 : Math.min(8, ci + 1);
+      c.orbIds.forEach(oid => microcosmOrbSlot(oid, slot));
+      if (slot > 0) {
+        const b = constTapeBalRef.current[c.id];
+        if (b) (['wow','sat','roll','hiss'] as const).forEach(k => microcosmConstTapeBalance(slot, k, b[k]));
+      }
+    });
+  }, [constellations]);
   useEffect(() => {
     if (!forwardConst) return;
     const alive = constellations.some(c => c.id === forwardConst && c.orbIds.length > 0);
@@ -1540,6 +1554,7 @@ export default function FieldPage() {
             <span style={{ fontFamily:'"Space Mono", monospace', fontSize:13, letterSpacing:'0.35em', color: CONST_TINTS[Math.max(0, constellations.filter(c=>c.orbIds.length>0).findIndex(c=>c.id===forwardConst)) % CONST_TINTS.length], opacity:0.9 }}>
               {(constellations.find(c=>c.id===forwardConst)?.name ?? '').toUpperCase()}
             </span>
+
           </div>
           <div onClick={()=>{ setForwardConst(null); setFocused(null); }}
             title="back to the cosmos"
@@ -2660,7 +2675,16 @@ export default function FieldPage() {
         </div>
       )}
       {/* TAPE — expands upward from the Tape button (FIELD row, bottom-left) */}
-      {tapeOpen && (
+      {tapeOpen && (() => {
+        // ONE TAPE PANEL, CONTEXT-AWARE: cosmos/single-field -> MASTER; inside a constellation -> its reel.
+        const liveC = constellations.filter(c=>c.orbIds.length>0);
+        const reelIdx = forwardConst && forwardConst !== DEFAULT_CONST_ID ? liveC.findIndex(c=>c.id===forwardConst) : -1;
+        const reelSlot = reelIdx >= 0 ? Math.min(8, reelIdx + 1) : 0;
+        const isReel = reelSlot > 0;
+        const reelName = isReel ? (liveC[reelIdx]?.name ?? '') : '';
+        const reelTint = isReel ? CONST_TINTS[reelIdx % CONST_TINTS.length] : '#e8b070';
+        const reelBal = isReel ? (constTapeBalRef.current[forwardConst!] ?? { wow:0, sat:0, roll:0, hiss:0 }) : null;
+        return (
         <div style={{ position:'fixed', left:40, bottom:132, zIndex:340, width:288,
           background:'linear-gradient(180deg, rgba(20,16,12,0.97), rgba(12,10,9,0.97))',
           backdropFilter:'blur(16px)', border:'1px solid rgba(232,176,112,0.28)', borderRadius:14,
@@ -2668,15 +2692,15 @@ export default function FieldPage() {
           boxShadow:'0 8px 44px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(232,176,112,0.1), inset 0 1px 0 rgba(232,176,112,0.08)',
           animation:'tapeRise 0.18s ease-out' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
-            <span style={{ fontSize:10.5, letterSpacing:'0.32em', color:'#e8b070', fontFamily:'"Space Mono", monospace', fontWeight:400 }}>TAPE</span>
+            <span style={{ fontSize:10.5, letterSpacing:'0.32em', color:reelTint, fontFamily:'"Space Mono", monospace', fontWeight:400 }}>{isReel ? `TAPE · ${reelName.toUpperCase()}` : 'TAPE · MASTER'}</span>
             <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-              <span onClick={()=>{ const m=!tapeMuted; setTapeMuted(m); microcosmTapeMute(m); }}
-                style={{ cursor:'pointer', fontSize:9.5, letterSpacing:'0.18em', fontFamily:'"Space Mono", monospace', padding:'3px 8px', borderRadius:5, border:`1px solid ${tapeMuted?'rgba(212,96,80,0.7)':'rgba(122,245,200,0.7)'}`, color: tapeMuted?'#d46050':'#7af5c8', background: tapeMuted?'rgba(212,96,80,0.12)':'rgba(122,245,200,0.12)' }}>{tapeMuted?'OFF':'ON'}</span>
+              {!isReel && <span onClick={()=>{ const m=!tapeMuted; setTapeMuted(m); microcosmTapeMute(m); }}
+                style={{ cursor:'pointer', fontSize:9.5, letterSpacing:'0.18em', fontFamily:'"Space Mono", monospace', padding:'3px 8px', borderRadius:5, border:`1px solid ${tapeMuted?'rgba(212,96,80,0.7)':'rgba(122,245,200,0.7)'}`, color: tapeMuted?'#d46050':'#7af5c8', background: tapeMuted?'rgba(212,96,80,0.12)':'rgba(122,245,200,0.12)' }}>{tapeMuted?'OFF':'ON'}</span>}
               <span onClick={()=>setTapeOpen(false)} style={{ cursor:'pointer', color:'rgba(232,226,214,0.35)', fontSize:15, lineHeight:1, padding:'2px 4px' }}>×</span>
             </div>
           </div>
-          {/* MASTER */}
-          <div style={{ marginBottom:16 }}>
+          {/* MASTER (master tier only) */}
+          {!isReel && <div style={{ marginBottom:16 }}>
             <div style={{ display:'flex', justifyContent:'space-between', marginBottom:7, alignItems:'baseline' }}>
               <span style={{ fontSize:11, letterSpacing:'0.16em', color:'#E8E2D6', fontFamily:'"Space Mono", monospace' }}>MASTER</span>
               <span style={{ fontSize:12, color:'#e8b070', fontFamily:'"Space Mono", monospace' }}>{Math.round(tapeMaster*100)}</span>
@@ -2684,22 +2708,25 @@ export default function FieldPage() {
             <input type="range" min={0} max={1} step={0.01} value={tapeMaster}
               onChange={(e)=>{ const v=parseFloat(e.target.value); setTapeMaster(v); microcosmTape(v); }}
               style={{ width:'100%', height:3, accentColor:'#E8E2D6', cursor:'pointer' }} />
-          </div>
+          </div>}
           <div style={{ height:1, background:'rgba(232,176,112,0.14)', margin:'0 -20px 16px' }} />
           {/* INGREDIENTS */}
           {([['hiss','HISS'],['sat','SATURATION'],['wow','WOW · FLUTTER'],['roll','ROLLOFF']] as const).map(([k,lbl],idx)=>(
             <div key={k} style={{ marginBottom: idx===3?0:13 }}>
               <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, alignItems:'baseline' }}>
                 <span style={{ fontSize:10.5, letterSpacing:'0.14em', color:'rgba(232,226,214,0.55)', fontFamily:'Rajdhani, sans-serif', fontWeight:500 }}>{lbl}</span>
-                <span style={{ fontSize:11, color:'rgba(232,176,112,0.85)', fontFamily:'"Space Mono", monospace' }}>{Math.round((tapeBal as any)[k]*100)}</span>
+                <span style={{ fontSize:11, color:'rgba(232,176,112,0.85)', fontFamily:'"Space Mono", monospace' }}>{Math.round((isReel ? (reelBal as any)[k] : (tapeBal as any)[k])*100)}</span>
               </div>
-              <input type="range" min={0} max={1} step={0.01} value={(tapeBal as any)[k]}
-                onChange={(e)=>{ const v=parseFloat(e.target.value); setTapeBal(b=>({...b,[k]:v})); microcosmTapeBalance(k, v); }}
+              <input type="range" min={0} max={1} step={0.01} value={isReel ? (reelBal as any)[k] : (tapeBal as any)[k]}
+                onChange={(e)=>{ const v=parseFloat(e.target.value);
+                  if (isReel) { const cur = constTapeBalRef.current[forwardConst!] ?? { wow:0, sat:0, roll:0, hiss:0 }; (cur as any)[k]=v; constTapeBalRef.current[forwardConst!]=cur; microcosmConstTapeBalance(reelSlot, k, v); forceOrb(x=>x+1); }
+                  else { setTapeBal(b=>({...b,[k]:v})); microcosmTapeBalance(k, v); } }}
                 style={{ width:'100%', height:3, accentColor:'#e8b070', cursor:'pointer' }} />
             </div>
           ))}
         </div>
-      )}
+      );
+      })()}
 
       {/* CONTROL — full-screen hardware mapping page (instrument-grade) */}
       {controlOpen && (

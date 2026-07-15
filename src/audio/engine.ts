@@ -685,6 +685,9 @@ export function microcosmActivity(a: number): void { microcosmCore?.setActivity(
 export function microcosmGrainSpread(x: number): void { microcosmCore?.setGrainSpread(x); }
 export function microcosmPitchSpread(y: number): void { microcosmCore?.setPitchSpread(y); }
 export function microcosmOrbXY(id: string, x: number, y: number): void { (microcosmCore as any)?.setOrbXY(id, x, y); }
+export function microcosmOrbSlot(orbId: string, slot: number): void { (microcosmCore as any)?.setOrbSlot(orbId, slot); }
+export function microcosmConstTape(slot: number, amount: number): void { (microcosmCore as any)?.setConstTape(slot, amount); }
+export function microcosmConstTapeBalance(slot: number, k: 'hiss'|'sat'|'wow'|'roll', v: number): void { (microcosmCore as any)?.setConstTapeBalance(slot, k, v); }
 import { drainGrainQueue as __drainGrainQueue } from './microcosm';
 export function microcosmDrainGrains(): { id: string; g: number }[] { return __drainGrainQueue(); }
 export function microcosmOnGrain(_cb: ((orbId: string, gain: number) => void) | null): void {}

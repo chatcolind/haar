@@ -36,6 +36,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
     this._sr = sampleRate;    // worklet global
 
     this.port.onmessage = (e) => {
+      this.handleSlotMessage(e.data);
       const m = e.data;
       if (m.type === 'enginePan') {
         this.enginePan[m.id] = m.pan;
@@ -344,11 +345,21 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
     l = this._eqBand(st.hi,l,'L'); r = this._eqBand(st.hi,r,'R');
     return [l, r];
   }
+  // CONSTELLATION ROUTING: orb id -> output slot (0 = default/unrouted, 1..8 = constellations)
+  handleSlotMessage(d) {
+    if (d.type === 'orbSlot') { this.orbSlots = this.orbSlots || {}; this.orbSlots[d.orbId] = d.slot; }
+    if (d.type === 'clearSlots') this.orbSlots = {};
+  }
   process(inputs, outputs) {
     const input = inputs[0];
     const output = outputs[0];
     const outL = output[0];
     const outR = output[1] || output[0];
+    // clear every slot's buffers (slot 0 cleared below with outL/outR)
+    for (let s = 1; s < outputs.length; s++) {
+      const o = outputs[s];
+      if (o && o[0]) { o[0].fill(0); if (o[1]) o[1].fill(0); }
+    }
     const inCh = input && input[0] ? input[0] : null;
     const n = outL.length;
 
@@ -408,14 +419,16 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         gr.remaining--;
       }
 
-      // EQ each engine's bus (continuous biquad state), then sum to output.
+      // EQ each engine's bus (continuous biquad state), then sum into the orb's CONSTELLATION SLOT.
       for (const eng in panAccL) {
         let l = panAccL[eng], r = panAccR[eng];
         if (this.eqState[eng] && !this.eqState[eng].flat) {
           const o = this._applyEQ(eng, l, r); l = o[0]; r = o[1];
         }
-        outL[i] += l;
-        outR[i] += r;
+        const slot = (this.orbSlots && this.orbSlots[eng]) || 0;
+        const so = outputs[slot];
+        if (slot > 0 && so && so[0]) { so[0][i] += l; (so[1] || so[0])[i] += r; }
+        else { outL[i] += l; outR[i] += r; }
       }
       // FREEZE LOOP PLAYER: one clean read head over the captured bar (bypasses grains).
       if (this.frozen && this.freezeBuf && this.freezeLen > 0) {
@@ -453,7 +466,10 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         const ef = Math.min(64, flen >> 1);          // edge fade so joins never click
         if (fv.pos < ef) smp *= fv.pos / ef;
         else if (fv.pos > flen - ef) smp *= (flen - fv.pos) / ef;
-        outL[i] += smp; outR[i] += smp;
+        { const fslot = (this.orbSlots && this.orbSlots[oid]) || 0;
+          const fo = outputs[fslot];
+          if (fslot > 0 && fo && fo[0]) { fo[0][i] += smp; (fo[1] || fo[0])[i] += smp; }
+          else { outL[i] += smp; outR[i] += smp; } }
         fv.pos += rate;                               // advance by pitch rate (was +1 = native/low)
         if (fv.pos >= flen) {
           fv.pos = 0;
