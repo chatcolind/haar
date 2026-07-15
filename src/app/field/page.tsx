@@ -594,6 +594,16 @@ export default function FieldPage() {
     }
     const territory = dim.w / Math.max(fieldRef2.current.systems.length, 1) * 0.45;
     setHoverConst(bestD < territory ? best : null);
+    if (fieldRef2.current.systems.length === 0) {
+      // FIELD MODE: nearest orb within reach reveals its name
+      let bo: string|null = null, bd = Infinity;
+      for (const oid in orbScreenPosRef.current) {
+        const p2 = orbScreenPosRef.current[oid];
+        const d = Math.hypot(px - p2.x, py - p2.y);
+        if (d < bd) { bd = d; bo = oid; }
+      }
+      setHoverOrb(bd < 130 ? bo : null);
+    }
   };
   const [midiView, setMidiView] = useState<'monitor'|'map'>('monitor');
   const [controlOpen, setControlOpen] = useState(false); // full-screen CONTROL (MIDI mapping) page
@@ -1361,16 +1371,21 @@ export default function FieldPage() {
   // The screen has two territories: TOP (field-or-focus) and BOTTOM (mixer, when open).
   // Opening the mixer shrinks the TOP; the field re-lays-out into the smaller height.
   const MIXER_H = 0.40;                    // mixer occupies 40% of screen when open
+  const [survey, setSurvey] = useState(false);   // hold N: every name in light at once
+  const [hoverOrb, setHoverOrb] = useState<string|null>(null);   // interior: orb near the pointer
   const [consoleUp, setConsoleUp] = useState(true);   // bottom console (keyboard/tokens): up = working, down = full sky
   const topFrac = mixOpen ? (1 - MIXER_H) : consoleUp ? FIELD_H : 0.93;  // console down -> the cosmos takes the window
   const fh = dim.h * topFrac;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
+      if (e.key === 'n' || e.key === 'N') setSurvey(true);
       if (e.key === 'c' || e.key === 'C') setConsoleUp(v => !v);
     };
+    const onUp = (e: KeyboardEvent) => { if (e.key === 'n' || e.key === 'N') setSurvey(false); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keyup', onUp);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onUp); };
   }, []);              // field height drives ALL orb positions (auto re-layout)
   const mixerH = dim.h * MIXER_H;          // mixer territory height
   const bottomBarH = dim.h * 0.30;         // the keyboard/field/system bar height (field state)
@@ -1536,7 +1551,7 @@ export default function FieldPage() {
             <circle cx={sys.cx} cy={sys.cy} r={6.5} fill="#fff" opacity={0.95} />
             <text x={sys.cx} y={sys.cy - 40} textAnchor="middle"
               fontFamily='"Space Mono", monospace' fontSize={13} letterSpacing="0.3em"
-              fill={sys.tint} opacity={hov ? 0.9 : 0} style={{ transition:'opacity 0.5s' }}>
+              fill={sys.tint} opacity={(hov || survey) ? 0.9 : 0} style={{ transition:'opacity 0.5s' }}>
               {name.toUpperCase()}
             </text>
           </g>
@@ -1556,11 +1571,16 @@ export default function FieldPage() {
             </span>
 
           </div>
-          <div onClick={()=>{ setForwardConst(null); setFocused(null); }}
-            title="back to the cosmos"
-            style={{ position:'absolute', top:22, left:320, zIndex:260, display:'flex', alignItems:'center', gap:9, cursor:'pointer', padding:'8px 18px', borderRadius:20, border:'0.5px solid rgba(255,255,255,0.22)', color:'rgba(232,226,214,0.7)' }}>
-            <span style={{ fontSize:15 }}>←</span>
-            <span style={{ fontFamily:'"Space Mono", monospace', fontSize:10, letterSpacing:'0.25em' }}>COSMOS</span>
+          <div className="haar-hover" onClick={()=>{ setForwardConst(null); setFocused(null); }}
+            style={{ position:'absolute', top:26, left:340, zIndex:260, display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
+            {/* the cosmos in miniature: an orbit seen edge-on, a body upon it */}
+            <svg width="30" height="18" viewBox="0 0 30 18" style={{ opacity:0.4, transition:'opacity 0.25s' }}
+              onMouseEnter={(e)=>{ (e.currentTarget as SVGElement).style.opacity='0.85'; }}
+              onMouseLeave={(e)=>{ (e.currentTarget as SVGElement).style.opacity='0.4'; }}>
+              <ellipse cx="15" cy="9" rx="13" ry="5" fill="none" stroke="#E8E2D6" strokeWidth="0.8" />
+              <circle cx="24.5" cy="6.4" r="2.1" fill="#E8E2D6" />
+            </svg>
+            <span className="haar-lbl" style={{ fontFamily:'"Space Mono", monospace', fontSize:9.5, letterSpacing:'0.3em', color:'rgba(232,226,214,0.6)' }}>COSMOS</span>
           </div>
         </>
       )}
@@ -1603,6 +1623,7 @@ export default function FieldPage() {
               <Orb id={o.id} label={o.label} colorKey={o.colorKey}
                 subLabel={constFor(o.id)?.name} tint={tintFor(o.id)}
                 x={slot.x} y={slot.y} size={slot.size} volume={0.7}
+                hideLabel={!(survey || hoverOrb === o.id || selected === o.id)} hideWave
                 selected={selected===o.id} xy={xyMap[o.id]} onSelect={handleSelect} onXY={handleXY} />
             </div>
           );
