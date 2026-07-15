@@ -1372,38 +1372,10 @@ export default function FieldPage() {
   const fieldWrapRefs = useRef<Record<string, HTMLDivElement | null>>({}); // interior/single-field orbs: idle drift + centre breath
   // GRAIN COMETS: pool of real-grain sparks drawn on one canvas by the driver
   const cometCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const spriteCache = useRef<Record<string, HTMLCanvasElement>>({});
-  const glowSprite = (tint: string): HTMLCanvasElement => {
-    let sp = spriteCache.current[tint];
-    if (sp) return sp;
-    sp = document.createElement('canvas'); sp.width = 64; sp.height = 64;
-    const c = sp.getContext('2d')!;
-    const g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
-    g.addColorStop(0, tint);                 // tint-hot centre — colour IS the light
-    g.addColorStop(0.55, tint);              // saturated body holds
-    g.addColorStop(1, 'rgba(0,0,0,0)');      // soft falloff
-    c.fillStyle = g; c.fillRect(0, 0, 64, 64);
-    spriteCache.current[tint] = sp;
-    return sp;
-  };
+
   const starfieldRef = useRef<{ w:number; layers:{x:number;y:number;r:number;a:number}[][] } | null>(null);
-  const cometsRef = useRef<{ x:number;y:number;vx:number;vy:number;born:number;life:number;tint:string;g:number }[]>([]);
   const orbScreenPosRef = useRef<Record<string,{x:number;y:number}>>({});   // driver publishes positions here each frame
-  const spawnComet = (orbId: string, gain: number) => {
-    const pos = orbScreenPosRef.current[orbId];
-    if (!pos) return;
-    const pool = cometsRef.current;
-    if (pool.length > 300) pool.splice(0, pool.length - 300);
-    let h = 3; for (let k = 0; k < orbId.length; k++) h = (h * 31 + orbId.charCodeAt(k)) & 0x7fffffff;
-    const stream = (h % 628) / 100 + performance.now() / 9000;
-    const a = stream + (Math.random() - 0.5) * 0.7;
-    const depth = (pos as any).d ?? 0.7;
-    const sp = (60 + Math.random() * 140 * (0.4 + gain)) * (0.6 + depth * 0.7);
-    pool.push({ x: pos.x, y: pos.y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
-      born: performance.now(), life: 1200 + Math.random()*900, tint: tintFor(orbId) ?? '#8ab6ff',
-      g: gain * (0.45 + depth * 0.9) });
-  };
-  const spawnCometRef = useRef(spawnComet); spawnCometRef.current = spawnComet;
+
   const fieldRef2 = useRef(field); fieldRef2.current = field;
   const selectedRef2 = useRef(selected); selectedRef2.current = selected;
   useEffect(() => {
@@ -1412,7 +1384,7 @@ export default function FieldPage() {
     const t0 = performance.now();
     const step = (now: number) => {
       const bars = (now - t0) / 1000 / barSec();
-      for (const gq of microcosmDrainGrains()) spawnCometRef.current(gq.id, gq.g);   // visuals pay, audio never does
+      microcosmDrainGrains();   // grain emission visuals retired — drain and discard so the queue never pools
       for (const o of fieldRef2.current.orbits) {
         const el = orbWrapRefs.current[o.orbId];
         if (!el) continue;
@@ -1460,6 +1432,14 @@ export default function FieldPage() {
         const r = el.getBoundingClientRect();
         orbScreenPosRef.current[oid] = { x: r.left + r.width/2, y: r.top + r.height/2 };
       }
+      // PLANET SPIN: drift each body's light point around its face (tempo-locked) — motion sells the sphere
+      {
+        const la = (bars / 8) * Math.PI * 2;                         // one lighting cycle per 8 bars
+        const lx = 38 + Math.cos(la) * 16, ly = 32 + Math.sin(la) * 12;
+        document.querySelectorAll('.planet-light').forEach(g => { g.setAttribute('cx', lx + '%'); g.setAttribute('cy', ly + '%'); });
+        const tx = 104 - lx, ty = 104 - ly;                          // terminator opposes the light
+        document.querySelectorAll('.planet-term').forEach(g => { g.setAttribute('cx', tx + '%'); g.setAttribute('cy', ty + '%'); });
+      }
       // PARALLAX STARFIELD: three layers sliding at different rates with the world's turn
       {
         const cv2 = cometCanvasRef.current;
@@ -1491,42 +1471,6 @@ export default function FieldPage() {
             });
             ctx2.globalAlpha = 1;
           }
-        }
-      }
-      // COMET DRAW: one canvas, additive sparks decaying along their flight
-      const cv = cometCanvasRef.current;
-      if (cv) {
-        const ctx = cv.getContext('2d');
-        if (ctx) {
-          ctx.globalCompositeOperation = 'lighter';   // starfield pass cleared + drew beneath
-          const pool = cometsRef.current;
-          for (let i = pool.length - 1; i >= 0; i--) {
-            const c = pool[i];
-            const t = (now - c.born) / c.life;
-            if (t >= 1) { pool.splice(i, 1); continue; }
-            const curl = 0.9 * t;                              // velocity slowly rotates: organic arcs
-            const cvx = c.vx * Math.cos(curl) - c.vy * Math.sin(curl);
-            const cvy = c.vx * Math.sin(curl) + c.vy * Math.cos(curl);
-            const x = c.x + cvx * t, y = c.y + cvy * t;
-            const alpha = (1 - t) * (0.55 + c.g * 0.45);
-            const sp = glowSprite(c.tint);
-            // tail: fading sprite ghosts along the recent path (soft light, not vector)
-            for (let k = 1; k <= 3; k++) {
-              const tk = Math.max(0, t - k * 0.07);
-              const gx = c.x + cvx * tk, gy = c.y + cvy * tk;
-              const gs = (7 + c.g * 8) * (1 - k * 0.22);
-              ctx.globalAlpha = alpha * 0.18 * (1 - k * 0.25);
-              ctx.drawImage(sp, gx - gs/2, gy - gs/2, gs, gs);
-            }
-            // head: big faint aura + small bright core, both from the tinted sprite
-            const hs = 14 + c.g * 14;
-            ctx.globalAlpha = alpha * 0.5;
-            ctx.drawImage(sp, x - hs/2, y - hs/2, hs, hs);
-            const cs = 5 + c.g * 5;
-            ctx.globalAlpha = alpha;
-            ctx.drawImage(sp, x - cs/2, y - cs/2, cs, cs);
-          }
-          ctx.globalAlpha = 1;
         }
       }
       raf = requestAnimationFrame(step);
@@ -1570,7 +1514,7 @@ export default function FieldPage() {
           return (
           <g key={sys.constId}>
             {/* AMBIENT BLEED: the system's light staining surrounding space */}
-            <circle cx={sys.cx} cy={sys.cy} r={Math.min(dim.w / Math.max(field.systems.length,1) * 0.52, 420)} fill={sys.tint} opacity={0.035} />
+            <circle cx={sys.cx} cy={sys.cy} r={Math.min(dim.w / Math.max(field.systems.length,1) * 0.52, 420)} fill={sys.tint} opacity={0.012} />
             {/* SOURCE STAR: a true luminary — layered corona, hot core, faint spill into the void */}
             <circle cx={sys.cx} cy={sys.cy} r={90} fill={sys.tint} opacity={hov ? 0.10 : 0.06} />
             <circle cx={sys.cx} cy={sys.cy} r={44} fill={sys.tint} opacity={0.14} />

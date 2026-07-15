@@ -30,6 +30,7 @@ type OrbProps = {
 };
 
 const BOX = 600;
+const PLANET = true;   // EXPERIMENT: lit-sphere bodies (bright limb, curved shading, thin atmosphere rim). false = legacy fog.
 const TRAVEL = 0.42;
 
 export default function Orb({
@@ -98,11 +99,38 @@ export default function Orb({
     >
       <svg width={BOX} height={BOX} viewBox={`0 0 ${BOX} ${BOX}`} style={{ overflow: 'visible' }}>
         <defs>
-          <radialGradient id={`fill-${id}`} cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor={c.core} stopOpacity={selected ? 1 : 0.8} />
-            <stop offset={`${Math.round(46 + (1 - glowScale) * 34)}%`} stopColor={c.mid} stopOpacity={(selected ? 0.68 : 0.46) * (0.55 + glowScale * 0.45)} />
-            <stop offset="100%" stopColor={c.glow} stopOpacity="0" />
-          </radialGradient>
+          {PLANET ? (
+            <radialGradient id={`fill-${id}`} className="planet-light" cx="38%" cy="32%" r="78%">
+              <stop offset="0%" stopColor={c.core} stopOpacity="1" />
+              <stop offset="28%" stopColor={c.mid} stopOpacity="0.96" />
+              <stop offset="66%" stopColor={c.glow} stopOpacity="0.9" />
+              <stop offset="92%" stopColor="#05060c" stopOpacity="0.92" />
+              <stop offset="100%" stopColor="#05060c" stopOpacity="0" />
+            </radialGradient>
+          ) : (
+            <radialGradient id={`fill-${id}`} cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor={c.core} stopOpacity={selected ? 1 : 0.8} />
+              <stop offset={`${Math.round(46 + (1 - glowScale) * 34)}%`} stopColor={c.mid} stopOpacity={(selected ? 0.68 : 0.46) * (0.55 + glowScale * 0.45)} />
+              <stop offset="100%" stopColor={c.glow} stopOpacity="0" />
+            </radialGradient>
+          )}
+          {PLANET && (
+            <radialGradient id={`term-${id}`} className="planet-term" cx="66%" cy="72%" r="80%">
+              <stop offset="0%" stopColor="#05060c" stopOpacity="0" />
+              <stop offset="58%" stopColor="#05060c" stopOpacity="0" />
+              <stop offset="88%" stopColor="#05060c" stopOpacity="0.55" />
+              <stop offset="100%" stopColor="#05060c" stopOpacity="0.8" />
+            </radialGradient>
+          )}
+          {PLANET && (
+            <radialGradient id={`atmo-${id}`} className="planet-light" cx="42%" cy="38%" r="62%">
+              <stop offset="0%" stopColor={c.mid} stopOpacity="0" />
+              <stop offset="58%" stopColor={c.mid} stopOpacity="0" />
+              <stop offset="78%" stopColor={c.mid} stopOpacity={0.16 * glowScale + 0.06} />
+              <stop offset="92%" stopColor={c.mid} stopOpacity={0.08 * glowScale + 0.03} />
+              <stop offset="100%" stopColor={c.glow} stopOpacity="0" />
+            </radialGradient>
+          )}
           <radialGradient id={`star-${id}`} cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="#fff" stopOpacity="1" />
             <stop offset="60%" stopColor="#fff" stopOpacity="0.7" />
@@ -114,7 +142,15 @@ export default function Orb({
         <g transform={`translate(${cx} ${cx})`}>
           {/* visuals — non-interactive */}
           <g style={{ pointerEvents: 'none' }}>
-            <ellipse cx="0" cy="0" rx={r} ry={r} fill={`url(#fill-${id})`} />
+            {PLANET ? (<>
+              {/* atmosphere: thin luminous shell hugging the body */}
+              <ellipse className="planet-atmo" cx="0" cy="0" rx={r * 0.78} ry={r * 0.78} fill={`url(#atmo-${id})`} />
+              {/* the BODY: lit sphere with a real silhouette + drifting terminator shadow */}
+              <ellipse cx="0" cy="0" rx={r * 0.52} ry={r * 0.52} fill={`url(#fill-${id})`} />
+              <ellipse cx="0" cy="0" rx={r * 0.52} ry={r * 0.52} fill={`url(#term-${id})`} />
+            </>) : (
+              <ellipse cx="0" cy="0" rx={r} ry={r} fill={`url(#fill-${id})`} />
+            )}
             <circle cx="0" cy="0" r={haloR} fill="none" stroke={c.mid}
               strokeWidth={haloW * (0.4 + glowScale * 0.6)} opacity={(selected ? 0.3 : 0.18) * (0.5 + glowScale * 0.5)} filter={`url(#halo-${id})`} />
             {!hideWave && <path ref={waveRef} transform={`translate(${coreX} ${coreY})`} d="M -44 0 Q -22 0 0 0 T 44 0"
@@ -125,14 +161,14 @@ export default function Orb({
             style={{ pointerEvents: 'all', cursor: 'pointer' }}
             onClick={() => { if (!dragging.current) onSelect?.(id); }} />
           {/* draggable core (on top) */}
-          <g transform={`translate(${coreX} ${coreY})`}
+          {(selected || !PLANET) && <g transform={`translate(${coreX} ${coreY})`}
              onPointerDown={corePointerDown} onPointerMove={corePointerMove}
              onPointerUp={corePointerUp} onPointerLeave={corePointerUp}
              style={{ pointerEvents: selected ? 'all' : 'none', cursor: selected ? 'grab' : 'pointer' }}>
             <circle cx="0" cy="0" r={selected ? 34 : 18} fill="transparent" />
             <circle cx="0" cy="0" r={selected ? 18 : 11} fill={`url(#star-${id})`} filter={`url(#soft-${id})`} style={{ pointerEvents: 'none' }} />
             <circle cx="0" cy="0" r={selected ? 7 : 4} fill="#fff" style={{ pointerEvents: 'none' }} />
-          </g>
+          </g>}
         </g>
       </svg>
       {!hideLabel && <div style={{
