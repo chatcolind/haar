@@ -1710,7 +1710,7 @@ export default function FieldPage() {
             })()}
 
             {/* LEFT COLUMN — level + voices (distributed) */}
-            <div style={{ position:'absolute', left:'3%', top:64, bottom: (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', paddingLeft:18, overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
+            <div style={{ position:'absolute', left:'3%', top:64, bottom: (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', paddingLeft:18, overflow:'auto', zIndex:60, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
               {/* LEVEL */}
               <div>
@@ -1799,7 +1799,7 @@ export default function FieldPage() {
             </div>
 
             {/* RIGHT COLUMN — signal path + flavour (distributed) */}
-            <div style={{ position:'absolute', right:'3%', top:64, bottom: (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:2, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
+            <div style={{ position:'absolute', right:'3%', top:64, bottom: (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:60, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
               {/* SIGNAL PATH — effect-orbs on a thread of light; tap to edit (UI ready, not yet audible) */}
               <div>
