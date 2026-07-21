@@ -330,7 +330,8 @@ export class Microcosm {
     const r = detuneClamped * homeRatio;            // exact interval * gentle wobble
     // final safety only for extreme up-stacks (e.g. +2oct * wide detune): cap high but generous
     const capped = Math.sign(r || 1) * Math.min(Math.abs(r), 4.2);
-    const source = this.engineSource[this._currentEngine] || 'default';
+    let source = this.engineSource[this._currentEngine] || 'default';
+    if ((spec as any).__fbSource) { source = (spec as any).__fbSource; delete (spec as any).__fbSource; }  // SPIKE LATHE
     const posEng = this.enginePosition[this._currentEngine];
     const sprayEng = this.engineSpray[this._currentEngine];
     const absEng = this.engineAbsence[this._currentEngine] || 0;
@@ -369,6 +370,10 @@ export class Microcosm {
   setOrbSubdiv(id: string, n: number): void { this.engineSubdiv[id] = n; }
   setOrbFill(id: string, f: number): void { this.engineFill[id] = Math.max(0, Math.min(1, f)); }
   setOrbSeed(id: string, seed: number): void { this.engineSeed[id] = seed; this.engineGridN[id] = 0; }
+  // SPIKE LATHE switch
+  private _latheOn: Record<string, boolean> = {};
+  latheOn(orbId: string): void { this._latheOn[orbId] = true; this.node?.port.postMessage({ type: 'latheOn', orbId }); }
+  latheOff(orbId: string): void { delete this._latheOn[orbId]; this.node?.port.postMessage({ type: 'latheOff', orbId }); }
   // deterministic hash -> 0..1 from (seed, grid index). Same seed+index = same result.
   private fillRoll(seed: number, n: number): number {
     let x = (seed * 2654435761 + n * 40503) >>> 0;
@@ -527,7 +532,7 @@ export class Microcosm {
     const tickFns: Record<string, (lvl: number) => number> = {
       mosaic:  (l) => this.tickMosaic(l),
       haze:    (l) => this.tickHaze(l),
-      tunnel:  (l) => this.tickTunnel(l),
+      tunnel:  (l) => (Microcosm as any).USE_RECIPE.tunnel ? this.tickCloud('tunnel', l) : this.tickTunnel(l),
       strum:   (l) => this.tickStrum(l),
       reverse: (l) => this.tickReverse(l),
       shimmer: (l) => this.tickShimmer(l),
@@ -575,6 +580,48 @@ export class Microcosm {
   }
 
   // ── MOSAIC: bright, octave-stacked overlapping loops ──
+  // ── CLOUD RECIPES: engines as data (pilot: TUNNEL) ──────────────────────
+  // A CloudRecipe is the audited grain-sentence as numbers: how many grains,
+  // each one's length/read-depth/gain/pan, and the tick pace. tickCloud() is
+  // the single player. Gate: statistically identical to the hardcoded tick.
+  static CLOUD_RECIPES: Record<string, any> = {
+    tunnel: {
+      voicesBase: 2, voicesDensity: 2,          // 2 + round(d*2)
+      lenBase: 0.6, lenSpreadX: 1.0,            // 0.6 + X*1.0 seconds
+      lenJitterMin: 0.8, lenJitterRange: 0.4,   // * (0.8 + rnd*0.4)
+      behindMin: 0.5, behindRange: 2.0,         // read-depth seconds into the past
+      gain: 0.3, gainSqrtVoices: true,          // 0.3/sqrt(voices) * 1.6 * lvl
+      panWidth: 1.0,                            // full random pan
+      tickBase: 180, tickDensity: 80,           // 180 - d*80 ms
+      pitch: 'flavour',                          // rate from pickRate (palette-aware)
+    },
+  };
+  static USE_RECIPE = { tunnel: true };          // A/B flag: false = old hardcoded tick
+  // WORKBENCH: shipped recipes frozen for RESET; live edits go to CLOUD_RECIPES
+  static SHIPPED_RECIPES: Record<string, any> = JSON.parse(JSON.stringify(Microcosm.CLOUD_RECIPES));
+  static recipeGet(id: string): any { return Microcosm.CLOUD_RECIPES[id]; }
+  static recipeSet(id: string, key: string, value: number): void {
+    if (Microcosm.CLOUD_RECIPES[id]) Microcosm.CLOUD_RECIPES[id][key] = value;
+  }
+  static recipeReset(id: string): void {
+    if (Microcosm.SHIPPED_RECIPES[id]) Microcosm.CLOUD_RECIPES[id] = JSON.parse(JSON.stringify(Microcosm.SHIPPED_RECIPES[id]));
+  }
+
+  private tickCloud(recipeId: string, lvl: number = 1): number {
+    const R = Microcosm.CLOUD_RECIPES[recipeId];
+    const d = this.curDensity;
+    const voices = R.voicesBase + Math.round(d * R.voicesDensity);
+    const baseLen = R.lenBase + this.grainSpread * R.lenSpreadX;
+    for (let v = 0; v < voices; v++) {
+      const rate = R.pitch === 'flavour' ? this.pickRate(this._currentEngine) : 1;
+      const lenSamp = Math.floor(this._sr * (baseLen * (R.lenJitterMin + Math.random() * R.lenJitterRange)));
+      const behind = Math.floor(this._sr * (R.behindMin + Math.random() * R.behindRange));
+      const gain = (R.gainSqrtVoices ? R.gain / Math.sqrt(voices) : R.gain) * 1.6 * lvl;
+      this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: (Math.random() * 2 - 1) * R.panWidth });
+    }
+    return R.tickBase - d * R.tickDensity;
+  }
+
   private tickMosaic(lvl: number = 1): number {
     // TEST DENSITY: voices + firing rate driven by density (not activity)
     const d = this.engineDensity[this._currentEngine] ?? 0.5;   // per-orb density
@@ -605,7 +652,8 @@ export class Microcosm {
       const lenSamp = Math.floor(this._sr * (baseLen * (0.8 + Math.random() * 0.4)));
       const behind = Math.floor(this._sr * (0.3 + Math.random() * 2.5));
       const gain = 0.28 / Math.sqrt(voices) * 1.6 * lvl;
-      this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
+      // SPIKE (throwaway): grain flesh - slow bloom envelope + dark relative tilt
+      this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1, env: 0.85, tilt: -0.55 } as any);
     }
     // slow, steady replenishment
     return 160 - this.curDensity * 70;
@@ -698,23 +746,36 @@ export class Microcosm {
 
   // ── WARP: grain rate modulated by slow LFO — seasick, tape wow/flutter ──
   private tickWarp(lvl: number = 1): number {
-    this.warpPhase += 0.08;
-    const voices = 2 + Math.round(this.curDensity * 2);
-    // LFO bends pitch ±depth (depth grows with pitchSpread)
-    const depth = 0.06 + this.pitchSpread * 0.25;
-    const lfo = Math.sin(this.warpPhase) * depth;
-    const baseLen = 0.25 + this.grainSpread * 0.5;
-    for (let v = 0; v < voices; v++) {
-      const rate = 1 + lfo + (Math.random() * 0.02 - 0.01);
-      const lenSamp = Math.floor(this._sr * (baseLen * (0.8 + Math.random() * 0.4)));
-      const behind = Math.floor(this._sr * (0.3 + Math.random() * 1.8));
-      const gain = 0.3 / Math.sqrt(voices) * 1.6 * lvl;
-      this.spawnGrain({ startSamp: behind, rate, lenSamp, gain, pan: Math.random() * 2 - 1 });
+    // SPIKE RITUAL: one composed gesture cycling on the grid.
+    // Phrase (8s at spike tempo): GATHER (0-40%) sparse->dense low swell,
+    // CREST (40-55%) full density + pitch lift, FALL (55-80%) thinning descent,
+    // REST (80-100%) held silence. Anticipatable, like a bowing pattern.
+    const STEP = 50;
+    this._ritualT = (this._ritualT || 0) + STEP;
+    const CYCLE = 8000;
+    const ph = (this._ritualT % CYCLE) / CYCLE;
+    if (ph > 0.8) return STEP;   // REST - the silence is part of the phrase
+    let dens, pitch, glen, gvol;
+    if (ph < 0.4) {            // GATHER
+      const t = ph / 0.4;
+      dens = 0.15 + t * 0.6; pitch = 1; glen = 0.35; gvol = 0.25 + t * 0.35;
+    } else if (ph < 0.55) {    // CREST
+      const t = (ph - 0.4) / 0.15;
+      dens = 0.9; pitch = 1 + t * 1.0; glen = 0.25; gvol = 0.7;   // lifts an octave
+    } else {                   // FALL
+      const t = (ph - 0.55) / 0.25;
+      dens = 0.85 - t * 0.7; pitch = 2 - t * 1.5; glen = 0.45; gvol = 0.6 - t * 0.45;
     }
-    return 100 - this.curDensity * 50;
+    if (Math.random() < dens) {
+      const rate = pitch * (1 + (Math.random() * 0.02 - 0.01));
+      const lenSamp = Math.floor(this._sr * (glen * (0.8 + Math.random() * 0.4)));
+      const behind = Math.floor(this._sr * (0.3 + Math.random() * 1.2));
+      const pan = (ph < 0.55 ? -0.7 + ph * 2.4 : 0.6 - (ph - 0.55) * 2.0);  // phrase travels L->R->centre
+      this.spawnGrain({ startSamp: behind, rate, lenSamp, gain: gvol * lvl, pan });
+    }
+    return STEP;
   }
-
-  // ── SWARM: many tiny micro-detuned grains, high density — insect cloud ──
+  private _ritualT = 0;
   private tickSwarm(lvl: number = 1): number {
     const voices = 3 + Math.round(this.curDensity * 5);
     for (let v = 0; v < voices; v++) {

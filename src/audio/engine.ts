@@ -674,11 +674,21 @@ export function microcosmStopEngine(): void {
   microcosmCore?.stopEngine();
 }
 export function microcosmEngineActive(id: string, on: boolean): void { microcosmCore?.setEngineActive(id, on); }
-export function microcosmAddOrb(orbId: string, engineType: string, level: number = 0.8): void { (microcosmCore as any)?.addOrb(orbId, engineType, level); }
+export function microcosmAddOrb(orbId: string, engineType: string, level: number = 0.8): void {
+  (microcosmCore as any)?.addOrb(orbId, engineType, level);
+  // SPIKE LATHE: warp orbs audition the feedback topology
+  // spike bench dismantled - worklet reverted; family verdicts live in HAAR_HANDOVER (LATHE 70, COMB 75)
+}
 export function microcosmRemoveOrb(orbId: string): void { (microcosmCore as any)?.removeOrb(orbId); }
 export function microcosmEngineLevel(id: string, level: number): void { microcosmCore?.setEngineLevel(id, level); }
 export function microcosmFadeInEngine(id: string, target: number, seconds?: number): void { (microcosmCore as any)?.fadeInEngine(id, target, seconds); }
 export function microcosmMasterLevel(v: number): void { (microcosmCore as any)?.setMasterGain(v); }
+// DEV A/B: recipe-vs-legacy tunnel toggle (temporary scaffolding)
+export function microcosmRecipeAB(on: boolean): void { const M = require('./microcosm'); (M.Microcosm as any).USE_RECIPE.tunnel = on; }
+// WORKBENCH bridges: read/write/reset the live recipe
+export function microcosmRecipeGet(id: string): any { const M = require('./microcosm'); return (M.Microcosm as any).recipeGet(id); }
+export function microcosmRecipeSet(id: string, key: string, value: number): void { const M = require('./microcosm'); (M.Microcosm as any).recipeSet(id, key, value); }
+export function microcosmRecipeReset(id: string): void { const M = require('./microcosm'); (M.Microcosm as any).recipeReset(id); }
 export function microcosmEnginePan(id: string, pan: number): void { (microcosmCore as any)?.setPan(id, pan); }
 export function microcosmEngineEQ(id: string, lo: number, mid: number, hi: number): void { (microcosmCore as any)?.setEQ(id, lo, mid, hi); }
 export function microcosmActivity(a: number): void { microcosmCore?.setActivity(a); }

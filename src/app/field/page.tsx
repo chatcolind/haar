@@ -15,6 +15,7 @@ import {
   microcosmClick, microcosmMetroLevel, microcosmAudioTime, microcosmLoadSource, microcosmSourcePosition, microcosmOrbPosition, microcosmOrbAbsence, microcosmOrbChaos, microcosmFreezeSource, microcosmFauveOn, microcosmFauveOff, microcosmFauveOffAll, microcosmFauveParam, microcosmFauveUpdatePitch, microcosmEngineSource, microcosmOrbConstTranspose, microcosmOrbTuning, microcosmOrbRegister, microcosmOrbChordStep, microcosmOrbConductor,
   microcosmGrainDensity, microcosmArmedPalette, microcosmOrbPalette, microcosmOrbHome, microcosmEngineAmount, microcosmSetFilter, microcosmSweep, microcosmResetFilter,
   microcosmBpm, microcosmOrbLock, microcosmOrbSubdiv, microcosmOrbFill, microcosmOrbSeed,
+  microcosmRecipeAB, microcosmRecipeGet, microcosmRecipeSet, microcosmRecipeReset,
 } from '../../audio/engine';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
@@ -285,6 +286,9 @@ export default function FieldPage() {
   const [muted, setMuted] = useState(false);
   const [xyMap, setXyMap] = useState<Record<string, XY>>(defaultXY);
   const [lockKey, setLockKey] = useState('C');   // the LOCKED root (yellow), double-click to set
+  const [recipeAB, setRecipeAB] = useState(true);   // DEV scaffolding: recipe vs legacy tunnel
+  const [planetOpen, setPlanetOpen] = useState(false);   // WORKBENCH: inside-the-planet dev view
+  const [rTick, setRTick] = useState(0);   // re-render pump for recipe dial values
   const [scaleLock, setScaleLock] = useState(false);      // SCALE-LOCK: snap notes to the song key
   const [selectedDial, setSelectedDial] = useState<null|'note'|'octave'|'scale'>(null);   // which key dial has keyboard focus
   const lastNoteKey = useRef<{letter:string;t:number}>({letter:'',t:0});   // repeat-letter toggles sharp
@@ -1601,6 +1605,64 @@ export default function FieldPage() {
         .haar-section:hover .haar-sectionlbl { opacity: 1; }
         .dial-active { filter: brightness(1.4); }
       `}</style>
+      {/* WORKBENCH: inside the planet (dev skin - styling pass comes after the interaction proves out) */}
+      {planetOpen && (() => {
+        const R = microcosmRecipeGet('tunnel') || {};
+        const row = (label: string, key: string, min: number, max: number, step: number) => (
+          <div key={key} style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <span style={{ fontSize:10, letterSpacing:'0.1em', color:'rgba(255,255,255,0.55)', width:150, fontFamily:'Space Mono, monospace' }}>{label}</span>
+            <input type="range" min={min} max={max} step={step} value={R[key] ?? 0}
+              onChange={(e)=>{ microcosmRecipeSet('tunnel', key, parseFloat(e.target.value)); setRTick(x=>x+1); }}
+              style={{ flex:1, accentColor:'#a6ffd8' }} />
+            <span style={{ fontSize:10.5, color:'#a6ffd8', width:46, textAlign:'right', fontFamily:'Space Mono, monospace' }}>{(R[key] ?? 0).toFixed(2)}</span>
+          </div>
+        );
+        return (
+          <div style={{ position:'absolute', inset:0, zIndex:400, background:'rgba(4,5,10,0.96)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:10, fontFamily:'Rajdhani, sans-serif' }}>
+            <div style={{ width:'min(620px, 82%)', display:'flex', flexDirection:'column', gap:11 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:8 }}>
+                <span style={{ fontSize:13, letterSpacing:'0.3em', color:'#a6ffd8' }}>INSIDE · TUNNEL</span>
+                <div style={{ display:'flex', gap:16, alignItems:'baseline' }}>
+                  <span onClick={()=>{
+                    const rr = (min:number,max:number,step:number)=>{ const v=min+Math.random()*(max-min); return Math.round(v/step)*step; };
+                    microcosmRecipeSet('tunnel','voicesBase', rr(1,8,1));
+                    microcosmRecipeSet('tunnel','voicesDensity', rr(0,6,1));
+                    microcosmRecipeSet('tunnel','lenBase', rr(0.02,2.0,0.01));
+                    microcosmRecipeSet('tunnel','lenSpreadX', rr(0,2.0,0.05));
+                    microcosmRecipeSet('tunnel','behindMin', rr(0.1,2.0,0.05));
+                    microcosmRecipeSet('tunnel','behindRange', rr(0.1,3.0,0.05));
+                    microcosmRecipeSet('tunnel','tickBase', rr(30,700,5));
+                    microcosmRecipeSet('tunnel','tickDensity', rr(0,400,5));
+                    microcosmRecipeSet('tunnel','gain', rr(0.1,0.5,0.01));
+                    microcosmRecipeSet('tunnel','panWidth', rr(0,1,0.05));
+                    setRTick(x=>x+1);
+                  }} style={{ fontSize:10, letterSpacing:'0.12em', color:'#d8a6ff', cursor:'pointer' }}>ROLL</span>
+                  <span onClick={()=>{ microcosmRecipeReset('tunnel'); setRTick(x=>x+1); }} style={{ fontSize:10, letterSpacing:'0.12em', color:'#ffd8a6', cursor:'pointer' }}>RESET</span>
+                  <span onClick={()=>setPlanetOpen(false)} style={{ fontSize:13, color:'rgba(255,255,255,0.6)', cursor:'pointer' }}>×</span>
+                </div>
+              </div>
+              {row('VOICES BASE', 'voicesBase', 1, 8, 1)}
+              {row('VOICES + DENSITY', 'voicesDensity', 0, 6, 1)}
+              {row('GRAIN LEN BASE s', 'lenBase', 0.02, 2.0, 0.01)}
+              {row('GRAIN LEN + X', 'lenSpreadX', 0, 2.0, 0.05)}
+              {row('MEMORY MIN s', 'behindMin', 0.1, 2.0, 0.05)}
+              {row('MEMORY RANGE s', 'behindRange', 0.1, 3.0, 0.05)}
+              {row('TICK BASE ms', 'tickBase', 30, 700, 5)}
+              {row('TICK - DENSITY ms', 'tickDensity', 0, 400, 5)}
+              {row('GRAIN GAIN', 'gain', 0.05, 0.7, 0.01)}
+              {row('PAN WIDTH', 'panWidth', 0, 1, 0.05)}
+              <div style={{ fontSize:9.5, color:'rgba(255,255,255,0.3)', marginTop:6, fontFamily:'Space Mono, monospace' }}>dev skin · edits are live on all tunnel orbs · RESET = shipped tunnel</div>
+            </div>
+          </div>
+        );
+      })()}
+      {/* DEV A/B chip - temporary scaffolding, remove with the workbench build */}
+      <div onClick={()=>{ const nv = !recipeAB; setRecipeAB(nv); microcosmRecipeAB(nv); }}
+        style={{ position:'absolute', top:14, right:64, zIndex:300, padding:'4px 12px', borderRadius:12,
+          border:'0.5px solid rgba(255,255,255,0.25)', fontSize:10, letterSpacing:'0.12em', cursor:'pointer',
+          color: recipeAB ? '#a6ffd8' : '#ffd8a6', background:'rgba(10,12,20,0.7)', fontFamily:'Space Mono, monospace' }}>
+        TUNNEL: {recipeAB ? 'RECIPE' : 'LEGACY'}
+      </div>
       <div style={{ position:'absolute', inset:0, opacity:0.6, pointerEvents:'none', backgroundImage:'radial-gradient(1px 1px at 20% 14%, rgba(255,255,255,0.5), transparent), radial-gradient(1px 1px at 88% 9%, rgba(255,255,255,0.45), transparent), radial-gradient(1px 1px at 94% 42%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 8% 46%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 50% 8%, rgba(255,255,255,0.3), transparent)' }} />
       <div style={{ position:'absolute', top:24, left:32, fontSize:21, letterSpacing:'0.6em', fontWeight:500 }}>H A A R</div>
 
@@ -1665,7 +1727,9 @@ export default function FieldPage() {
               <span onClick={exitFocus} style={{ fontSize:13, letterSpacing:'0.1em', color:'rgba(255,255,255,0.45)', cursor:'pointer' }}>FIELD</span>
               <span style={{ fontSize:13, color:'rgba(255,255,255,0.3)' }}>›</span>
               <span style={{ fontSize:13, letterSpacing:'0.1em', color:fc }}>{(fo?.label || focused).toUpperCase()}</span>
-            </div>
+            {fieldOrbs.find(o=>o.id===focused)?.engineType==='tunnel' && (
+                <span onClick={()=>setPlanetOpen(true)} style={{ marginLeft:10, padding:'2px 10px', borderRadius:10, border:'0.5px solid rgba(166,255,216,0.4)', fontSize:9.5, letterSpacing:'0.14em', color:'#a6ffd8', cursor:'pointer', fontFamily:'Space Mono, monospace' }}>ENTER</span>
+              )}</div>
             <div onClick={exitFocus} style={{ position:'absolute', top:14, right:22, zIndex:3, width:30, height:30, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:15, cursor:'pointer', opacity: focusShown?1:0, transition:'opacity 0.42s ease', pointerEvents:'auto' }}>×</div>
 
             {/* THE ORB — CENTRED, large, alive + XY-playable. x,y = CENTRE in px. */}
