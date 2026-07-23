@@ -287,22 +287,20 @@ export class Microcosm {
   // Play one warm knock at audio-clock time `when` (seconds). accent = beat 1 (higher + louder).
   click(accent: boolean, when?: number): void {
     this.buildMetro();
+    console.log('[click]', accent ? 'ACCENT' : 'beat', '| ctx:', this.ctx.state, '| level:', this.metroLevel);
     const c = this.ctx;
     const t = (when != null && when > c.currentTime) ? when : c.currentTime;
+    // THE CLICK (Colin-approved voice): clean sine tick - 1047Hz beat / 1568Hz accent,
+    // short exponential decay. Scheduling + metroGain volume kept from the original.
     const osc = c.createOscillator();
-    osc.type = 'triangle';
-    const f0 = accent ? 340 : 250;      // accent a bit higher
-    osc.frequency.setValueAtTime(f0, t);
-    osc.frequency.exponentialRampToValueAtTime(f0 * 0.55, t + 0.05);   // fast pitch drop = knock body
-    const lp = c.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.value = accent ? 1600 : 1300;    // round off the top (warm)
+    osc.type = 'sine';
+    osc.frequency.value = accent ? 1568 : 1047;
     const g = c.createGain();
-    const peak = accent ? 0.9 : 0.6;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(peak, t + 0.006);              // gentle attack (not clicky)
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);            // short round decay
-    osc.connect(lp); lp.connect(g); g.connect(this.metroGain as GainNode);
-    osc.start(t); osc.stop(t + 0.14);
+    const peak = accent ? 0.30 : 0.22;
+    g.gain.setValueAtTime(peak, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    osc.connect(g); g.connect(this.metroGain as GainNode);
+    osc.start(t); osc.stop(t + 0.08);
   }
 
   private _currentEngine: string = '';

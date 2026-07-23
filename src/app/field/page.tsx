@@ -19,7 +19,8 @@ import {
   microcosmInputOn, microcosmInputOff, microcosmLiveArm, microcosmSynthOn, microcosmSynthOff,
   microcosmMonitor,
   microcosmInputLevel, microcosmInputDevices, microcosmCaptureLive,
-  microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
+  microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos,
+  samplerExportWav, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
 } from '../../audio/engine';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
@@ -527,7 +528,6 @@ export default function FieldPage() {
   const [sampFiles, setSampFiles] = useState<{name:string; bars:number; root:string}[]>([]);
   const [recState, setRecState] = useState<'idle'|'listening'|'counting'|'recording'>('idle');
   const [countLeft, setCountLeft] = useState(0);
-  const [clickOn, setClickOn] = useState(true);    // THE click: sounds whenever the sampler sounds
   const clickIvRef = useRef<number>(0);
   const playClickIvRef = useRef<number>(0);
   const [recLeft, setRecLeft] = useState(0);
@@ -548,7 +548,7 @@ export default function FieldPage() {
     }
     if (recState === 'listening') {
       // press 2 -> COUNT-IN (one bar of click), then the take starts on the downbeat
-      if (clickOn && snapBars > 0) beginCountIn(); else beginTake();
+      if (metroOn && snapBars > 0) beginCountIn(); else beginTake();
       return;
     }
     if (recState === 'counting') return;   // count-in is not interruptible; it's one bar
@@ -562,11 +562,11 @@ export default function FieldPage() {
     const beatMs = (60 / bpm) * 1000;
     let beat = 0;
     setCountLeft(4);
-    samplerClick(true);
+    microcosmClick(true);
     clickIvRef.current = window.setInterval(() => {
       beat += 1;
       if (beat >= 4) { window.clearInterval(clickIvRef.current); beginTake(); }
-      else { setCountLeft(4 - beat); samplerClick(false); }
+      else { setCountLeft(4 - beat); microcosmClick(false); }
     }, beatMs);
   }
   function beginTake() {
@@ -575,13 +575,7 @@ export default function FieldPage() {
     cancelAnimationFrame(meterRafRef.current);
     const pump = () => { setMeterLvl(microcosmInputLevel()); meterRafRef.current = requestAnimationFrame(pump); };
     meterRafRef.current = requestAnimationFrame(pump);
-    // the click keeps time through the take
-    if (clickOn) {
-      const beatMs = (60 / bpm) * 1000;
-      let beat = 0;
-      samplerClick(true);
-      clickIvRef.current = window.setInterval(() => { beat += 1; samplerClick(beat % 4 === 0); }, beatMs);
-    }
+    // the metronome effect already covers the take when CLICK is lit (no private interval - was double-clicking)
     if (snapBars > 0) {
       const secs = snapBars * spb;
       setRecLeft(secs);
@@ -653,17 +647,9 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
     return (NOTES.indexOf(st.note) - NOTES.indexOf(lockKey)) + (st.oct - (octave + 4)) * 12;
   }
   const [bpm, setBpm] = useState(92);   // master tempo — reference frame for progression clock + locked orbs
-  // THE CLICK during playback (lives directly below bpm - its last dependency to declare)
-  useEffect(() => {
-    window.clearInterval(playClickIvRef.current);
-    if (loopPlaying && clickOn) {
-      const beatMs = (60 / bpm) * 1000;
-      let beat = 0;
-      samplerClick(true);
-      playClickIvRef.current = window.setInterval(() => { beat += 1; samplerClick(beat % 4 === 0); }, beatMs);
-    }
-    return () => window.clearInterval(playClickIvRef.current);
-  }, [loopPlaying, clickOn, bpm]);
+  // THE METRONOME: CLICK lit = clicking, whenever the sampler is open. Practice at tempo,
+  // no states required. (Needs audio started - ensured at sampler open.)
+  // (sampler metronome removed - the field's bar-anchored scheduler is THE metronome)
   const bpmRef = useRef(92); useEffect(() => { bpmRef.current = bpm; }, [bpm]);
   const barAnchorRef = useRef(0);   // performance.now() timestamp of a known bar boundary (free-running clock)
   const barAudioAnchorRef = useRef(0);   // audio-clock time of the same bar boundary (for sample-accurate metro sync)
@@ -724,11 +710,16 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
   // METRONOME look-ahead scheduler — beats derived from the SHARED audio bar anchor,
   // so beat 1 (accent) always coincides with the progression's bar boundary.
   useEffect(() => {
+    console.log('[metro] effect run - metroOn:', metroOn);
     if (!metroOn) return;
     let scheduledUntil = microcosmAudioTime();   // audio-time up to which we've already scheduled
+    const anchor0 = scheduledUntil;              // FIX: stable anchor when no progression is running.
+    // (The old fallback re-read audioTime every tick, so the anchor rode alongside 'now' and the
+    //  next beat stayed perpetually beyond the horizon - the silent-scheduler bug.)
+    console.log('[metro] scheduler starting - audioTime:', scheduledUntil);
     const tick = () => {
       const beatSec = 60 / bpm;
-      const anchor = barAudioAnchorRef.current || microcosmAudioTime();   // read LIVE (re-anchors when chords engage)
+      const anchor = barAudioAnchorRef.current || anchor0;   // progression's anchor when live, else our latch
       const now = microcosmAudioTime();
       const horizon = now + 0.12;
       // first un-scheduled beat index from the (possibly updated) anchor
@@ -2024,10 +2015,7 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
               {/* HEADER */}
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', height:34, flexShrink:0 }}>
                 <span style={{ fontSize:15, letterSpacing:'0.34em', color:'#e8b800' }}>S A M P L E R</span>
-                <div style={{ display:'flex', gap:26, alignItems:'baseline' }}>
-                  <span style={{ fontSize:12, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.4)' }}>{lockKey} {scaleMode} · {bpm} bpm</span>
-                  <span onClick={closeSampler} style={{ fontSize:16, color:'rgba(255,255,255,0.6)', cursor:'pointer' }}>×</span>
-                </div>
+                <span onClick={closeSampler} style={{ fontSize:16, color:'rgba(255,255,255,0.6)', cursor:'pointer' }}>×</span>
               </div>
               {/* INPUT STRIP */}
               <div style={{ display:'flex', gap:22, alignItems:'center', height:52, flexShrink:0 }}>
@@ -2052,16 +2040,8 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                   ))}
                 </div>
                 <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', minWidth:50, textAlign:'right', color: clip ? '#d63020' : '#5dcaa5' }}>{meterAlive ? (clip ? 'CLIP' : (db <= -59 ? '' : db.toFixed(0) + ' dB')) : ''}</span>
-                <div>
-                  <div style={{ fontSize:13, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.8)', cursor:'ns-resize', textAlign:'center' }}>1.00</div>
-                  {W('GAIN')}
-                </div>
-                <div>
-                  <div style={{ width:30, height:30, margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.5)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
-                    <div style={{ width:7, height:7, borderRadius:'50%', background:'rgba(255,255,255,0.4)' }} />
-                  </div>
-                  {W('MON')}
-                </div>
+
+
               </div>
               {/* MAIN */}
               <div style={{ flex:1, minHeight:0, display:'grid', gridTemplateRows:'0.72fr 2.9fr 0.95fr 1.05fr', alignItems:'center', justifyItems:'center' }}>
@@ -2086,20 +2066,31 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                   <div>
                     <div style={{ display:'flex', gap:13, alignItems:'center', height:C(0.098,80) }}>
                       {[1,2,4,8,0].map(nb => { const on = snapBars===nb; return (
-                        <div key={nb} onClick={()=>setSnapBars(nb)} style={{ width:C(on?0.062:0.054, on?52:45), height:C(on?0.062:0.054, on?52:45), borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'Space Mono, monospace', fontSize: nb===0?10:13, border: on?'1px solid #e8b800':'1px solid rgba(255,255,255,0.35)', color: on?'#e8b800':'rgba(255,255,255,0.6)', boxShadow: on?'0 0 18px rgba(232,184,0,0.35)':'none', transition:'all 0.2s' }}>{nb===0?'free':nb}</div>
+                        <div key={nb} onClick={()=>setSnapBars(nb)} style={{ width:C(on?0.062:0.054, on?52:45), height:C(on?0.062:0.054, on?52:45), borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'Space Mono, monospace', fontSize: nb===0?10:13, border: on?'1px solid #e8b800':'1px solid rgba(232,184,0,0.28)', color: on?'#e8b800':'rgba(232,184,0,0.55)', boxShadow: on?'0 0 18px rgba(232,184,0,0.35)':'none', transition:'all 0.2s' }}>{nb===0?'free':nb}</div>
                       ); })}
                     </div>
                     {W('BARS')}
                   </div>
-                  <div>
-                    <div style={{ display:'flex', gap:13, alignItems:'center', height:C(0.098,80) }}>
-                      <div onClick={()=>setClickOn(cv=>!cv)} style={{ width:C(0.052,44), height:C(0.052,44), borderRadius:'50%', border: clickOn?'1px solid #e8b800':'1px solid rgba(255,255,255,0.35)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow: clickOn?'0 0 15px rgba(232,184,0,0.3)':'none' }}>
-                        <div style={{ width:8, height:8, borderRadius:'50%', background: clickOn?'#e8b800':'rgba(255,255,255,0.3)', boxShadow: clickOn?'0 0 8px rgba(232,184,0,0.9)':'none' }} />
+                  <div style={{ display:'flex', gap:20, alignItems:'flex-start' }}>
+<div>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:C(0.098,80) }}>
+                      <div onPointerDown={(e)=>{ const startY=e.clientY; const startV=metroLevel; let moved=false; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); const mv=(ev:PointerEvent)=>{ if(Math.abs(ev.clientY-startY)>3) moved=true; const v=Math.max(0,Math.min(1, startV + (startY-ev.clientY)/160)); setMetroLevel(v); microcosmMetroLevel(v); }; const up=()=>{ if(!moved){ setMetroOn(n=>!n); } window.removeEventListener('pointermove',mv); window.removeEventListener('pointerup',up); }; window.addEventListener('pointermove',mv); window.addEventListener('pointerup',up); }} style={{ width:C(0.052,44), height:C(0.052,44), borderRadius:'50%', border: metroOn?'1.5px solid #7af5c8':'1px solid rgba(122,245,200,0.35)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', background: metroOn?`radial-gradient(circle, rgba(122,245,200,${0.15+metroLevel*0.3}) 0%, transparent 70%)`:'transparent', boxShadow: metroOn?`0 0 ${12+metroLevel*14}px rgba(122,245,200,${0.3+metroLevel*0.3})`:'none' }}>
+                        <div style={{ width:8, height:8, borderRadius:'50%', background: metroOn?'#7af5c8':'rgba(122,245,200,0.35)', boxShadow: metroOn?'0 0 8px rgba(122,245,200,0.9)':'none' }} />
                       </div>
                       
                     </div>
-                    {W('CLICK', clickOn ? '#e8b800' : undefined)}
+                    {W(metroOn ? 'CLICK · ' + Math.round(metroLevel*100) + '%' : 'CLICK', metroOn ? '#7af5c8' : undefined)}
 
+                  </div>
+                  <div>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:C(0.098,80) }}>
+                    <div onPointerDown={(e)=>{ const startY=e.clientY; const startB=bpm; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); const mv=(ev:PointerEvent)=>{ const nb=Math.max(40,Math.min(220, Math.round(startB + (startY-ev.clientY)/2))); setBpm(nb); }; const up=()=>{ window.removeEventListener('pointermove',mv); window.removeEventListener('pointerup',up); }; window.addEventListener('pointermove',mv); window.addEventListener('pointerup',up); }}
+                      style={{ width:C(0.052,44), height:C(0.052,44), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(154,255,200,0.5)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'ns-resize', touchAction:'none', boxShadow:'0 0 12px rgba(154,255,200,0.15)' }}>
+                      <span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'#9affc8', lineHeight:1 }}>{bpm}</span>
+                    </div>
+                    </div>
+                    {W('BPM', '#9affc8')}
+                  </div>
                   </div>
                 </div>
                 {/* LOOP EDITOR - framed, one instrument */}
@@ -2294,7 +2285,17 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
             {naming && (
               <div style={{ position:'absolute', bottom:14, left:0, right:0, display:'flex', gap:18, alignItems:'baseline', justifyContent:'center' }}>
                 <input autoFocus value={capName} onChange={e=>setCapName(e.target.value)}
-                  onKeyDown={e=>{ if(e.key==='Enter'){ console.log('[sampler] SAVE:', capName, selStation, capReg + capFine); setNaming(false); } if(e.key==='Escape') setNaming(false); }}
+                  onKeyDown={e=>{ if(e.key==='Enter'){
+                    if (capture) {
+                      const s0 = Math.floor(loopA * capture.data.length);
+                      const e0 = Math.floor(loopB * capture.data.length);
+                      let seg = capture.data.slice(s0, e0);
+                      if (capReverse) seg = seg.slice().reverse();
+                      samplerExportWav(seg, capName);
+                      say('saved · ' + capName + '.wav → Downloads');
+                    }
+                    setNaming(false);
+                  } if(e.key==='Escape') setNaming(false); }}
                   style={{ background:'transparent', border:'none', borderBottom:'0.5px solid rgba(122,245,200,0.5)', color:'rgba(255,255,255,0.9)', fontSize:14, fontFamily:'Space Mono, monospace', padding:'3px 10px', width:260, outline:'none', textAlign:'center' }} />
                 <span style={{ fontSize:10, letterSpacing:'0.26em', color:'rgba(255,255,255,0.4)' }}>ENTER TO KEEP</span>
               </div>
@@ -3112,7 +3113,7 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
               <div className="haar-hover" style={{ textAlign:'center' }}>
                 <div
                   onWheel={(e)=>{ const v=Math.max(0,Math.min(1, metroLevel - Math.sign(e.deltaY)*0.05)); setMetroLevel(v); microcosmMetroLevel(v); }}
-                  onPointerDown={(e)=>{ const startY=e.clientY; const startV=metroLevel; let moved=false; const el=e.currentTarget as HTMLElement; el.setPointerCapture(e.pointerId); const mv=(ev:PointerEvent)=>{ if(Math.abs(ev.clientY-startY)>3) moved=true; const v=Math.max(0,Math.min(1, startV + (startY-ev.clientY)/160)); setMetroLevel(v); microcosmMetroLevel(v); }; const up=()=>{ if(!moved){ const n=!metroOn; setMetroOn(n); microcosmMetroLevel(metroLevel); } window.removeEventListener('pointermove',mv); window.removeEventListener('pointerup',up); }; window.addEventListener('pointermove',mv); window.addEventListener('pointerup',up); }}
+                  onPointerDown={(e)=>{ const startY=e.clientY; const startV=metroLevel; let moved=false; const el=e.currentTarget as HTMLElement; el.setPointerCapture(e.pointerId); const mv=(ev:PointerEvent)=>{ if(Math.abs(ev.clientY-startY)>3) moved=true; const v=Math.max(0,Math.min(1, startV + (startY-ev.clientY)/160)); setMetroLevel(v); microcosmMetroLevel(v); }; const up=async()=>{ if(!moved){ await ensureStarted(); const n=!metroOn; setMetroOn(n); microcosmMetroLevel(metroLevel); } window.removeEventListener('pointermove',mv); window.removeEventListener('pointerup',up); }; window.addEventListener('pointermove',mv); window.addEventListener('pointerup',up); }}
                   title="tap: on/off · drag up/down: volume"
                   style={{ width:52, height:52, borderRadius:'50%', border:`2px solid ${metroOn?'#7af5c8':'rgba(122,245,200,0.3)'}`, background: metroOn?`radial-gradient(circle, rgba(122,245,200,${0.2+metroLevel*0.35}) 0%, transparent 70%)`:'transparent', display:'flex', alignItems:'center', justifyContent:'center', cursor:'ns-resize', touchAction:'none', boxShadow: metroOn?`0 0 20px 3px rgba(122,245,200,${0.25+metroLevel*0.3})`:'none' }}>
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={metroOn?'#7af5c8':'rgba(122,245,200,0.5)'} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
