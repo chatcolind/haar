@@ -18,6 +18,16 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
     // freeze/write/seam/capture code is byte-for-byte unchanged. Sample sources are added here
     // with no writer (filled once, zero-copy). Grains carry a `source` id (absent => default).
     this.sources = { default: { buf: this.ring, len: this.size, live: true } };
+    // SOURCES SLICE: the LIVE ring - input's own buffer (12s of phrase memory),
+    // a second writer over the one-buffer primitive. No varispeed, no synth.
+    this.liveSize = Math.floor(sampleRate * 12);
+    this.liveRing = new Float32Array(this.liveSize);
+    this.liveWrite = 0;
+    this.liveArmed = false;   // input writes here only when armed
+    this.sources.live = { buf: this.liveRing, len: this.liveSize, live: true };
+    // SAMPLER BUS TAP: records a chosen orb's FINISHED output (the transformed sound).
+    this._tap = null;          // { orbId, buf, len, wp }
+    this._tapPending = null;   // { id, len, tail, remaining } - deferred carve for tail-fold
     this.frozen = false;        // HOLD — read from the frozen loop buffer instead of live ring
     this.recording = true;
     this.freezeBuf = null;      // tempo-locked captured loop (Float32Array), grains read this when frozen
@@ -61,6 +71,25 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
           // STATIC source (WAV): read from the source's POSITION (0..1 into the buffer) plus a
           // spray so grains scatter around the point (avoids a static/combed sound). This is
           // what lets you freeze on one moment or slowly scan through the sample.
+          // LIVE-LAW: a live source with its own write head is read like the default ring -
+          // a safe distance behind ITS head, never by wav-style map position (the writer laps
+          // map positions; that was the die-after-3-loops + preview/orb mismatch bug).
+          if (src.live && src.wp != null) {
+            // v2: honour the ENGINE's requested memory depth (startSamp), exactly like the
+            // default ring - TUNNEL reads 0.5-2s back, HAZE deeper, etc. The random-4s
+            // scatter destroyed engine character and mostly hit silence (the pluck bug).
+            const guardL = Math.floor(this._sr * 0.05);
+            // v3: LIVE READS SHALLOW. Engine memory-depths (0.5-2s+) suit drone rings, not a
+            // performer - they made every hit late, brief, then unreachable (the time-window
+            // Colin identified). Live grains read the freshest 0.1-0.6s: the mirror reads NOW.
+            const behindL = guardL + Math.floor(Math.random() * this._sr * 0.5);
+            let posL = src.wp - Math.min(behindL, src.len - guardL);
+            posL = ((posL % src.len) + src.len) % src.len;
+            this.grains.push({ pos: posL, rate: m.rate || 1, remaining: m.lenSamp || 4800, total: m.lenSamp || 4800,
+              gain: m.gain || 0.3, panL: Math.SQRT1_2 * (1 - (m.pan || 0)) , panR: Math.SQRT1_2 * (1 + (m.pan || 0)),
+              engine: m.engine || '_', source: srcId, env: (m.env || 0), tilt: (m.tilt || 0), tLp: 0, ghost: (m.ghost || 0) });
+            return;
+          }
           // per-ORB position/spray if the grain carries them, else the source's default
           const p01   = (m.position != null) ? m.position : ((src.position != null) ? src.position : 0.0);
           const spray = (m.spray != null)    ? m.spray    : ((src.spray != null)    ? src.spray    : 0.08);
@@ -349,6 +378,34 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
   handleSlotMessage(d) {
     if (d.type === 'orbSlot') { this.orbSlots = this.orbSlots || {}; this.orbSlots[d.orbId] = d.slot; }
     if (d.type === 'clearSlots') this.orbSlots = {};
+    if (d.type === 'liveArm') { this.liveArmed = !!d.on; console.log('[live-ring]', this.liveArmed ? 'ARMED' : 'off'); }
+    if (d.type === 'tapOn') {
+      const len = Math.floor(sampleRate * 14);
+      this._tap = { orbId: d.orbId, buf: new Float32Array(len), len: len, wp: 0 };
+      console.log('[tap] ON', d.orbId);
+    }
+    if (d.type === 'tapOff') { this._tap = null; this._tapPending = null; console.log('[tap] off'); }
+    if (d.type === 'captureTap') {
+      // TAIL-FOLD LAW: mark now, keep recording d.tailSamp more, then carve loop+tail,
+      // fold the tail under the loop start, peak-normalize. Continuous seam, no clip.
+      if (this._tap) {
+        this._tapPending = { id: d.id, len: d.lenSamp, tail: d.tailSamp || Math.floor(sampleRate * 1.5), remaining: d.tailSamp || Math.floor(sampleRate * 1.5) };
+        console.log('[tap] capture pending - recording the tail');
+      }
+    }
+    if (d.type === 'captureLive') {
+      // SAMPLER: carve the last d.lenSamp samples behind the live write head into
+      // a static source (id = d.id). Same move as FREEZE, aimed at the live ring.
+      const len = Math.min(d.lenSamp || this._sr * 4, this.liveSize);
+      const start = ((this.liveWrite - len) % this.liveSize + this.liveSize) % this.liveSize;
+      const keep = new Float32Array(len);      // stays in the worklet as the source
+      const send = new Float32Array(len);      // transferred to the main thread
+      for (let i = 0; i < len; i++) { const v = this.liveRing[(start + i) % this.liveSize]; keep[i] = v; send[i] = v; }
+      this.sources[d.id] = { buf: keep, len: len };
+      this.port.postMessage({ type: 'captured', id: d.id, len: len, buf: send.buffer }, [send.buffer]);
+      console.log('[sampler] captured', d.id, len, 'samples');
+    }
+    if (d.type === 'flushDefault') { this.ring.fill(0); console.log('[ring] default flushed'); }
   }
   process(inputs, outputs) {
     const input = inputs[0];
@@ -369,6 +426,61 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         this.ring[this.writePos] = inCh[i];
         this.writePos = (this.writePos + 1) % this.size;
       }
+    }
+    // PROBE: report the live ring's energy once a second
+    this._rmsN = (this._rmsN || 0) + n;
+    if (this._rmsN >= sampleRate) {
+      this._rmsN = 0;
+      let sum = 0, mx = 0;
+      for (let i = 0; i < this.liveSize; i += 16) { const v = this.liveRing[i]; sum += v * v; if (Math.abs(v) > mx) mx = Math.abs(v); }
+      const rms = Math.sqrt(sum / (this.liveSize / 16));
+      // v3 probe: head movement + energy in the exact read window (0.05-2s behind head)
+      const headMoved = this.liveWrite - (this._lastWp || 0);
+      this._lastWp = this.liveWrite;
+      let wsum = 0, wcnt = 0;
+      for (let b = Math.floor(this._sr * 0.05); b < this._sr * 2; b += 800) {
+        const idx = ((this.liveWrite - b) % this.liveSize + this.liveSize) % this.liveSize;
+        wsum += this.liveRing[idx] * this.liveRing[idx]; wcnt++;
+      }
+      console.log('[live-ring] rms:', rms.toFixed(5), 'peak:', mx.toFixed(4),
+        '| head moved:', headMoved, '| readwin rms:', Math.sqrt(wsum / wcnt).toFixed(5),
+        '| src.wp==head:', this.sources.live && this.sources.live.wp === this.liveWrite,
+        '| armed:', this.liveArmed);
+    }
+    // SAMPLER: pending tail-folded capture countdown
+    if (this._tapPending && this._tap) {
+      this._tapPending.remaining -= n;
+      if (this._tapPending.remaining <= 0) {
+        const tp = this._tap, pd = this._tapPending;
+        const total = pd.len + pd.tail;
+        const start = ((tp.wp - total) % tp.len + tp.len) % tp.len;
+        const keep = new Float32Array(pd.len);
+        const send = new Float32Array(pd.len);
+        for (let i = 0; i < pd.len; i++) keep[i] = tp.buf[(start + i) % tp.len];
+        // fold the tail under the loop start (equal-power ramp out over the tail)
+        for (let i = 0; i < pd.tail && i < pd.len; i++) {
+          const tv = tp.buf[(start + pd.len + i) % tp.len];
+          const g = Math.cos((i / pd.tail) * Math.PI / 2);
+          keep[i] += tv * g;
+        }
+        // peak-normalize to -1 dB
+        let pk = 0;
+        for (let i = 0; i < pd.len; i++) { const av = Math.abs(keep[i]); if (av > pk) pk = av; }
+        const norm = pk > 0.0001 ? 0.891 / pk : 1;
+        for (let i = 0; i < pd.len; i++) { keep[i] *= norm; send[i] = keep[i]; }
+        this.sources[pd.id] = { buf: keep, len: pd.len };
+        this.port.postMessage({ type: 'captured', id: pd.id, len: pd.len, buf: send.buffer }, [send.buffer]);
+        console.log('[tap] captured', pd.id, pd.len, 'samples, tail-folded, norm x' + norm.toFixed(2));
+        this._tapPending = null;
+      }
+    }
+    // 1b. LIVE ring write - input's own memory, armed independently
+    if (inCh && this.liveArmed) {
+      for (let i = 0; i < n; i++) {
+        this.liveRing[this.liveWrite] = inCh[i];
+        this.liveWrite = (this.liveWrite + 1) % this.liveSize;
+      }
+      this.sources.live.wp = this.liveWrite;   // the source knows its own write head
     }
 
     // 2. Clear output
@@ -396,6 +508,17 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         // read from THIS grain's source buffer (default source's buf === this.ring, so the
         // default path is byte-for-byte identical). Non-default sources read their own buffer.
         const src = this.sources[gr.source] || this.sources.default;
+        // PROBE: announce each orb's actual diet once
+        const dk = gr.engine + '>' + (gr.source || 'default');
+        this._dietSeen = this._dietSeen || {};
+        if (!this._dietSeen[dk]) { this._dietSeen[dk] = 1;
+          const _s = this.sources[gr.source];
+          console.log('[diet]', gr.engine, 'tag:', gr.source || 'default',
+            '| entry exists:', !!_s,
+            '| buf IS liveRing:', !!_s && _s.buf === this.liveRing,
+            '| buf IS defaultRing:', (!!_s ? _s.buf : this.sources.default.buf) === this.ring,
+            '| liveArmed:', this.liveArmed);
+        }
         const sbuf = src.buf, slen = src.len;
         const i0 = Math.floor(p) % slen;
         const i1 = (i0 + 1) % slen;
@@ -422,6 +545,12 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
       // EQ each engine's bus (continuous biquad state), then sum into the orb's CONSTELLATION SLOT.
       for (const eng in panAccL) {
         let l = panAccL[eng], r = panAccR[eng];
+        // SAMPLER BUS TAP: this orb's finished voice, mono, into the tap ring
+        if (this._tap && eng === this._tap.orbId) {
+          const tp = this._tap;
+          tp.buf[tp.wp] = (l + r) * 0.5;
+          tp.wp = (tp.wp + 1) % tp.len;
+        }
         if (this.eqState[eng] && !this.eqState[eng].flat) {
           const o = this._applyEQ(eng, l, r); l = o[0]; r = o[1];
         }

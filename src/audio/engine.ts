@@ -610,7 +610,179 @@ export function microcosmStop(): void {
 let microcosmCore: MicrocosmCore | null = null;
 let microTestOsc: OscillatorNode | null = null;
 let microSrcGain: GainNode | null = null;  // source feed gain (for ducking on pitch change)
+let synthMuted = false;  // LATCH: while true, NOTHING may raise the synth gain (the ducker was resurrecting it)
 let microSampleSrc: AudioBufferSourceNode | null = null;   // PROOF-OF-CONCEPT: sample source into nativeIn
+
+// ── SOURCES SLICE: THE DOOR — live input (mic / line / interface) into the ring ──
+let liveStream: MediaStream | null = null;
+let liveSrc: MediaStreamAudioSourceNode | null = null;
+let liveGain: GainNode | null = null;
+let liveAnalyser: AnalyserNode | null = null;
+let liveLevelBuf: Float32Array | null = null;
+
+export async function microcosmInputDevices(): Promise<{ id: string; label: string }[]> {
+  // labels are empty until permission has been granted once - callers should
+  // call microcosmInputOn() first if labels come back blank
+  const devs = await navigator.mediaDevices.enumerateDevices();
+  return devs.filter(d => d.kind === 'audioinput').map(d => ({ id: d.deviceId, label: d.label || 'input ' + d.deviceId.slice(0, 6) }));
+}
+
+export async function microcosmInputOn(deviceId?: string): Promise<boolean> {
+  if (!microcosmCore) return false;
+  microcosmInputOff();
+  try {
+    liveStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        // THE TRIO - all off or guitars drown (browser "helpfulness" mangles instruments)
+        echoCancellation: false,
+        autoGainControl: false,
+        noiseSuppression: false,
+        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+      },
+    });
+    const ctx = (microcosmCore as any).ctx || (microcosmCore as any).context || (microcosmCore.nativeIn as GainNode).context;
+    liveSrc = (ctx as AudioContext).createMediaStreamSource(liveStream);
+    liveGain = (ctx as AudioContext).createGain();
+    liveGain.gain.value = 1.0;
+    liveSrc.connect(liveGain);
+    liveGain.connect(microcosmCore.nativeIn);
+    liveAnalyser = (ctx as AudioContext).createAnalyser();
+    liveAnalyser.fftSize = 2048;
+    liveLevelBuf = new Float32Array(liveAnalyser.fftSize);
+    liveGain.connect(liveAnalyser);   // meter shows post-gain: what the ring actually eats
+    const track = liveStream.getAudioTracks()[0];
+    console.log('[input] ON -', track ? track.label : 'unknown device');
+    return true;
+  } catch (err) {
+    console.log('[input] FAILED', err);
+    return false;
+  }
+}
+
+export function microcosmInputOff(): void {
+  if (monGain) { try { monGain.disconnect(); } catch {} monGain = null; }
+  if (liveAnalyser) { try { liveAnalyser.disconnect(); } catch {} liveAnalyser = null; liveLevelBuf = null; }
+  if (liveGain) { try { liveGain.disconnect(); } catch {} liveGain = null; }
+  if (liveSrc) { try { liveSrc.disconnect(); } catch {} liveSrc = null; }
+  if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); liveStream = null; console.log('[input] OFF'); }
+}
+
+export function microcosmInputGain(v: number): void { if (liveGain) liveGain.gain.value = Math.max(0, Math.min(2, v)); }
+let monGain: GainNode | null = null;
+export function microcosmMonitor(on: boolean): void {
+  if (monGain) { try { monGain.disconnect(); } catch {} monGain = null; }
+  if (on && microcosmCore && liveGain) {
+    const ctx = microcosmCore.context as AudioContext;
+    monGain = ctx.createGain(); monGain.gain.value = 0.9;
+    liveGain.connect(monGain);
+    monGain.connect((microcosmCore as any).nativeOut || ctx.destination);
+    console.log('[monitor] ON (dry)');
+  } else if (!on) { console.log('[monitor] off'); }
+}
+// ── SAMPLER PLAYBACK: loop the capture (clean station) ───────────────────────
+let capPlaySrc: AudioBufferSourceNode | null = null;
+let capPlayGain: GainNode | null = null;
+let capPlayT0 = 0; let capPlayDur = 0; let capPlayRate = 1;
+
+export function samplerLoopPlay(data: Float32Array, opts: { rate: number; reverse: boolean; start01: number; end01: number }): void {
+  if (!microcosmCore) return;
+  samplerLoopStop();
+  const ctx = microcosmCore.context as AudioContext;
+  const s0 = Math.floor(Math.max(0, Math.min(0.98, opts.start01)) * data.length);
+  const e0 = Math.floor(Math.max(opts.start01 + 0.01, Math.min(1, opts.end01)) * data.length);
+  let seg = data.slice(s0, e0);
+  if (opts.reverse) seg = seg.slice().reverse();
+  // bake seam: 15ms equal-power fade at both edges = click-free loop
+  const F = Math.min(Math.floor(ctx.sampleRate * 0.015), Math.floor(seg.length / 4));
+  for (let i = 0; i < F; i++) {
+    const g = Math.sin((i / F) * Math.PI / 2);
+    seg[i] *= g;
+    seg[seg.length - 1 - i] *= g;
+  }
+  const buf = ctx.createBuffer(1, seg.length, ctx.sampleRate);
+  buf.getChannelData(0).set(seg);
+  capPlaySrc = ctx.createBufferSource();
+  capPlaySrc.buffer = buf;
+  capPlaySrc.loop = true;
+  capPlaySrc.playbackRate.value = Math.max(0.05, Math.min(8, opts.rate));
+  capPlayGain = ctx.createGain();
+  capPlayGain.gain.value = 0.9;
+  capPlaySrc.connect(capPlayGain);
+  capPlayGain.connect((microcosmCore as any).nativeOut || ctx.destination);
+  capPlaySrc.start();
+  capPlayT0 = ctx.currentTime; capPlayDur = buf.duration; capPlayRate = capPlaySrc.playbackRate.value;
+}
+export function samplerLoopStop(): void {
+  try { capPlaySrc?.stop(); } catch {}
+  try { capPlaySrc?.disconnect(); } catch {}
+  try { capPlayGain?.disconnect(); } catch {}
+  capPlaySrc = null; capPlayGain = null; capPlayDur = 0;
+}
+export function samplerLoopPos(): number {
+  if (!capPlaySrc || !microcosmCore || capPlayDur <= 0) return -1;
+  const t = ((microcosmCore.context as AudioContext).currentTime - capPlayT0) * capPlayRate;
+  return (t % capPlayDur) / capPlayDur;
+}
+// root detection on a raw capture (reuses the wav loader's detector if present)
+export function samplerDetectRoot(data: Float32Array): number {
+  if (!microcosmCore) return 0;
+  try {
+    const ctx = microcosmCore.context as AudioContext;
+    const buf = ctx.createBuffer(1, data.length, ctx.sampleRate);
+    buf.getChannelData(0).set(data);
+    // @ts-ignore - internal detector
+    return typeof detectFundamentalHz === 'function' ? (detectFundamentalHz as any)(buf) : 0;
+  } catch { return 0; }
+}
+// encode a mono Float32Array as a 16-bit WAV blob and download it
+export function samplerExportWav(data: Float32Array, name: string, sampleRate: number = 48000): void {
+  const n = data.length;
+  const ab = new ArrayBuffer(44 + n * 2);
+  const dv = new DataView(ab);
+  const wstr = (o: number, str: string) => { for (let i = 0; i < str.length; i++) dv.setUint8(o + i, str.charCodeAt(i)); };
+  wstr(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); wstr(8, 'WAVE');
+  wstr(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  wstr(36, 'data'); dv.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) { const v = Math.max(-1, Math.min(1, data[i])); dv.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7FFF, true); }
+  const blob = new Blob([ab], { type: 'audio/wav' });
+  const url = URL.createObjectURL(blob);
+  const aEl = document.createElement('a');
+  aEl.href = url; aEl.download = (name || 'capture') + '.wav';
+  aEl.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  console.log('[sampler] exported', name + '.wav', (n / sampleRate).toFixed(2) + 's');
+}
+export function samplerClick(accent: boolean = false): void {
+  if (!microcosmCore) return;
+  const ctx = microcosmCore.context as AudioContext;
+  const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = accent ? 1568 : 1047;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.22, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+  o.connect(g); g.connect((microcosmCore as any).nativeOut || ctx.destination);
+  o.start(); o.stop(ctx.currentTime + 0.08);
+}
+export function microcosmTapOn(orbId: string): void { (microcosmCore as any)?.tapOn(orbId); }
+export function microcosmTapOff(): void { (microcosmCore as any)?.tapOff(); }
+export function microcosmCaptureTap(id: string, lenSamp: number, tailSamp: number, cb: (id: string, data: Float32Array) => void): void {
+  if (!microcosmCore) return;
+  (microcosmCore as any).onCaptured = cb;
+  (microcosmCore as any).captureTap(id, lenSamp, tailSamp);
+}
+export function microcosmCaptureLive(id: string, lenSamp: number, cb: (id: string, data: Float32Array) => void): void {
+  if (!microcosmCore) return;
+  (microcosmCore as any).onCaptured = cb;
+  (microcosmCore as any).captureLive(id, lenSamp);
+}
+export function microcosmInputLevel(): { rms: number; peak: number } {
+  if (!liveAnalyser || !liveLevelBuf) return { rms: 0, peak: 0 };
+  liveAnalyser.getFloatTimeDomainData(liveLevelBuf);
+  let sum = 0, mx = 0;
+  for (let i = 0; i < liveLevelBuf.length; i++) { const v = liveLevelBuf[i]; sum += v * v; const a = Math.abs(v); if (a > mx) mx = a; }
+  return { rms: Math.sqrt(sum / liveLevelBuf.length), peak: mx };
+}
+export function microcosmLiveArm(on: boolean): void { (microcosmCore as any)?.node?.port.postMessage({ type: 'liveArm', on }); }
 let sampleLoaded = false;   // once a sample is loaded, keep the oscillator silenced
 
 async function ensureMicrocosmCore(): Promise<void> {
@@ -619,20 +791,32 @@ async function ensureMicrocosmCore(): Promise<void> {
     await microcosmCore.load();
     microcosmCore.connectOut(microcosmCore.destination);
   }
-  // Temporary internal source until the cross-context synth feed is built:
-  // a native oscillator in the Microcosm's own context feeding its input.
+}
+
+// SOURCES SLICE: the synth oscillator is ON DEMAND now, not automatic at ignition.
+// (It ran unconditionally since the beginning - the ghost synth in every universe.)
+export function microcosmSynthOn(): void {
+  if (!microcosmCore) return;
   const ctx = microcosmCore.context;
-  if (!microTestOsc && !sampleLoaded) {
-    microTestOsc = ctx.createOscillator();
-    microTestOsc.type = 'triangle';
-    microTestOsc.frequency.value = 220;
-    const g = ctx.createGain();
-    g.gain.value = 0.32;  // headroom: high notes + octave-up grains were railing
-    microSrcGain = g;
-    microTestOsc.connect(g);
-    g.connect(microcosmCore.nativeIn);
-    microTestOsc.start();
-  }
+  synthMuted = false;
+  if (microTestOsc) { try { if (microSrcGain) { microSrcGain.gain.cancelScheduledValues(0); microSrcGain.gain.value = 0.32; } } catch {} return; }
+  if (sampleLoaded) return;
+  microTestOsc = ctx.createOscillator();
+  microTestOsc.type = 'triangle';
+  microTestOsc.frequency.value = 220;
+  const g = ctx.createGain();
+  g.gain.value = 0.32;  // headroom: high notes + octave-up grains were railing
+  microSrcGain = g;
+  microTestOsc.connect(g);
+  g.connect(microcosmCore.nativeIn);
+  microTestOsc.start();
+  console.log('[synth] ON');
+}
+export function microcosmSynthOff(): void {
+  synthMuted = true;
+  try { if (microSrcGain) { microSrcGain.gain.cancelScheduledValues(0); microSrcGain.gain.value = 0; } } catch {}
+  (microcosmCore as any)?.node?.port.postMessage({ type: 'flushDefault' });   // clear the ring's stale synth memory
+  console.log('[synth] muted');
 }
 
 // PROOF OF CONCEPT: load an audio file, decode it in the Microcosm's own context,
@@ -818,7 +1002,9 @@ export function microcosmSourceFreq(hz: number): void {
       microTestOsc.frequency.setValueAtTime(Math.max(1, cur), t);
       microTestOsc.frequency.exponentialRampToValueAtTime(Math.max(1, hz), t + microGlide);
       // DUCK the source briefly so in-flight grains crossing the pitch change aren't heard popping
-      if (microSrcGain) {
+      // LATCH: while the synth is deliberately muted, the ducker must NOT restore it (it was
+      // resurrecting the synth after every mute - the five-round ghost).
+      if (microSrcGain && !synthMuted) {
         const base = 0.32;
         const dip = 0.06;        // near-silence during the change
         const tIn = 0.04;        // fade down

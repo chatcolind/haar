@@ -337,6 +337,14 @@ export class Microcosm {
     const absEng = this.engineAbsence[this._currentEngine] || 0;
     const chaosEng = this.engineChaos[this._currentEngine] || 0;
     this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine, source, position: posEng, spray: sprayEng, absence: absEng, chaos: chaosEng });
+    // PROBE: grain-fire rate + the orb's level, once a second
+    const _gp = (this as any)._gprobe || ((this as any)._gprobe = { n: 0, t: Date.now() });
+    _gp.n++;
+    if (Date.now() - _gp.t > 1000) {
+      const lv = this.rack[this._currentEngine] ? this.rack[this._currentEngine].level : -1;
+      console.log('[grains/sec]', _gp.n, 'orb', this._currentEngine, 'level', lv, 'active', this.rack[this._currentEngine]?.active);
+      _gp.n = 0; _gp.t = Date.now();
+    }
     // GRAIN COMETS: queue the spawn notification — drained by the UI's own loop.
     // NEVER do visual work inside the grain scheduler; the audio path pays for nothing.
     if (__grainQueue.length < 400) __grainQueue.push({ id: this._currentEngine, g: (spec as any).gain ?? 0.5 });
@@ -374,6 +382,29 @@ export class Microcosm {
   private _latheOn: Record<string, boolean> = {};
   latheOn(orbId: string): void { this._latheOn[orbId] = true; this.node?.port.postMessage({ type: 'latheOn', orbId }); }
   latheOff(orbId: string): void { delete this._latheOn[orbId]; this.node?.port.postMessage({ type: 'latheOff', orbId }); }
+  // SAMPLER capture: request a carve of the live ring; the worklet answers with the audio
+  onCaptured: ((id: string, data: Float32Array) => void) | null = null;
+  tapOn(orbId: string): void { this.node?.port.postMessage({ type: 'tapOn', orbId }); }
+  tapOff(): void { this.node?.port.postMessage({ type: 'tapOff' }); }
+  captureTap(id: string, lenSamp: number, tailSamp: number): void {
+    // listener setup is shared with captureLive (lazy, attach-once)
+    this.captureLiveEnsureListener();
+    this.node?.port.postMessage({ type: 'captureTap', id, lenSamp, tailSamp });
+  }
+  captureLiveEnsureListener(): void {
+    if (this.node && !(this as any)._portListening) {
+      (this as any)._portListening = true;
+      this.node.port.addEventListener('message', (ev: MessageEvent) => {
+        const msg: any = ev.data;
+        if (msg && msg.type === 'captured' && this.onCaptured) this.onCaptured(msg.id, new Float32Array(msg.buf));
+      });
+      this.node.port.start();
+    }
+  }
+  captureLive(id: string, lenSamp: number): void {
+    this.captureLiveEnsureListener();
+    this.node?.port.postMessage({ type: 'captureLive', id, lenSamp });
+  }
   // deterministic hash -> 0..1 from (seed, grid index). Same seed+index = same result.
   private fillRoll(seed: number, n: number): number {
     let x = (seed * 2654435761 + n * 40503) >>> 0;
