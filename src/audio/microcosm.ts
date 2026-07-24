@@ -158,6 +158,7 @@ export class Microcosm {
     if (this.ready) return;
     if (this.ctx.state !== 'running') { try { await this.ctx.resume(); } catch {} }
     await this.ctx.audioWorklet.addModule('/microcosm-processor.js?v=' + Date.now());
+    await this.ctx.audioWorklet.addModule('/recorder-processor.js?v=' + Date.now());
     this.node = new AudioWorkletNode(this.ctx, 'microcosm-processor', {
       numberOfInputs: 1, numberOfOutputs: 9, outputChannelCount: [2,2,2,2,2,2,2,2,2],   // 0 = default, 1..8 = constellation reels
     });
@@ -270,6 +271,13 @@ export class Microcosm {
     this.nativeOut.connect(this.limiter);
     this.limiter.connect(this.tapeWobbleDelay as DelayNode);   // into tape
     (this.tapeMakeup as GainNode).connect(dest);      // tape out (post makeup) -> destination
+    // HAAR RECORDER: taps the true chain end (post tape makeup) - records what you hear (no click).
+    if (!this._recNode) {
+      this._recNode = new AudioWorkletNode(this.ctx, 'haar-recorder', { numberOfInputs: 1, numberOfOutputs: 1 });
+      const recMute = this.ctx.createGain(); recMute.gain.value = 0;
+      this._recNode.connect(recMute); recMute.connect(this.ctx.destination);   // graph pull, silent
+      (this.tapeMakeup as GainNode).connect(this._recNode);
+    }
   }
   // ── METRONOME: warm, round woodblock/rim knock, on its own gain bus ──
   // Kept separate from the main chain so it can later route to a distinct output (cue/click bus).
@@ -382,7 +390,22 @@ export class Microcosm {
   latheOff(orbId: string): void { delete this._latheOn[orbId]; this.node?.port.postMessage({ type: 'latheOff', orbId }); }
   // SAMPLER capture: request a carve of the live ring; the worklet answers with the audio
   onCaptured: ((id: string, data: Float32Array) => void) | null = null;
-  tapOn(orbId: string): void { this.node?.port.postMessage({ type: 'tapOn', orbId }); }
+  private _recNode: AudioWorkletNode | null = null;
+  recordOutput(lenSamp: number, cb: (L: Float32Array, R: Float32Array) => void): void {
+    // record the literal output, STEREO, UNTOUCHED - the tape machine at the chain's end
+    if (!this._recNode) { console.warn('[recorder] not connected yet'); return; }
+    const handler = (ev: MessageEvent) => {
+      const m: any = ev.data;
+      if (m && m.type === 'done') {
+        this._recNode!.port.removeEventListener('message', handler);
+        cb(new Float32Array(m.bufL), new Float32Array(m.bufR));
+      }
+    };
+    this._recNode.port.addEventListener('message', handler);
+    this._recNode.port.start();
+    this._recNode.port.postMessage({ type: 'start', lenSamp });
+  }
+  tapOn(orbId: string, master: boolean = false): void { this.node?.port.postMessage({ type: 'tapOn', orbId, master }); }
   tapOff(): void { this.node?.port.postMessage({ type: 'tapOff' }); }
   captureTap(id: string, lenSamp: number, tailSamp: number): void {
     // listener setup is shared with captureLive (lazy, attach-once)

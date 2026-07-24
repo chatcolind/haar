@@ -379,10 +379,10 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
     if (d.type === 'orbSlot') { this.orbSlots = this.orbSlots || {}; this.orbSlots[d.orbId] = d.slot; }
     if (d.type === 'clearSlots') this.orbSlots = {};
     if (d.type === 'liveArm') { this.liveArmed = !!d.on; console.log('[live-ring]', this.liveArmed ? 'ARMED' : 'off'); }
-    if (d.type === 'tapOn') {
+if (d.type === 'tapOn') {
       const len = Math.floor(sampleRate * 14);
-      this._tap = { orbId: d.orbId, buf: new Float32Array(len), len: len, wp: 0 };
-      console.log('[tap] ON', d.orbId);
+      this._tap = { orbId: d.orbId, master: !!d.master, buf: new Float32Array(len), len: len, wp: 0 };
+      console.log('[tap] ON', d.master ? 'MASTER (what you hear)' : d.orbId);
     }
     if (d.type === 'tapOff') { this._tap = null; this._tapPending = null; console.log('[tap] off'); }
     if (d.type === 'captureTap') {
@@ -466,7 +466,9 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         // peak-normalize to -1 dB
         let pk = 0;
         for (let i = 0; i < pd.len; i++) { const av = Math.abs(keep[i]); if (av > pk) pk = av; }
-        const norm = pk > 0.0001 ? 0.891 / pk : 1;
+        let norm = pk > 0.0001 ? 0.891 / pk : 1;
+        if (this._tap && this._tap.master) { if (norm > 1) norm = 1; }   // master print: exact copy
+        else if (norm > 2) norm = 2;   // orb lift capped: never drag the floor to full scale
         for (let i = 0; i < pd.len; i++) { keep[i] *= norm; send[i] = keep[i]; }
         this.sources[pd.id] = { buf: keep, len: pd.len };
         this.port.postMessage({ type: 'captured', id: pd.id, len: pd.len, buf: send.buffer }, [send.buffer]);
@@ -546,7 +548,8 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
       for (const eng in panAccL) {
         let l = panAccL[eng], r = panAccR[eng];
         // SAMPLER BUS TAP: this orb's finished voice, mono, into the tap ring
-        if (this._tap && eng === this._tap.orbId) {
+        // (yields entirely in master mode - double-writing the ring was the gravel bug)
+        if (this._tap && !this._tap.master && eng === this._tap.orbId) {
           const tp = this._tap;
           tp.buf[tp.wp] = (l + r) * 0.5;
           tp.wp = (tp.wp + 1) % tp.len;
@@ -621,6 +624,16 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
     // 4. Cull finished grains
     this.grains = this.grains.filter(gr => gr.remaining > 0);
 
+    // MASTER TAP: slot-0 summed output = what the worklet renders to the ear. Single stream.
+    if (this._tap && this._tap.master) {
+      const tp = this._tap;
+      const mo = outputs[0];
+      const moL = mo[0], moR = mo[1] || mo[0];
+      for (let mi = 0; mi < moL.length; mi++) {
+        tp.buf[tp.wp] = (moL[mi] + moR[mi]) * 0.5;
+        tp.wp = (tp.wp + 1) % tp.len;
+      }
+    }
     return true;
   }
 }

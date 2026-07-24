@@ -18,6 +18,8 @@ import {
   microcosmRecipeAB, microcosmRecipeGet, microcosmRecipeSet, microcosmRecipeReset,
   microcosmInputOn, microcosmInputOff, microcosmLiveArm, microcosmSynthOn, microcosmSynthOff,
   microcosmMonitor,
+  microcosmLoadSourceData,
+  microcosmRecordOutput, samplerLoopPlayStereo, samplerExportWavStereo,
   microcosmInputLevel, microcosmInputDevices, microcosmCaptureLive,
   microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos,
   samplerExportWav, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
@@ -304,13 +306,17 @@ export default function FieldPage() {
   const [loopA, setLoopA] = useState(0);        // loop window 0..1 into the capture
   const [loopB, setLoopB] = useState(1);
   const waveWrapRef = useRef<HTMLDivElement>(null);
-  const dragHandleRef = useRef<''|'A'|'B'>('');
+  const dragHandleRef = useRef<''|'A'|'B'|'W'>('');   // W = slide the whole window (tape head)
+  const winGrabRef = useRef<{ startF:number; a0:number; b0:number }>({ startF:0, a0:0, b0:0 });
+  function playCapture(data: Float32Array, a: number, b: number, rev: boolean) {
+    const rate = capVari * Math.pow(2, (capReg + capFine) / 12);
+    const cr = capture as any;
+    if (cr && cr.dataR && data === cr.data) samplerLoopPlayStereo(cr.data, cr.dataR, { rate, reverse: rev, start01: a, end01: b });
+    else samplerLoopPlay(data, { rate, reverse: rev, start01: a, end01: b });
+  }
   function replayIfPlaying(over?: { reverse?: boolean; a?: number; b?: number; data?: Float32Array }) {
-    if (!loopPlaying || !capture) return;
-    samplerLoopPlay(over?.data || (nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data), {
-      rate: capVari * Math.pow(2, (capReg + capFine) / 12),
-      reverse: over?.reverse ?? capReverse,
-      start01: over?.a ?? loopA, end01: over?.b ?? loopB });
+    if (!loopPlaying || !capture || selStation !== 'clean') return;
+    playCapture(over?.data || (nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data), over?.a ?? loopA, over?.b ?? loopB, over?.reverse ?? capReverse);
   }
   function handleDragMove(clientX: number) {
     const el = waveWrapRef.current; if (!el || !dragHandleRef.current) return;
@@ -321,14 +327,25 @@ export default function FieldPage() {
       const beats = capture.bars * 4;
       f = Math.round(f * beats) / beats;
     }
+    if (dragHandleRef.current === 'W') {
+      const w = winGrabRef.current.b0 - winGrabRef.current.a0;
+      let na = winGrabRef.current.a0 + (f - winGrabRef.current.startF);
+      if (snapOn && capture && capture.bars > 0) {
+        const beats = capture.bars * 4;
+        na = Math.round(na * beats) / beats;
+      }
+      na = Math.max(0, Math.min(1 - w, na));
+      setLoopA(na); setLoopB(na + w);
+      return;
+    }
     if (dragHandleRef.current === 'A') setLoopA(Math.min(f, loopB - 0.02));
     else setLoopB(Math.max(f, loopA + 0.02));
   }
   useEffect(() => {
     const mv = (ev: PointerEvent) => handleDragMove(ev.clientX);
     const up = () => {
-      if (dragHandleRef.current && loopPlaying && capture) {
-        samplerLoopPlay(capture.data, { rate: capVari * Math.pow(2, (capReg + capFine) / 12), reverse: capReverse, start01: loopA, end01: loopB });
+      if (dragHandleRef.current && loopPlaying && capture && selStation === 'clean') {
+        playCapture((nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data), loopA, loopB, capReverse);
       }
       dragHandleRef.current = '';
     };
@@ -379,6 +396,19 @@ export default function FieldPage() {
   const [gateLit, setGateLit] = useState(false);
   const gateIvRef = useRef<number>(0);
   const gateLoudRef = useRef(0);
+  const rampIvRef = useRef<number>(0);
+
+  function rampOrbLevel(target: number) {
+    window.clearInterval(rampIvRef.current);
+    let v = target > 0 ? 0 : 0.85;
+    const step = (target - v) / 6;
+    rampIvRef.current = window.setInterval(() => {
+      v += step;
+      const done = step > 0 ? v >= target : v <= target;
+      microcosmEngineLevel(SAMPLER_ORB, done ? target : v);
+      if (done) window.clearInterval(rampIvRef.current);
+    }, 15);
+  }
   function gateStart() {
     window.clearInterval(gateIvRef.current);
     gateLoudRef.current = 0;
@@ -388,7 +418,7 @@ export default function FieldPage() {
       const now = Date.now();
       if (lvl.rms > 0.03) gateLoudRef.current = now;
       const open = now - gateLoudRef.current < 1400;
-      setGateLit(prev => { if (prev !== open) microcosmEngineLevel(SAMPLER_ORB, open ? 0.85 : 0); return open; });
+      setGateLit(prev => { if (prev !== open) rampOrbLevel(open ? 0.85 : 0); return open; });
     }, 50);
   }
   function gateStop() { window.clearInterval(gateIvRef.current); setGateLit(false); }
@@ -407,17 +437,23 @@ export default function FieldPage() {
   }
   function stationChanged(stIn: 'clean'|'engine'|'chain') {
     let st = stIn;
-    // tap the lit engine again -> off, back to clean (the stop you asked for)
-    if (st !== 'clean' && st === selStation) st = 'clean';
+    if (st !== 'clean' && st === selStation) st = 'clean';   // tap the lit engine again -> clean
     setSelStation(st); setOrbAgain(false);
+    if (recState !== 'idle') {
+      // LISTENING/recording: the mic flow's rules (dry monitor vs gated engine)
+      if (st === 'clean') { gateStop(); samplerOrbSet(false, ''); microcosmMonitor(true); }
+      else { microcosmMonitor(false); samplerOrbSet(true, 'live'); gateStart(); }
+      return;
+    }
+    if (!loopPlaying) { gateStop(); samplerOrbSet(false, ''); return; }   // stopped: stations only SELECT
+    // playing: switch the voice live
     if (st === 'clean') {
-      gateStop(); samplerOrbSet(false, '');
-      microcosmMonitor(recState !== 'idle');     // dry guitar while listening
-    } else {
-      microcosmMonitor(false);                   // wet only - Haar law
-      samplerOrbSet(true, 'live');
-      if (recState !== 'idle') gateStart();      // gated: silent until the first note
-      else microcosmEngineLevel(SAMPLER_ORB, 0.85);
+      samplerOrbSet(false, '');
+      if (capture) playCapture((nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data), loopA, loopB, capReverse);
+    } else if (capture) {
+      samplerLoopStop();
+      samplerOrbSet(true, capture.id);
+      rampOrbLevel(0.85);
     }
   }
   function toggleOrbAgain() {
@@ -462,6 +498,37 @@ export default function FieldPage() {
     replayIfPlaying({ data: d2 });
     say('nudged · ' + (nudgeSamp > 0 ? '+' : '') + (nudgeSamp / 48000).toFixed(2) + ' s');
     setNudgeMode(false); setNudgeSamp(0);
+  }
+  function printWindow() {
+    // WRAP-TO-WRAP PRINT: the traversal is periodic - the engine does the same thing at
+    // every wrap. Arm on a wrap, record exactly one walk period: head and tail are the
+    // engine at the SAME PHASE - material that belongs end-to-start. Stereo, untouched.
+    if (!capture || selStation === 'clean') return;
+    if (!loopPlaying) { say('press play first - print captures what you hear'); return; }
+    const st = walkStateRef.current;
+    const lenSamp = Math.floor(48000 * Math.min(st.dur, 11.5));   // one traversal period
+    say('armed · printing from the wrap');
+    const armT0 = performance.now();
+    let lastF = walkFracRef.current;
+    const armWait = () => {
+      const f = walkFracRef.current;
+      const wrapped = f < lastF;
+      lastF = f;
+      if (!wrapped && performance.now() - armT0 < 20000) { requestAnimationFrame(armWait); return; }
+      say('printing · ' + (lenSamp / 48000).toFixed(2) + ' s · one cycle');
+      microcosmRecordOutput(lenSamp, (Lc, Rc) => {
+        takeStackRef.current.push(capture);
+        setLoopPlaying(false); samplerLoopStop(); samplerOrbSet(false, '');
+        const cid = 'print_' + Date.now();
+        microcosmLoadSourceData(cid, Lc);
+        setCapture({ id: cid, data: Lc, dataR: Rc, bars: 0 });
+        setLoopA(0); setLoopB(1);
+        setSelStation('clean');
+        say('printed · ' + (Lc.length/48000).toFixed(2) + ' s · one cycle · untouched');
+        console.log('[sampler] PRINT landed (wrap-to-wrap, stereo, verbatim)', cid);
+      });
+    };
+    requestAnimationFrame(armWait);
   }
   function nudgeToggle() {
     if (nudgeMode) { setNudgeMode(false); setNudgeSamp(0); replayIfPlaying(); }
@@ -586,7 +653,9 @@ export default function FieldPage() {
         const wholeBars = Math.round(secs / spb);
         const bars = Math.abs(wholeBars * spb - secs) < 0.03 && wholeBars >= 1 ? wholeBars : 0;
         if (capture) takeStackRef.current.push(capture);
-        setCapture({ id: 'wav_' + Date.now(), data: d2, bars });
+        const wid = 'wav_' + Date.now();
+        microcosmLoadSourceData(wid, d2);      // register decoded samples with the worklet
+        setCapture({ id: wid, data: d2, bars });
         setLoopA(0); setLoopB(1);
         say('loaded · ' + f.name + ' · ' + secs.toFixed(2) + ' s');
         console.log('[sampler] WAV loaded:', f.name, secs.toFixed(2) + 's, bars:', bars);
@@ -606,6 +675,33 @@ export default function FieldPage() {
   const [naming, setNaming] = useState(false);   // name line appears only after SAVE is tapped
   const [capReverse, setCapReverse] = useState(false);
   const [capVari, setCapVari] = useState(1.0);
+  // ENGINE TRAVERSAL (continuous phase): the read-centre walks the window; the clock never
+  // resets on window moves - the fraction persists and re-maps into wherever the window sits.
+  const walkRafRef = useRef<number>(0);
+  const walkFracRef = useRef(0);
+  const walkLastRef = useRef(0);
+  const walkStateRef = useRef({ a: 0, b: 1, dur: 1, rev: false, id: '' });
+  useEffect(() => { walkStateRef.current = {
+    a: loopA, b: loopB,
+    dur: capture ? Math.max(0.05, ((capture.data.length / 48000) * (loopB - loopA)) / Math.max(0.05, capVari * Math.pow(2, (capReg + capFine) / 12))) : 1,
+    rev: capReverse, id: capture ? capture.id : '' };
+  }, [capture, loopA, loopB, capVari, capReg, capFine, capReverse]);
+  useEffect(() => {
+    cancelAnimationFrame(walkRafRef.current);
+    if (!(loopPlaying && selStation !== 'clean' && capture)) return;
+    walkLastRef.current = performance.now();
+    const walk = () => {
+      const st = walkStateRef.current;
+      const now = performance.now();
+      walkFracRef.current = (walkFracRef.current + (now - walkLastRef.current) / 1000 / st.dur) % 1;
+      walkLastRef.current = now;
+      const pos = st.rev ? (st.b - walkFracRef.current * (st.b - st.a)) : (st.a + walkFracRef.current * (st.b - st.a));
+      if (st.id) microcosmSourcePosition(st.id, pos, 0.06);
+      walkRafRef.current = requestAnimationFrame(walk);
+    };
+    walkRafRef.current = requestAnimationFrame(walk);
+    return () => cancelAnimationFrame(walkRafRef.current);
+  }, [loopPlaying, selStation, capture]);
   const [sampFiles, setSampFiles] = useState<{name:string; bars:number; root:string}[]>([]);
   const [recState, setRecState] = useState<'idle'|'listening'|'counting'|'recording'>('idle');
   const [countLeft, setCountLeft] = useState(0);
@@ -2174,18 +2270,31 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                   </div>
                   </div>
                 </div>
-                {/* LOOP EDITOR - framed, one instrument */}
+                {/* LOOP EDITOR - framed, one instrument. Editing lives on CLEAN; engines are for listening. */}
                 <div style={{ width:'100%' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10 }}>
                     <div style={{ display:'flex', gap:38, alignItems:'baseline' }}>
                       <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', color: capture ? '#5dcaa5' : 'rgba(255,255,255,0.3)', cursor:'pointer' }}>{capture ? 'A2 ▴▾' : '— ▴▾'} <span style={{ fontSize:10, letterSpacing:'0.3em', color:'rgba(255,255,255,0.5)', marginLeft:6 }}>ROOT</span></span>
                       <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.6)' }}>{(() => { if (!capture) return '— s · — bars'; const bb = capture.bars > 0 ? capture.bars : 0; if (bb > 0) return (capture.data.length/48000).toFixed(2) + ' s · ' + bb + (bb === 1 ? ' bar' : ' bars'); const spb2 = (60/bpm)*4; const secs2 = capture.data.length/48000; const nb2 = Math.max(1, Math.round(secs2/spb2)); const off2 = secs2 - nb2*spb2; return secs2.toFixed(2) + ' s · free · ' + (Math.abs(off2) < 0.02 ? 'on the bar' : (off2 > 0 ? '+' : '') + off2.toFixed(2) + ' s vs ' + nb2 + ' bar' + (nb2===1?'':'s')); })()}</span>
+                      {capture && !(loopA <= 0.001 && loopB >= 0.999) && (
+                        <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', color:'#e8b800' }}>window {(((loopB-loopA)*capture.data.length)/48000).toFixed(2)} s<span style={{ fontSize:10, letterSpacing:'0.3em', color:'rgba(255,255,255,0.4)', marginLeft:8 }}>DRAG POSTS · GRAB MIDDLE TO SLIDE</span></span>
+                      )}
                       <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.4)' }}>−1 dB <span style={{ fontSize:10, letterSpacing:'0.3em', color:'rgba(255,255,255,0.4)', marginLeft:6 }}>NORM</span></span>
                     </div>
                     <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', color:'#d8a6ff', cursor:'ns-resize' }}>{capVari.toFixed(2)}× <span style={{ fontSize:9, letterSpacing:'0.28em', color:'rgba(255,255,255,0.45)' }}>VARISPEED</span></span>
                   </div>
                   <div ref={waveWrapRef}
-                    onPointerDown={(ev)=>{ if (nudgeMode && capture) { nudgeDragRef.current = { on:true, startX:ev.clientX, startN:nudgeSamp }; return; } if (!fadeMode || !capture) return; const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); const f2 = Math.max(0, Math.min(1, (ev.clientX - r.left - 10) / (r.width - 20))); fadeDragRef.current = true; setFadeA(f2); setFadeB(f2); }}
+                    onPointerDown={(ev)=>{ if (!nudgeMode && !fadeMode && capture && !(loopA <= 0.001 && loopB >= 0.999)) {
+                      const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+                      const f2 = Math.max(0, Math.min(1, (ev.clientX - r.left - 10) / (r.width - 20)));
+                      if (f2 > loopA + 0.01 && f2 < loopB - 0.01) {
+                        dragHandleRef.current = 'W';
+                        winGrabRef.current = { startF: f2, a0: loopA, b0: loopB };
+                        return;
+                      }
+                    }
+                    if (selStation !== 'clean') return;   // destructive gestures stay CLEAN-only
+                    if (nudgeMode && capture) { nudgeDragRef.current = { on:true, startX:ev.clientX, startN:nudgeSamp }; return; } if (!fadeMode || !capture) return; const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); const f2 = Math.max(0, Math.min(1, (ev.clientX - r.left - 10) / (r.width - 20))); fadeDragRef.current = true; setFadeA(f2); setFadeB(f2); }}
                     onPointerMove={(ev)=>{ if (nudgeDragRef.current.on && nudgeMode && capture) {
                       const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
                       const fracMoved = (ev.clientX - nudgeDragRef.current.startX) / (r.width - 20);
@@ -2209,7 +2318,7 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                       {Array.from({length:17}).map((_,gi)=>{ const x2 = gi*(900/16); const isBar = gi % 4 === 0; return (
                         <line key={gi} x1={x2} y1="0" x2={x2} y2="150" stroke={isBar?'rgba(255,255,255,0.2)':'rgba(255,255,255,0.08)'} strokeWidth={isBar?1:0.5} />
                       ); })}
-                      <rect x={loopA*900} y="0" width={(loopB-loopA)*900} height="150" fill="rgba(232,184,0,0.05)" />
+                      <rect x={loopA*900} y="0" width={(loopB-loopA)*900} height="150" fill={selStation === 'clean' ? "rgba(232,184,0,0.05)" : "rgba(27,92,232,0.12)"} style={{ cursor: (capture && !(loopA <= 0.001 && loopB >= 0.999)) ? "grab" : "default" }} />
                       {fadeMode && fadeB > fadeA && (
                         <>
                           <rect x={fadeA*900} y="0" width={(fadeB-fadeA)*900} height="150" fill="rgba(93,202,165,0.09)" />
@@ -2234,7 +2343,7 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                         }
                         return <polygon points={up.join(' ') + ' ' + dn.reverse().join(' ')} fill="url(#wv)" />;
                       })()}
-                      {loopPlaying && (() => { const cx = (loopA + loopPos * (loopB - loopA)) * 900; return <line x1={cx} y1="0" x2={cx} y2="150" stroke="rgba(122,245,200,0.9)" strokeWidth="1.2" />; })()}
+                      {loopPlaying && selStation === 'clean' && (() => { const cx = (loopA + loopPos * (loopB - loopA)) * 900; return <line x1={cx} y1="0" x2={cx} y2="150" stroke="rgba(122,245,200,0.9)" strokeWidth="1.2" />; })()}
                     </svg>
                     <div onPointerDown={()=>{ dragHandleRef.current = 'A'; }} style={{ position:'absolute', left:`calc(10px + ${loopA*100}%)`, top:0, bottom:0, width:16, marginLeft:-8, cursor:'ew-resize', display:'flex', flexDirection:'column', alignItems:'center', touchAction:'none' }}>
                       <div style={{ width:2.5, flex:1, background:'#e8b800', boxShadow:'0 0 10px rgba(232,184,0,0.7)' }} />
@@ -2246,18 +2355,51 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                     </div>
                   </div>
                   {toast && <div style={{ textAlign:'center', fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.55)', marginTop:10 }}>{toast}</div>}
-                  <div style={{ display:'flex', gap:30, alignItems:'flex-start', justifyContent:'center', marginTop:16 }}>
+                  {selStation !== 'clean' && !toast && <div style={{ textAlign:'center', fontSize:10, letterSpacing:'0.3em', color:'rgba(255,255,255,0.35)', marginTop:10 }}>LISTENING THROUGH {selStation === 'chain' ? 'FULL CHAIN' : samplerEngine.toUpperCase()} · SLIDE THE WINDOW TO ROAM · EDIT ON CLEAN</div>}
+                  <div style={{ display:'flex', gap:30, alignItems:'flex-start', justifyContent:'center', marginTop:16, opacity: selStation === 'clean' ? 1 : undefined }}>
                     <div>
                       <div onClick={()=>{ const next = !loopPlaying; setLoopPlaying(next);
-                        if (next && capture) samplerLoopPlay((nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data), { rate: capVari * Math.pow(2, (capReg + capFine) / 12), reverse: capReverse, start01: loopA, end01: loopB });
-                        else samplerLoopStop(); }} style={{ width:C(0.088,72), height:C(0.088,72), margin:'0 auto', borderRadius:'50%', border:'1.5px solid rgba(122,245,200,0.9)', background:'rgba(122,245,200,0.06)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow:'0 0 26px rgba(122,245,200,0.35)' }}>
+                        if (next && capture) {
+                          if (selStation === 'clean') {
+                            playCapture((nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data), loopA, loopB, capReverse);
+                          } else {
+                            samplerLoopStop();
+                            samplerOrbSet(true, capture.id);   // the engine IS the voice
+                            rampOrbLevel(0.85);
+                          }
+                        } else {
+                          samplerLoopStop();
+                          samplerOrbSet(false, '');            // transport owns ALL sound - stop is stop
+                        } }} style={{ width:C(0.088,72), height:C(0.088,72), margin:'0 auto', borderRadius:'50%', border:'1.5px solid rgba(122,245,200,0.9)', background:'rgba(122,245,200,0.06)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow:'0 0 26px rgba(122,245,200,0.35)' }}>
                         <span style={{ fontSize:C(0.028,23), color:'#7af5c8' }}>{loopPlaying ? '■' : '▶'}</span>
                       </div>
                       {W('PLAY', '#7af5c8')}
                     </div>
+                  {selStation !== 'clean' ? (<>
+                    <div>
+                      <div onClick={printWindow} title="print: capture what you hear as a recording" style={{ width:C(0.088,72), height:C(0.088,72), margin:'0 auto', borderRadius:'50%', border:'1.5px solid rgba(111,157,255,0.9)', background:'rgba(27,92,232,0.08)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow:'0 0 26px rgba(27,92,232,0.4)' }}>
+                        <div style={{ width:'30%', height:'30%', borderRadius:3, border:'2px solid #6f9dff' }} />
+                      </div>
+                      {W('PRINT', '#6f9dff')}
+                    </div>
+                    <div>
+                      <div style={{ display:'flex', gap:9, alignItems:'center', height:C(0.088,72) }}>
+                        {([4,2,1,0.5] as const).map(wb => {
+                          const spb2 = (60/bpm)*4;
+                          const w2 = capture ? Math.min(1, (wb*spb2)/(capture.data.length/48000)) : 1;
+                          const on = capture ? Math.abs((loopB-loopA) - w2) < 0.01 : false;
+                          return (
+                            <div key={wb} onClick={()=>{ if (!capture) return; const na = Math.min(loopA, 1-w2); setLoopA(na); setLoopB(na+w2); }}
+                              style={{ width:C(0.052,44), height:C(0.052,44), borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'Space Mono, monospace', fontSize:11, border: on?'1px solid #6f9dff':'1px solid rgba(111,157,255,0.3)', color: on?'#6f9dff':'rgba(111,157,255,0.55)', boxShadow: on?'0 0 16px rgba(27,92,232,0.4)':'none' }}>{wb === 0.5 ? '½' : wb}</div>
+                          );
+                        })}
+                      </div>
+                      {W('WINDOW · BARS', '#6f9dff')}
+                    </div>
+                  </>) : (<>
                     <div>
                       <div onClick={()=>{
-                        if (!capture) return;
+                        if (!capture || selStation !== 'clean') return;
                         if (loopA <= 0.001 && loopB >= 0.999) return;   // nothing to cut
                         takeStackRef.current.push(capture);              // undo restores pre-cut audio
                         const s0 = Math.floor(loopA * capture.data.length);
@@ -2274,13 +2416,13 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                       {W('CUT')}
                     </div>
                     <div>
-                      <div onClick={()=>fadeToggle('in')} style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border: fadeMode==='in' ? '1px solid #5dcaa5' : '1px solid rgba(255,255,255,0.55)', boxShadow: fadeMode==='in' ? '0 0 18px rgba(93,202,165,0.4)' : 'none', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
+                      <div onClick={()=>{ if (selStation !== 'clean') return; fadeToggle('in'); }} style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border: fadeMode==='in' ? '1px solid #5dcaa5' : '1px solid rgba(255,255,255,0.55)', boxShadow: fadeMode==='in' ? '0 0 18px rgba(93,202,165,0.4)' : 'none', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
                         <svg width="45%" height="45%" viewBox="0 0 24 24"><polygon points="3,20 21,20 21,4" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="1.5" strokeLinejoin="round" /></svg>
                       </div>
                       {W('FADE IN', fadeMode==='in' ? '#5dcaa5' : undefined)}
                     </div>
                     <div>
-                      <div onClick={()=>fadeToggle('out')} style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border: fadeMode==='out' ? '1px solid #5dcaa5' : '1px solid rgba(255,255,255,0.55)', boxShadow: fadeMode==='out' ? '0 0 18px rgba(93,202,165,0.4)' : 'none', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
+                      <div onClick={()=>{ if (selStation !== 'clean') return; fadeToggle('out'); }} style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border: fadeMode==='out' ? '1px solid #5dcaa5' : '1px solid rgba(255,255,255,0.55)', boxShadow: fadeMode==='out' ? '0 0 18px rgba(93,202,165,0.4)' : 'none', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
                         <svg width="45%" height="45%" viewBox="0 0 24 24"><polygon points="3,4 3,20 21,20" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="1.5" strokeLinejoin="round" /></svg>
                       </div>
                       {W('FADE OUT', fadeMode==='out' ? '#5dcaa5' : undefined)}
@@ -2304,19 +2446,19 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                       {W('SNAP', snapOn ? '#e8b800' : undefined)}
                     </div>
                     <div>
-                      <div onClick={nudgeToggle} title="slide the recording against the grid" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border: nudgeMode?'1px solid #d8a6ff':'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow: nudgeMode?'0 0 18px rgba(216,166,255,0.4)':'none', fontSize:C(0.023,19), color: nudgeMode?'#d8a6ff':'rgba(255,255,255,0.85)' }}>↔</div>
+                      <div onClick={()=>{ if (selStation !== 'clean') return; nudgeToggle(); }} title="slide the recording against the grid" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border: nudgeMode?'1px solid #d8a6ff':'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow: nudgeMode?'0 0 18px rgba(216,166,255,0.4)':'none', fontSize:C(0.023,19), color: nudgeMode?'#d8a6ff':'rgba(255,255,255,0.85)' }}>↔</div>
                       {W(nudgeMode && nudgeSamp !== 0 ? 'NUDGE · ' + (nudgeSamp>0?'+':'') + (nudgeSamp/48000).toFixed(2) + ' s' : 'NUDGE', nudgeMode ? '#d8a6ff' : undefined)}
                     </div>
                     <div>
-                      <div onClick={fitToBar} title="varispeed to the nearest bar (pitch moves)" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontFamily:'Space Mono, monospace', fontSize:11, color:'rgba(255,255,255,0.85)' }}>≡</div>
+                      <div onClick={()=>{ if (selStation !== 'clean') return; fitToBar(); }} title="varispeed to the nearest bar (pitch moves)" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontFamily:'Space Mono, monospace', fontSize:11, color:'rgba(255,255,255,0.85)' }}>≡</div>
                       {W('FIT BAR')}
                     </div>
                     <div>
-                      <div onClick={()=>fitToBar(true)} title="fit to the bar AND stay at your key" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontFamily:'Space Mono, monospace', fontSize:10, color:'rgba(255,255,255,0.85)' }}>≡♪</div>
+                      <div onClick={()=>{ if (selStation !== 'clean') return; fitToBar(true); }} title="fit to the bar AND stay at your key" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontFamily:'Space Mono, monospace', fontSize:10, color:'rgba(255,255,255,0.85)' }}>≡♪</div>
                       {W('FIT+KEY')}
                     </div>
                     <div>
-                      <div onClick={padToBar} title="append silence to the next bar (pitch untouched)" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontFamily:'Space Mono, monospace', fontSize:11, color:'rgba(255,255,255,0.85)' }}>‥|</div>
+                      <div onClick={()=>{ if (selStation !== 'clean') return; padToBar(); }} title="append silence to the next bar (pitch untouched)" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontFamily:'Space Mono, monospace', fontSize:11, color:'rgba(255,255,255,0.85)' }}>‥|</div>
                       {W('PAD BAR')}
                     </div>
                     {((fadeMode && fadeB - fadeA >= 0.005) || (nudgeMode && nudgeSamp !== 0)) && (
@@ -2327,6 +2469,7 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                         {W('PROCESS', '#5dcaa5')}
                       </div>
                     )}
+                  </>)}
                   </div>
                 </div>
                 {/* PITCH */}
@@ -2391,9 +2534,16 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                     if (capture) {
                       const s0 = Math.floor(loopA * capture.data.length);
                       const e0 = Math.floor(loopB * capture.data.length);
-                      let seg = capture.data.slice(s0, e0);
-                      if (capReverse) seg = seg.slice().reverse();
-                      samplerExportWav(seg, capName);
+                      const crx = capture as any;
+                      if (crx.dataR) {
+                        let sl = capture.data.slice(s0, e0), sr = crx.dataR.slice(s0, e0);
+                        if (capReverse) { sl = sl.slice().reverse(); sr = sr.slice().reverse(); }
+                        samplerExportWavStereo(sl, sr, capName);
+                      } else {
+                        let seg = capture.data.slice(s0, e0);
+                        if (capReverse) seg = seg.slice().reverse();
+                        samplerExportWav(seg, capName);
+                      }
                       say('saved · ' + capName + '.wav → Downloads');
                     }
                     setNaming(false);

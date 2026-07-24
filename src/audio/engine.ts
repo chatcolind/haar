@@ -684,6 +684,65 @@ let capPlaySrc: AudioBufferSourceNode | null = null;
 let capPlayGain: GainNode | null = null;
 let capPlayT0 = 0; let capPlayDur = 0; let capPlayRate = 1;
 
+// STEREO LOOP PLAYER - verbatim material, crossfading join.
+// The wav is never altered. The PLAYER overlaps tail into head at each cycle
+// (equal-power, ~80ms) - the hardware loop-point law: playback-time blending,
+// zero samples touched. Two alternating sources scheduled on the audio clock.
+let xfTimer: number = 0;
+let xfNodes: { src: AudioBufferSourceNode; g: GainNode }[] = [];
+export function samplerLoopPlayStereo(L: Float32Array, R: Float32Array, opts: { rate: number; reverse: boolean; start01: number; end01: number }): void {
+  if (!microcosmCore) return;
+  samplerLoopStop();
+  const ctx = microcosmCore.context as AudioContext;
+  const s0 = Math.floor(Math.max(0, Math.min(0.98, opts.start01)) * L.length);
+  const e0 = Math.floor(Math.max(opts.start01 + 0.01, Math.min(1, opts.end01)) * L.length);
+  let segL = L.slice(s0, e0), segR = R.slice(s0, e0);
+  if (opts.reverse) { segL = segL.slice().reverse(); segR = segR.slice().reverse(); }
+  const buf = ctx.createBuffer(2, segL.length, ctx.sampleRate);
+  buf.getChannelData(0).set(segL);
+  buf.getChannelData(1).set(segR);
+  const rate = Math.max(0.05, Math.min(8, opts.rate));
+  const durSec = buf.duration / rate;
+  const XF = Math.min(0.08, durSec / 4);              // 80ms performed crossfade at the join
+  const out = (microcosmCore as any).nativeOut || ctx.destination;
+  capPlayGain = ctx.createGain(); capPlayGain.gain.value = 0.9;
+  capPlayGain.connect(out);
+  let nextStart = ctx.currentTime + 0.02;
+  const spawn = (when: number) => {
+    const src = ctx.createBufferSource();
+    src.buffer = buf; src.playbackRate.value = rate;
+    const g = ctx.createGain();
+    // EQUAL-POWER curves (sin in / cos out): the two overlapping voices sum to unity
+    // at every instant of the crossfade - no dip, no bump. (Exponential ramps hug the
+    // floor and left a silent gap at the join - that was the split-second hole.)
+    const N2 = 64;
+    const inCurve = new Float32Array(N2), outCurve = new Float32Array(N2);
+    for (let ci = 0; ci < N2; ci++) {
+      const f2 = ci / (N2 - 1);
+      inCurve[ci] = Math.sin(f2 * Math.PI / 2);
+      outCurve[ci] = Math.cos(f2 * Math.PI / 2);
+    }
+    g.gain.setValueAtTime(0, when);
+    g.gain.setValueCurveAtTime(inCurve, when, XF);                  // head rises under the tail
+    g.gain.setValueAtTime(1, when + XF + 0.001);
+    g.gain.setValueCurveAtTime(outCurve, when + durSec - XF, XF);   // tail falls under the next head
+    src.connect(g); g.connect(capPlayGain as GainNode);
+    src.start(when); src.stop(when + durSec + 0.01);
+    xfNodes.push({ src, g });
+    if (xfNodes.length > 3) { const old = xfNodes.shift(); try { old!.src.disconnect(); old!.g.disconnect(); } catch {} }
+  };
+  capPlayT0 = nextStart; capPlayDur = buf.duration; capPlayRate = rate;
+  capPlaySrc = null as any;
+  spawn(nextStart);
+  nextStart += durSec - XF;
+  spawn(nextStart);
+  const pump = () => {
+    while (nextStart - ctx.currentTime < 0.3) { nextStart += durSec - XF; spawn(nextStart); }
+    xfTimer = window.setTimeout(pump, 100);
+  };
+  xfTimer = window.setTimeout(pump, 100);
+}
+
 export function samplerLoopPlay(data: Float32Array, opts: { rate: number; reverse: boolean; start01: number; end01: number }): void {
   if (!microcosmCore) return;
   samplerLoopStop();
@@ -713,11 +772,15 @@ export function samplerLoopPlay(data: Float32Array, opts: { rate: number; revers
   capPlayT0 = ctx.currentTime; capPlayDur = buf.duration; capPlayRate = capPlaySrc.playbackRate.value;
 }
 export function samplerLoopStop(): void {
+  window.clearTimeout(xfTimer);
+  for (const nd of xfNodes) { try { nd.src.stop(); } catch {} try { nd.src.disconnect(); nd.g.disconnect(); } catch {} }
+  xfNodes = [];
   try { capPlaySrc?.stop(); } catch {}
   try { capPlaySrc?.disconnect(); } catch {}
   try { capPlayGain?.disconnect(); } catch {}
   capPlaySrc = null; capPlayGain = null; capPlayDur = 0;
 }
+
 export function samplerLoopPos(): number {
   if (!capPlaySrc || !microcosmCore || capPlayDur <= 0) return -1;
   const t = ((microcosmCore.context as AudioContext).currentTime - capPlayT0) * capPlayRate;
@@ -735,6 +798,28 @@ export function samplerDetectRoot(data: Float32Array): number {
   } catch { return 0; }
 }
 // encode a mono Float32Array as a 16-bit WAV blob and download it
+export function samplerExportWavStereo(L: Float32Array, R: Float32Array, name: string, sampleRate: number = 48000): void {
+  const n = L.length;
+  const ab = new ArrayBuffer(44 + n * 4);
+  const dv = new DataView(ab);
+  const wstr = (o: number, str: string) => { for (let i = 0; i < str.length; i++) dv.setUint8(o + i, str.charCodeAt(i)); };
+  wstr(0, 'RIFF'); dv.setUint32(4, 36 + n * 4, true); wstr(8, 'WAVE');
+  wstr(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 2, true);
+  dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate * 4, true); dv.setUint16(32, 4, true); dv.setUint16(34, 16, true);
+  wstr(36, 'data'); dv.setUint32(40, n * 4, true);
+  for (let i = 0; i < n; i++) {
+    const vl = Math.max(-1, Math.min(1, L[i])), vr = Math.max(-1, Math.min(1, R[i]));
+    dv.setInt16(44 + i * 4, vl < 0 ? vl * 0x8000 : vl * 0x7FFF, true);
+    dv.setInt16(46 + i * 4, vr < 0 ? vr * 0x8000 : vr * 0x7FFF, true);
+  }
+  const blob = new Blob([ab], { type: 'audio/wav' });
+  const url = URL.createObjectURL(blob);
+  const aEl = document.createElement('a');
+  aEl.href = url; aEl.download = (name || 'print') + '.wav';
+  aEl.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  console.log('[sampler] exported STEREO', name + '.wav', (n / sampleRate).toFixed(2) + 's');
+}
 export function samplerExportWav(data: Float32Array, name: string, sampleRate: number = 48000): void {
   const n = data.length;
   const ab = new ArrayBuffer(44 + n * 2);
@@ -763,7 +848,22 @@ export function samplerClick(accent: boolean = false): void {
   o.connect(g); g.connect((microcosmCore as any).nativeOut || ctx.destination);
   o.start(); o.stop(ctx.currentTime + 0.08);
 }
-export function microcosmTapOn(orbId: string): void { (microcosmCore as any)?.tapOn(orbId); }
+export function microcosmLoadSourceData(id: string, data: Float32Array): void {
+  // register already-decoded samples with the worklet (the bench's captures/wavs)
+  if (!microcosmCore) return;
+  const node = (microcosmCore as any).node;
+  if (!node) return;
+  const send = new Float32Array(data);          // transferable copy - the bench keeps its own
+  node.port.postMessage({ type: 'loadSource', id, channelData: send }, [send.buffer]);   // the cosmos loader's exact shape
+  console.log('[sampler] source registered:', id, (data.length/48000).toFixed(2) + 's');
+}
+export function microcosmTapOn(orbId: string, master: boolean = false): void { (microcosmCore as any)?.tapOn(orbId, master); }
+export function microcosmRecordOutput(lenSamp: number, cb: (L: Float32Array, R: Float32Array) => void): void {
+  (microcosmCore as any)?.recordOutput(lenSamp, cb);
+}
+// (samplerFoldTail removed - prints are exact recordings, no processing between recorder and bench)
+
+
 export function microcosmTapOff(): void { (microcosmCore as any)?.tapOff(); }
 export function microcosmCaptureTap(id: string, lenSamp: number, tailSamp: number, cb: (id: string, data: Float32Array) => void): void {
   if (!microcosmCore) return;
