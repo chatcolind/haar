@@ -20,6 +20,7 @@ import {
   microcosmMonitor,
   microcosmLoadSourceData,
   microcosmRecordOutput, samplerLoopPlayStereo, samplerExportWavStereo,
+  samplerAnalyseRoot,
   microcosmInputLevel, microcosmInputDevices, microcosmCaptureLive,
   microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos,
   samplerExportWav, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
@@ -237,14 +238,19 @@ export default function FieldPage() {
   // semitone shift that lands it on the NEAREST pitch of the current root (minimal movement,
   // keeps the sample in its natural register but in tune). 0 if no pitch detected.
   function tuningOffsetFor(detectedHz: number): number {
+    // RE-ROOTING (the placement law): move the sample's root onto the SONG'S root by the
+    // nearest path - pitch-class arithmetic, always within ±6 st, register untouched.
+    // (The old version returned only the fractional detune - a cents polish that left a
+    //  D sample in D against a B song: the 'not in the same key' bug.)
     if (!detectedHz || detectedHz <= 0) return 0;
     const rootHz = NOTE_BASE[lockKey] ?? 261.63;
-    // semitone distance from root to detected, then take the fractional part to nearest note
     const semisFromRoot = 12 * Math.log2(detectedHz / rootHz);
-    const nearestNote = Math.round(semisFromRoot);           // nearest in-key octave/note of root grid
-    // offset that moves detected onto that exact grid note = -(fractional detune)
-    const offset = nearestNote - semisFromRoot;               // small ± correction into tune
-    return Math.round(offset * 100) / 100;                    // 2dp semitones (can be fractional)
+    // pitch-class distance from the song's root, wrapped to the nearest path (-6..+6)
+    let pcDist = ((semisFromRoot % 12) + 12) % 12;
+    if (pcDist > 6) pcDist -= 12;
+    // the offset that moves the sample's root ONTO the song's root (cancels detune too)
+    const offset = -pcDist;
+    return Math.round(offset * 100) / 100;
   }
   const orbCounter = useRef<Record<string, number>>({});
   function mintOrbId(engineType: string): string {
@@ -393,6 +399,24 @@ export default function FieldPage() {
   }
   const [orbAgain, setOrbAgain] = useState(false);            // live engine playing over the capture
   const takeStackRef = useRef<{ id:string; data:Float32Array; bars:number }[]>([]);   // undo takes
+  const [rootRead, setRootRead] = useState<{ label:string; note:string; cents:number; kind:string }>({ label:'—', note:'', cents:0, kind:'none' });
+  const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  function analyseCapture(data: Float32Array) {
+    // fire-and-set: analysis is a guess presented for correction, never authority
+    window.setTimeout(() => { try { setRootRead(samplerAnalyseRoot(data)); } catch { setRootRead({ label:'—', note:'', cents:0, kind:'none' }); } }, 30);
+  }
+  function nudgeRoot(dir: number) {
+    // the ▴▾: step the note manually - the user's overrule is final
+    const cur = rootRead.note || 'A2';
+    const m = cur.match(/^([A-G]#?)(\d)$/);
+    if (!m) { setRootRead({ label:'A2', note:'A2', cents:0, kind:'note' }); return; }
+    let idx = NOTE_NAMES.indexOf(m[1]); let oct = parseInt(m[2]);
+    idx += dir;
+    if (idx < 0) { idx = 11; oct -= 1; } if (idx > 11) { idx = 0; oct += 1; }
+    oct = Math.max(0, Math.min(7, oct));
+    const nn = NOTE_NAMES[idx] + oct;
+    setRootRead({ label: nn, note: nn, cents: 0, kind: 'note' });
+  }
   const [gateLit, setGateLit] = useState(false);
   const gateIvRef = useRef<number>(0);
   const gateLoudRef = useRef(0);
@@ -471,7 +495,7 @@ export default function FieldPage() {
     const tailSamp = Math.floor(48000 * Math.min(spb, 2.5));
     const id = 'cap_' + Date.now();
     microcosmCaptureTap(id, lenSamp, tailSamp, (cid, data) => {
-      setCapture({ id: cid, data, bars: snapBars });
+      analyseCapture(data); setCapture({ id: cid, data, bars: snapBars });
       say('take landed'); console.log('[sampler] TAKE landed', cid, data.length, 'samples (tail-folded)');
     });
   }
@@ -521,7 +545,7 @@ export default function FieldPage() {
         setLoopPlaying(false); samplerLoopStop(); samplerOrbSet(false, '');
         const cid = 'print_' + Date.now();
         microcosmLoadSourceData(cid, Lc);
-        setCapture({ id: cid, data: Lc, dataR: Rc, bars: 0 });
+        analyseCapture(Lc); setCapture({ id: cid, data: Lc, dataR: Rc, bars: 0 });
         setLoopA(0); setLoopB(1);
         setSelStation('clean');
         say('printed · ' + (Lc.length/48000).toFixed(2) + ' s · one cycle · untouched');
@@ -655,6 +679,12 @@ export default function FieldPage() {
         if (capture) takeStackRef.current.push(capture);
         const wid = 'wav_' + Date.now();
         microcosmLoadSourceData(wid, d2);      // register decoded samples with the worklet
+        // declaration beats detection: a root suffix on the filename is the user's word
+        const suffixMatch = f.name.replace(/\.wav$/i, '').match(/_([A-G]s?)(min|maj)?(\d)?$/);
+        if (suffixMatch) {
+          const nn = suffixMatch[1].replace('s','#') + (suffixMatch[3] || '2');
+          setRootRead({ label: suffixMatch[1].replace('s','#') + (suffixMatch[3] || '') + (suffixMatch[2] ? ' ' + suffixMatch[2] : ''), note: nn, cents: 0, kind: 'note' });
+        } else { analyseCapture(d2); }
         setCapture({ id: wid, data: d2, bars });
         setLoopA(0); setLoopB(1);
         say('loaded · ' + f.name + ' · ' + secs.toFixed(2) + ' s');
@@ -784,7 +814,7 @@ export default function FieldPage() {
     const lenSamp = Math.floor(48000 * Math.min(secs, 11.5));      // ring holds 12s - clamp with margin
     const id = 'cap_' + Date.now();
     microcosmCaptureLive(id, lenSamp, (cid, data) => {
-setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
+setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data, bars: snapBars });
       console.log('[sampler] capture landed', cid, data.length, 'samples');
     });
   }
@@ -2274,7 +2304,7 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                 <div style={{ width:'100%' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10 }}>
                     <div style={{ display:'flex', gap:38, alignItems:'baseline' }}>
-                      <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', color: capture ? '#5dcaa5' : 'rgba(255,255,255,0.3)', cursor:'pointer' }}>{capture ? 'A2 ▴▾' : '— ▴▾'} <span style={{ fontSize:10, letterSpacing:'0.3em', color:'rgba(255,255,255,0.5)', marginLeft:6 }}>ROOT</span></span>
+                      <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', color: capture ? '#5dcaa5' : 'rgba(255,255,255,0.3)', cursor:'pointer' }}>{capture ? rootRead.label : '—'} <span onClick={(e)=>{ e.stopPropagation(); nudgeRoot(1); }} style={{ cursor:'pointer' }}>▴</span><span onClick={(e)=>{ e.stopPropagation(); nudgeRoot(-1); }} style={{ cursor:'pointer' }}>▾</span> <span style={{ fontSize:10, letterSpacing:'0.3em', color:'rgba(255,255,255,0.5)', marginLeft:6 }}>ROOT</span></span>
                       <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.6)' }}>{(() => { if (!capture) return '— s · — bars'; const bb = capture.bars > 0 ? capture.bars : 0; if (bb > 0) return (capture.data.length/48000).toFixed(2) + ' s · ' + bb + (bb === 1 ? ' bar' : ' bars'); const spb2 = (60/bpm)*4; const secs2 = capture.data.length/48000; const nb2 = Math.max(1, Math.round(secs2/spb2)); const off2 = secs2 - nb2*spb2; return secs2.toFixed(2) + ' s · free · ' + (Math.abs(off2) < 0.02 ? 'on the bar' : (off2 > 0 ? '+' : '') + off2.toFixed(2) + ' s vs ' + nb2 + ' bar' + (nb2===1?'':'s')); })()}</span>
                       {capture && !(loopA <= 0.001 && loopB >= 0.999) && (
                         <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', color:'#e8b800' }}>window {(((loopB-loopA)*capture.data.length)/48000).toFixed(2)} s<span style={{ fontSize:10, letterSpacing:'0.3em', color:'rgba(255,255,255,0.4)', marginLeft:8 }}>DRAG POSTS · GRAB MIDDLE TO SLIDE</span></span>
@@ -2534,17 +2564,20 @@ setLoopA(0); setLoopB(1);       setCapture({ id: cid, data, bars: snapBars });
                     if (capture) {
                       const s0 = Math.floor(loopA * capture.data.length);
                       const e0 = Math.floor(loopB * capture.data.length);
+                      // the declaration travels: root suffix on the filename (D2 / G / Gmin)
+                      const rootSuffix = rootRead.note ? '_' + rootRead.note.replace('#','s') : '';
+                      const saveName = capName + rootSuffix;
                       const crx = capture as any;
                       if (crx.dataR) {
                         let sl = capture.data.slice(s0, e0), sr = crx.dataR.slice(s0, e0);
                         if (capReverse) { sl = sl.slice().reverse(); sr = sr.slice().reverse(); }
-                        samplerExportWavStereo(sl, sr, capName);
+                        samplerExportWavStereo(sl, sr, saveName);
                       } else {
                         let seg = capture.data.slice(s0, e0);
                         if (capReverse) seg = seg.slice().reverse();
-                        samplerExportWav(seg, capName);
+                        samplerExportWav(seg, saveName);
                       }
-                      say('saved · ' + capName + '.wav → Downloads');
+                      say('saved · ' + saveName + '.wav → Downloads');
                     }
                     setNaming(false);
                   } if(e.key==='Escape') setNaming(false); }}

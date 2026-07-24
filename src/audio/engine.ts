@@ -787,16 +787,63 @@ export function samplerLoopPos(): number {
   return (t % capPlayDur) / capPlayDur;
 }
 // root detection on a raw capture (reuses the wav loader's detector if present)
-export function samplerDetectRoot(data: Float32Array): number {
-  if (!microcosmCore) return 0;
-  try {
-    const ctx = microcosmCore.context as AudioContext;
-    const buf = ctx.createBuffer(1, data.length, ctx.sampleRate);
-    buf.getChannelData(0).set(data);
-    // @ts-ignore - internal detector
-    return typeof detectFundamentalHz === 'function' ? (detectFundamentalHz as any)(buf) : 0;
-  } catch { return 0; }
+export type RootReading = { label: string; note: string; cents: number; kind: 'note' | 'anchor' | 'none' };
+export function samplerAnalyseRoot(data: Float32Array): RootReading {
+  // HISTOGRAM BRAIN: run the existing fundamental detector over ~200ms slices,
+  // collect a pitch-class histogram weighted by slice energy.
+  // One note dominating -> a NOTE reading (D2 +30c). A coherent set -> an ANCHOR (~A).
+  // Nothing periodic -> honest none. Detection labels; it never changes audio.
+  if (!microcosmCore) return { label: '—', note: '', cents: 0, kind: 'none' };
+  const ctx = microcosmCore.context as AudioContext;
+  const sr = 48000;
+  const slice = Math.floor(sr * 0.2);
+  const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const hist = new Array(12).fill(0);
+  const centsByPc: number[][] = Array.from({ length: 12 }, () => []);
+  const midiByPc: number[][] = Array.from({ length: 12 }, () => []);
+  let voiced = 0, total = 0;
+  for (let off = 0; off + slice <= data.length; off += slice) {
+    total++;
+    const seg = data.subarray(off, off + slice);
+    let energy = 0;
+    for (let i = 0; i < seg.length; i += 16) energy += seg[i] * seg[i];
+    if (energy < 0.0005) continue;
+    const buf = ctx.createBuffer(1, slice, sr);
+    buf.getChannelData(0).set(seg);
+    const hz = detectFundamentalHz(buf);
+    if (!hz || hz < 30 || hz > 2000) continue;
+    voiced++;
+    const midi = 69 + 12 * Math.log2(hz / 440);
+    const nearest = Math.round(midi);
+    const pc = ((nearest % 12) + 12) % 12;
+    hist[pc] += energy;
+    centsByPc[pc].push(Math.round((midi - nearest) * 100));
+    midiByPc[pc].push(nearest);
+  }
+  if (voiced === 0 || total === 0) return { label: '—', note: '', cents: 0, kind: 'none' };
+  const sum = hist.reduce((x, y) => x + y, 0);
+  let best = 0;
+  for (let i = 1; i < 12; i++) if (hist[i] > hist[best]) best = i;
+  const share = hist[best] / (sum || 1);
+  const cl = centsByPc[best];
+  const medCents = cl.length ? cl.sort((x, y) => x - y)[Math.floor(cl.length / 2)] : 0;
+  // octave for the note reading: re-run the detector on the strongest slice region is
+  // overkill; take the median midi of the winning class via cents list length weighting.
+  const noteName = names[best];
+  if (share > 0.6 && voiced / total > 0.3) {
+    // ONE NOTE dominates: octave from the MEDIAN of the winning class's own votes -
+    // the register the evidence chose, not a separate pass that can latch a harmonic.
+    // (Open low E read E6 from string overtones - the whole-take pass was the bug.)
+    const ml = midiByPc[best].sort((x, y) => x - y);
+    const medMidi = ml[Math.floor(ml.length / 2)];
+    const oct = Math.floor(medMidi / 12) - 1;
+    const label = noteName + oct + (medCents !== 0 ? ' ' + (medCents > 0 ? '+' : '') + medCents + '\u00A2' : '');
+    return { label, note: noteName + oct, cents: medCents, kind: 'note' };
+  }
+  // A SET: propose the anchor with earned uncertainty
+  return { label: '~' + noteName, note: noteName + '2', cents: 0, kind: 'anchor' };
 }
+
 // encode a mono Float32Array as a 16-bit WAV blob and download it
 export function samplerExportWavStereo(L: Float32Array, R: Float32Array, name: string, sampleRate: number = 48000): void {
   const n = L.length;
@@ -1030,8 +1077,21 @@ export async function microcosmLoadSource(id: string, file: File): Promise<{ dur
   const arr = await file.arrayBuffer();
   const audioBuf = await ctx.decodeAudioData(arr);
   (microcosmCore as any).loadSource(id, audioBuf);
-  const rootHz = detectFundamentalHz(audioBuf);
-  console.log('[source] loaded', id, file.name, audioBuf.duration.toFixed(1)+'s', 'detected root:', rootHz ? rootHz.toFixed(1)+'Hz' : 'none');
+  // DECLARATION BEATS DETECTION: a root suffix on the filename (_D2 / _G / _Gmin,
+  // written by the sampler's save) is the user's word - converted to Hz, detection skipped.
+  const NOTE_PC: Record<string, number> = { C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11 };
+  const sm = file.name.replace(/\.wav$/i, '').match(/_([A-G]s?)(min|maj)?(\d)?$/);
+  let rootHz: number;
+  if (sm) {
+    const pc = NOTE_PC[sm[1].replace('s', '#')] ?? 9;
+    const oct = sm[3] ? parseInt(sm[3]) : 2;
+    const midi = (oct + 1) * 12 + pc;
+    rootHz = 440 * Math.pow(2, (midi - 69) / 12);
+    console.log('[source] loaded', id, file.name, audioBuf.duration.toFixed(1)+'s', 'DECLARED root:', sm[1].replace('s','#') + (sm[3]||''), '(' + rootHz.toFixed(1) + 'Hz)');
+  } else {
+    rootHz = detectFundamentalHz(audioBuf);
+    console.log('[source] loaded', id, file.name, audioBuf.duration.toFixed(1)+'s', 'detected root:', rootHz ? rootHz.toFixed(1)+'Hz' : 'none');
+  }
   return { duration: audioBuf.duration, rootHz };
 }
 export function microcosmRemoveSource(id: string): void { (microcosmCore as any)?.removeSource(id); }
