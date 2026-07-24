@@ -20,6 +20,7 @@ import {
   microcosmMonitor,
   microcosmLoadSourceData,
   microcosmRecordOutput, samplerLoopPlayStereo, samplerExportWavStereo,
+  microcosmCleanSync, microcosmCleanGain,
   samplerAnalyseRoot,
   microcosmInputLevel, microcosmInputDevices, microcosmCaptureLive,
   microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos,
@@ -32,6 +33,7 @@ type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
 // For these defaults id === engineType; once orbs are user-created, ids diverge.
 const ALL_ORBS: OrbDef[] = [
   // TEST BHAIRAV: Bhairav-capable engines first (mosaic/shimmer/warp/glitch use tiers)
+  { id: 'clean',   label: 'Clean',   colorKey: 'clean',   engineType: 'clean'   },
   { id: 'mosaic',  label: 'Mosaic',  colorKey: 'tunnel',  engineType: 'mosaic'  },
   { id: 'shimmer', label: 'Shimmer', colorKey: 'shimmer', engineType: 'shimmer' },
   { id: 'warp',    label: 'Warp',    colorKey: 'warp',    engineType: 'warp'    },
@@ -254,6 +256,11 @@ export default function FieldPage() {
     return Math.round(offset * 100) / 100;
   }
   const orbCounter = useRef<Record<string, number>>({});
+  function setOrbLevelEverywhere(id: string, v: number) {
+    microcosmEngineLevel(id, v);
+    const od = fieldOrbs.find(o2 => o2.id === id);
+    if (od && od.engineType === 'clean') microcosmCleanGain(id, v);
+  }
   function mintOrbId(engineType: string): string {
     const n = (orbCounter.current[engineType] || 0) + 1;
     orbCounter.current[engineType] = n;
@@ -280,6 +287,7 @@ export default function FieldPage() {
   }
   function removeFieldOrb(id: string): void {
     microcosmEngineActive(id, false);
+    microcosmCleanSync(id, null, 0);                 // clean player dies with the orb (no-op for engines)
     microcosmRemoveOrb(id);
     setFieldOrbs(prev => prev.filter(o => o.id !== id));
     // membership cleanup + PRUNE: no ghost ids; empty constellations cease to exist (default exempt)
@@ -1361,6 +1369,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       const id = addFieldOrb(engineType, cat?.label || engineType, cat?.colorKey || 'tunnel');
       newOrbIds.push(id);
       microcosmEngineSource(id, sourceId);              // route to the constellation's source
+      if (engineType === 'clean') microcosmCleanSync(id, sourceId, volRef.current[id] ?? 0.7);   // CLEAN: the player is the voice (loop var - the state lookup was stale)
       if (tune) microcosmOrbTuning(id, tune);           // FIXED tuning slot (never overwritten by chords)
       applyJoinPitch(id, targetId, sourceId === 'default');   // arrive in the current key + on the current chord
       // seamless add: the newly-added orb inherits the PREVIEW's current level (in live mode the
@@ -1368,6 +1377,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       const joinLevel = (engineType === createEngine && (window as any).__previewLevel != null) ? (window as any).__previewLevel : orbLevel(id);
       volRef.current[id] = joinLevel;
       if (started.current && state==='playing') { microcosmAddOrb(id, engineType, joinLevel); microcosmEngineActive(id, true); microcosmEngineLevel(id, joinLevel); }
+      if (engineType === 'clean') { /* player wired on constellation routing (cleanSync) */ }
     }
     // AUTHORITATIVE membership (no stale state): record new orbs into the target constellation
     setConstellations(prev => prev.map(c => ({ ...c, orbIds: c.id === targetId ? Array.from(new Set([...c.orbIds, ...newOrbIds])) : c.orbIds.filter(o => !newOrbIds.includes(o)) })));
@@ -1424,8 +1434,11 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   async function previewEngine(engineType: string) {
     setCreateEngine(engineType);
     await ensureStarted();
+    microcosmCleanSync(PREVIEW_ID, null, 0);
     microcosmRemoveOrb(PREVIEW_ID);
     microcosmAddOrb(PREVIEW_ID, engineType, 0.8);
+    if (engineType === 'clean') microcosmCleanSync(PREVIEW_ID, 'src_pending', 0.8);   // CLEAN preview: the player, not grains
+    else microcosmCleanSync(PREVIEW_ID, null, 0);
     // RESET the reused preview orb's pitch slots so nothing leaks between previews — e.g. a
     // prior WAV preview left a tuning offset that would detune a later synth preview.
     microcosmOrbTuning(PREVIEW_ID, 0);
@@ -1464,6 +1477,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   }
   function stopPreview() {
     microcosmEngineActive(PREVIEW_ID, false);
+    microcosmCleanSync(PREVIEW_ID, null, 0);
     microcosmRemoveOrb(PREVIEW_ID);
   }
   // ---- SAVE / RECALL songs (Universe) — localStorage ----
@@ -1753,6 +1767,11 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   const toggleConstMuteRef = useRef(toggleConstMute); toggleConstMuteRef.current = toggleConstMute;
   const setConstLevelRef = useRef(setConstLevel); setConstLevelRef.current = setConstLevel;
   function activateRack() {
+    // clean players re-arm with the transport (stop is not one-way)
+    for (const o of fieldOrbs) if (o.engineType === 'clean') {
+      const c2 = constellations.find(cc => cc.orbIds.includes(o.id));
+      if (c2) microcosmCleanSync(o.id, c2.sourceId, volRef.current[o.id] ?? 0.7);
+    }
     if (!started.current) return;
     fieldOrbs.forEach(o => {
       const on = orbs.some(v => v.id === o.id);
@@ -1945,7 +1964,11 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     if (!started.current) { await ensureStarted(); return; }
     await microcosmStart(); activateRack(); setState('playing'); barAnchorRef.current = performance.now(); barAudioAnchorRef.current = microcosmAudioTime();
   }
-  function doStop() { microcosmStopEngine(); microcosmFauveOffAll(); setState('stopped'); }   // silence Fauve audio but KEEP fauveRef (your setting) so save/restart preserves it
+  function doStop() {
+    microcosmStopEngine(); microcosmFauveOffAll();
+    for (const o of fieldOrbs) if (o.engineType === 'clean') microcosmCleanSync(o.id, null, 0);   // clean players stop with the transport
+    setState('stopped');
+  }   // silence Fauve audio but KEEP fauveRef (your setting) so save/restart preserves it
   function toggleMute() {
     const m = !mutedRef.current; mutedRef.current=m; setMuted(m);
     activateRack();

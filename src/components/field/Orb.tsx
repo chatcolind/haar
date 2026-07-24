@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 export type OrbColor = { core: string; mid: string; glow: string; };
 
 export const ORB_COLORS: Record<string, OrbColor> = {
+  clean:    { core: '#ffffff', mid: '#c9cdd4', glow: '#6b7280' },   // the sampler station's white-silver - dry as a chosen voice
   bubbles:  { core: '#f3e6ff', mid: '#c98cff', glow: '#8a3df5' },
   tunnel:   { core: '#aac4ff', mid: '#5b8cff', glow: '#2a4fa0' },
   shimmer:  { core: '#a6fff2', mid: '#3df5e0', glow: '#0f6e72' },

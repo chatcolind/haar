@@ -160,7 +160,7 @@ export class Microcosm {
     await this.ctx.audioWorklet.addModule('/microcosm-processor.js?v=' + Date.now());
     await this.ctx.audioWorklet.addModule('/recorder-processor.js?v=' + Date.now());
     this.node = new AudioWorkletNode(this.ctx, 'microcosm-processor', {
-      numberOfInputs: 1, numberOfOutputs: 9, outputChannelCount: [2,2,2,2,2,2,2,2,2],   // 0 = default, 1..8 = constellation reels
+      numberOfInputs: 1, numberOfOutputs: 10, outputChannelCount: [2,2,2,2,2,2,2,2,2,2],   // 0 = default, 1..8 = reels, 9 = THE DRY LANE (clean orbs)
     });
     // nativeIn → worklet → filter → [dry + reverb→wet] → nativeOut
     this.nativeIn.connect(this.node);
@@ -271,6 +271,13 @@ export class Microcosm {
     this.nativeOut.connect(this.limiter);
     this.limiter.connect(this.tapeWobbleDelay as DelayNode);   // into tape
     (this.tapeMakeup as GainNode).connect(dest);      // tape out (post makeup) -> destination
+    // THE DRY LANE: worklet output 9 straight to the destination - clean orbs' voice,
+    // untouched by filter/reverb/limiter/tape. Space/tape return later as opt-in sends.
+    if (!this._dryGain) {
+      this._dryGain = this.ctx.createGain(); this._dryGain.gain.value = 1.0;
+      this.node?.connect(this._dryGain, 9);
+      this._dryGain.connect(dest);
+    }
     // HAAR RECORDER: taps the true chain end (post tape makeup) - records what you hear (no click).
     if (!this._recNode) {
       this._recNode = new AudioWorkletNode(this.ctx, 'haar-recorder', { numberOfInputs: 1, numberOfOutputs: 1 });
@@ -391,6 +398,7 @@ export class Microcosm {
   // SAMPLER capture: request a carve of the live ring; the worklet answers with the audio
   onCaptured: ((id: string, data: Float32Array) => void) | null = null;
   private _recNode: AudioWorkletNode | null = null;
+  private _dryGain: GainNode | null = null;
   recordOutput(lenSamp: number, cb: (L: Float32Array, R: Float32Array) => void): void {
     // record the literal output, STEREO, UNTOUCHED - the tape machine at the chain's end
     if (!this._recNode) { console.warn('[recorder] not connected yet'); return; }
@@ -547,6 +555,12 @@ export class Microcosm {
   // ---- dynamic rack (rack-by-orb-id) ----
   // Create a rack entry for an orb instance running a given engine recipe.
   // Idempotent: re-adding an existing orbId updates its engineType, keeps level/active.
+  cleanSync(orbId: string, srcId: string | null, gain: number): void {
+    // CLEAN orb player control: srcId null = off; otherwise (re)start at gain
+    if (!srcId) { this.node?.port.postMessage({ type: 'cleanOff', orbId }); return; }
+    this.node?.port.postMessage({ type: 'cleanOn', orbId, srcId, gain });
+  }
+  cleanGain(orbId: string, gain: number): void { this.node?.port.postMessage({ type: 'cleanGain', orbId, gain }); }
   addOrb(orbId: string, engineType: string, level: number = 0.8): void {
     const existing = this.rack[orbId];
     this.rack[orbId] = {
@@ -597,6 +611,7 @@ export class Microcosm {
     };
     const tick = () => {
       for (const id of Object.keys(this.rack)) {
+        if (this.rack[id].engineType === 'clean') continue;   // CLEAN: the worklet player is the voice - no grains
         const e = this.rack[id];
         if (!e.active) continue;
         this.engineTickAccum[id] -= STEP;
