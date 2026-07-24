@@ -706,6 +706,13 @@ export default function FieldPage() {
   const [naming, setNaming] = useState(false);   // name line appears only after SAVE is tapped
   const [capReverse, setCapReverse] = useState(false);
   const [capVari, setCapVari] = useState(1.0);
+  // LIVE RE-PITCH: octave/semitone/varispeed taps while playing replay the voice at the
+  // new rate on the spot (engine voices already follow via the traversal's rate deps).
+  const pitchLiveRef = useRef(false);
+  useEffect(() => {
+    if (!pitchLiveRef.current) { pitchLiveRef.current = true; return; }   // skip mount
+    if (loopPlaying && selStation === 'clean' && capture) replayIfPlaying();
+  }, [capReg, capFine, capVari]);
   // ENGINE TRAVERSAL (continuous phase): the read-centre walks the window; the clock never
   // resets on window moves - the fraction persists and re-maps into wherever the window sits.
   const walkRafRef = useRef<number>(0);
