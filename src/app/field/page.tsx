@@ -25,6 +25,7 @@ import {
   microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos,
   samplerExportWav, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
 } from '../../audio/engine';
+import { writeWav, writeSong, hasHome, pickHome, openSongFile, saveSongAs, saveWavAs } from '../../lib/haarHome';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
 // id is the orb INSTANCE id (unique); engineType is which scattering recipe it runs.
@@ -1481,6 +1482,20 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const val = await new Promise<any>((res, rej) => { const tx = db.transaction('sources','readonly'); const r = tx.objectStore('sources').get(key); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     db.close(); return val;
   }
+  // MIGRATION (run once from the console): window.haarMigrateSongs() - every localStorage
+  // song becomes a real file in Haar/Songs. Existing files with the same name are overwritten.
+  useEffect(() => {
+    (window as any).haarMigrateSongs = async () => {
+      let ok = await hasHome(); if (!ok) ok = await pickHome(); if (!ok) return 'no home picked';
+      const idx = JSON.parse(localStorage.getItem('haar_songs_index') || '[]');
+      let n = 0;
+      for (const sg of idx) {
+        const j = localStorage.getItem('haar_song_' + sg.name);
+        if (j && await writeSong(sg.name, j)) n++;
+      }
+      return n + ' songs written to Haar/Songs';
+    };
+  }, []);
   function listSongs(): {name:string;ts:number}[] {
     try { return JSON.parse(localStorage.getItem('haar_songs_index') || '[]'); } catch { return []; }
   }
@@ -1510,13 +1525,22 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       const sb = sourceBytesRef.current[c.sourceId];
       if (sb) { sourceMeta[c.sourceId] = { name: sb.name }; idbSet('src_'+c.sourceId, sb).catch(err=>console.warn('[idb] save failed', c.sourceId, err)); }
     }
-    localStorage.setItem('haar_song_'+name, JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, key: { lockKey, scaleLock, scaleMode, octave }, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta }));
+    const songJson = JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, key: { lockKey, scaleLock, scaleMode, octave }, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta });
+    localStorage.setItem('haar_song_'+name, songJson);
+    // the home: the song becomes a REAL FILE too (localStorage stays the working store)
+    (async () => {
+      const saved = await saveSongAs(name, songJson);       // THE DIALOG - you choose where, every time
+      console.log(saved ? '[song] saved as ' + saved : '[song] save dialog cancelled');
+    })();
     const idx = listSongs().filter(s=>s.name!==name); idx.push({name, ts:Date.now()});
     localStorage.setItem('haar_songs_index', JSON.stringify(idx));
     setCurrentSongName(name); setSongMenu(null); setSongName('');
   }
   async function loadSong(name: string) {
     let data; try { data = JSON.parse(localStorage.getItem('haar_song_'+name) || ''); } catch { return; }
+    return loadSongData(data);
+  }
+  async function loadSongData(data: any) {
     if (!data?.orbs) return;
     fieldOrbs.forEach(o => removeFieldOrb(o.id));
     await ensureStarted();
@@ -2568,16 +2592,21 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                       const rootSuffix = rootRead.note ? '_' + rootRead.note.replace('#','s') : '';
                       const saveName = capName + rootSuffix;
                       const crx = capture as any;
+                      let wavBytes: ArrayBuffer;
                       if (crx.dataR) {
                         let sl = capture.data.slice(s0, e0), sr = crx.dataR.slice(s0, e0);
                         if (capReverse) { sl = sl.slice().reverse(); sr = sr.slice().reverse(); }
-                        samplerExportWavStereo(sl, sr, saveName);
+                        wavBytes = samplerExportWavStereo(sl, sr, saveName, 48000, true) as ArrayBuffer;
                       } else {
                         let seg = capture.data.slice(s0, e0);
                         if (capReverse) seg = seg.slice().reverse();
-                        samplerExportWav(seg, saveName);
+                        wavBytes = samplerExportWav(seg, saveName, 48000, true) as ArrayBuffer;
                       }
-                      say('saved · ' + saveName + '.wav → Downloads');
+                      (async () => {
+                        const saved = await saveWavAs(saveName, wavBytes);   // THE DIALOG - every save
+                        if (saved) { say('saved · ' + saved); }
+                        else { say('save cancelled'); }
+                      })();
                     }
                     setNaming(false);
                   } if(e.key==='Escape') setNaming(false); }}
@@ -3348,7 +3377,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 </div>
                 <div className="haar-lbl" style={{ fontSize:12.5, color:'#a6fff2', marginTop:8 }}>Save</div>
               </div>
-              <div onClick={()=>setSongMenu('open')} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+              <div onClick={()=>(async ()=>{ const txt = await openSongFile(); if (txt) { try { const data = JSON.parse(txt); await loadSongData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } })()} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(216,166,255,0.5)', background:'rgba(216,166,255,0.06)', boxShadow:'0 0 18px 3px rgba(216,166,255,0.4), inset 0 0 14px rgba(216,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#d8a6ff" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M3 5h5l2 2h7v9H3z"/></g></svg>
                 </div>
@@ -3581,11 +3610,15 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
             ) : (
               <>
                 <div style={{ fontSize:12, letterSpacing:'0.2em', color:'#d8a6ff', fontFamily:'monospace', marginBottom:20 }}>OPEN UNIVERSE</div>
+                <div onClick={async ()=>{ const txt = await openSongFile(); if (txt) { try { const data = JSON.parse(txt); setSongMenu(null); await loadSongData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } }}
+                  style={{ padding:'13px 16px', marginBottom:14, borderRadius:10, cursor:'pointer', textAlign:'center', border:'1px solid rgba(122,245,200,0.4)', color:'#7af5c8', fontSize:13, letterSpacing:'0.12em' }}>
+                  BROWSE FOLDERS · Haar/Songs
+                </div>
                 {listSongs().length===0 ? (
                   <div style={{ fontSize:14, color:'rgba(255,255,255,0.4)', padding:'10px 0 20px' }}>no saved universes yet</div>
                 ) : (
                   <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:'46vh', overflowY:'auto', marginBottom:18 }}>
-                    {listSongs().sort((a,b)=>b.ts-a.ts).map(sg => (
+                    {listSongs().sort((a,b)=>b.ts-a.ts).slice(0,5).map(sg => (
                       <div key={sg.name} onClick={()=>loadSong(sg.name)} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'13px 16px', borderRadius:10, cursor:'pointer', background:'rgba(255,255,255,0.03)', border:'0.5px solid rgba(255,255,255,0.1)' }}>
                         <span style={{ fontSize:16, color:'#e0bfff' }}>{sg.name}</span>
                         <span style={{ fontSize:11, color:'rgba(255,255,255,0.35)' }}>{new Date(sg.ts).toLocaleDateString()}</span>

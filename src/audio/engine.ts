@@ -845,7 +845,7 @@ export function samplerAnalyseRoot(data: Float32Array): RootReading {
 }
 
 // encode a mono Float32Array as a 16-bit WAV blob and download it
-export function samplerExportWavStereo(L: Float32Array, R: Float32Array, name: string, sampleRate: number = 48000): void {
+export function samplerExportWavStereo(L: Float32Array, R: Float32Array, name: string, sampleRate: number = 48000, bytesOnly: boolean = false): ArrayBuffer | void {
   const n = L.length;
   const ab = new ArrayBuffer(44 + n * 4);
   const dv = new DataView(ab);
@@ -859,6 +859,7 @@ export function samplerExportWavStereo(L: Float32Array, R: Float32Array, name: s
     dv.setInt16(44 + i * 4, vl < 0 ? vl * 0x8000 : vl * 0x7FFF, true);
     dv.setInt16(46 + i * 4, vr < 0 ? vr * 0x8000 : vr * 0x7FFF, true);
   }
+  if (bytesOnly) return ab;
   const blob = new Blob([ab], { type: 'audio/wav' });
   const url = URL.createObjectURL(blob);
   const aEl = document.createElement('a');
@@ -867,7 +868,7 @@ export function samplerExportWavStereo(L: Float32Array, R: Float32Array, name: s
   setTimeout(() => URL.revokeObjectURL(url), 5000);
   console.log('[sampler] exported STEREO', name + '.wav', (n / sampleRate).toFixed(2) + 's');
 }
-export function samplerExportWav(data: Float32Array, name: string, sampleRate: number = 48000): void {
+export function samplerExportWav(data: Float32Array, name: string, sampleRate: number = 48000, bytesOnly: boolean = false): ArrayBuffer | void {
   const n = data.length;
   const ab = new ArrayBuffer(44 + n * 2);
   const dv = new DataView(ab);
@@ -877,6 +878,7 @@ export function samplerExportWav(data: Float32Array, name: string, sampleRate: n
   dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
   wstr(36, 'data'); dv.setUint32(40, n * 2, true);
   for (let i = 0; i < n; i++) { const v = Math.max(-1, Math.min(1, data[i])); dv.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7FFF, true); }
+  if (bytesOnly) return ab;
   const blob = new Blob([ab], { type: 'audio/wav' });
   const url = URL.createObjectURL(blob);
   const aEl = document.createElement('a');
