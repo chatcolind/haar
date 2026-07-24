@@ -360,7 +360,7 @@ export default function FieldPage() {
     const mv = (ev: PointerEvent) => handleDragMove(ev.clientX);
     const up = () => {
       if (dragHandleRef.current && loopPlaying && capture && selStation === 'clean') {
-        playCapture((nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data), loopA, loopB, capReverse);
+        playCapture((revMode && revB - revA >= 0.005 ? (revFlippedCopy() || capture.data) : (nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data)), loopA, loopB, capReverse);
       }
       dragHandleRef.current = '';
     };
@@ -482,7 +482,7 @@ export default function FieldPage() {
     // playing: switch the voice live
     if (st === 'clean') {
       samplerOrbSet(false, '');
-      if (capture) playCapture((nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data), loopA, loopB, capReverse);
+      if (capture) playCapture((revMode && revB - revA >= 0.005 ? (revFlippedCopy() || capture.data) : (nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data)), loopA, loopB, capReverse);
     } else if (capture) {
       samplerLoopStop();
       samplerOrbSet(true, capture.id);
@@ -562,6 +562,40 @@ export default function FieldPage() {
       });
     };
     requestAnimationFrame(armWait);
+  }
+  function conformToTempo() {
+    // PRINT TO TEMPO: bake the loop window at the song's bpm - varispeed conform
+    // (pitch rides with time: the classic sampler sound). Pure math, no capture.
+    if (!capture) return;
+    const s0 = Math.floor(loopA * capture.data.length);
+    const e0 = Math.floor(loopB * capture.data.length);
+    const srcLen = e0 - s0;
+    if (srcLen < 4800) { say('window too small'); return; }
+    const actualSec = srcLen / 48000;
+    const spb = (60 / bpm) * 4;
+    const wholeBars = Math.max(1, Math.round(actualSec / spb));
+    const targetLen = Math.floor(wholeBars * spb * 48000);
+    const ratio = srcLen / targetLen;                    // read speed through the source
+    const conform = (src: Float32Array): Float32Array => {
+      const outA = new Float32Array(targetLen);
+      for (let i = 0; i < targetLen; i++) {
+        const rp = s0 + i * ratio;
+        const p0 = Math.floor(rp), p1 = Math.min(p0 + 1, e0 - 1);
+        const fr = rp - p0;
+        outA[i] = src[p0] * (1 - fr) + src[p1] * fr;
+      }
+      return outA;
+    };
+    takeStackRef.current.push(capture);
+    const crx = capture as any;
+    const nd = conform(capture.data);
+    const ndR = crx.dataR ? conform(crx.dataR) : undefined;
+    const cid = 'conform_' + Date.now();
+    microcosmLoadSourceData(cid, nd);
+    setCapture(ndR ? { id: cid, data: nd, dataR: ndR, bars: wholeBars } as any : { id: cid, data: nd, bars: wholeBars });
+    setLoopA(0); setLoopB(1);
+    replayIfPlaying({ data: nd });
+    say('conformed · ' + wholeBars + (wholeBars === 1 ? ' bar · ' : ' bars · ') + bpm + ' bpm');
   }
   function nudgeToggle() {
     if (nudgeMode) { setNudgeMode(false); setNudgeSamp(0); replayIfPlaying(); }
@@ -654,6 +688,43 @@ export default function FieldPage() {
     setCapture(nc); setLoopA(0); setLoopB(1);
     replayIfPlaying({ data: d2, a: 0, b: 1 });
     say('padded to ' + barsUp + (barsUp===1?' bar':' bars')); console.log('[sampler] PAD ->', barsUp, 'bar(s)');
+  }
+  const [revMode, setRevMode] = useState(false);
+  const [revA, setRevA] = useState(0);
+  const [revB, setRevB] = useState(0);
+  function revToggle() {
+    if (revMode) { setRevMode(false); setRevA(0); setRevB(0); replayIfPlaying(); }   // abandon: the original replays, wav untouched
+    else { setRevMode(true); setRevA(0); setRevB(0); setFadeMode(''); setFadeA(0); setFadeB(0); setNudgeMode(false); setNudgeSamp(0); }
+  }
+  function revFlippedCopy(): Float32Array | null {
+    // the AUDITION: the loop with the framed span flipped - what you hear before you commit
+    if (!capture || revB - revA < 0.005) return null;
+    const s1 = Math.floor(revA * capture.data.length);
+    const e1 = Math.floor(revB * capture.data.length);
+    const outA = capture.data.slice();
+    for (let i = 0; i < e1 - s1; i++) outA[s1 + i] = capture.data[e1 - 1 - i];
+    return outA;
+  }
+  function revProcess() {
+    // REGION REVERSE: flip the selected span in place (both channels) - the drum trick
+    if (!capture || revB - revA < 0.005) return;
+    const s1 = Math.floor(revA * capture.data.length);
+    const e1 = Math.floor(revB * capture.data.length);
+    const flip = (src: Float32Array): Float32Array => {
+      const outA = src.slice();
+      for (let i = 0; i < e1 - s1; i++) outA[s1 + i] = src[e1 - 1 - i];
+      return outA;
+    };
+    takeStackRef.current.push(capture);
+    const crx = capture as any;
+    const nd = flip(capture.data);
+    const ndR = crx.dataR ? flip(crx.dataR) : undefined;
+    const cid = 'cap_' + Date.now();
+    microcosmLoadSourceData(cid, nd);
+    setCapture(ndR ? { id: cid, data: nd, dataR: ndR, bars: capture.bars } as any : { id: cid, data: nd, bars: capture.bars });
+    replayIfPlaying({ data: nd });
+    setRevMode(false); setRevA(0); setRevB(0);
+    say('section reversed');
   }
   function fadeToggle(dir: 'in'|'out') {
     if (fadeMode === dir) { setFadeMode(''); setFadeA(0); setFadeB(0); replayIfPlaying(); }  // abandon, wav untouched
@@ -2368,7 +2439,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                     <span style={{ fontSize:13, fontFamily:'Space Mono, monospace', color:'#d8a6ff', cursor:'ns-resize' }}>{capVari.toFixed(2)}× <span style={{ fontSize:9, letterSpacing:'0.28em', color:'rgba(255,255,255,0.45)' }}>VARISPEED</span></span>
                   </div>
                   <div ref={waveWrapRef}
-                    onPointerDown={(ev)=>{ if (!nudgeMode && !fadeMode && capture && !(loopA <= 0.001 && loopB >= 0.999)) {
+                    onPointerDown={(ev)=>{ if (!nudgeMode && !fadeMode && !revMode && capture && !(loopA <= 0.001 && loopB >= 0.999)) {
                       const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
                       const f2 = Math.max(0, Math.min(1, (ev.clientX - r.left - 10) / (r.width - 20)));
                       if (f2 > loopA + 0.01 && f2 < loopB - 0.01) {
@@ -2378,7 +2449,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                       }
                     }
                     if (selStation !== 'clean') return;   // destructive gestures stay CLEAN-only
-                    if (nudgeMode && capture) { nudgeDragRef.current = { on:true, startX:ev.clientX, startN:nudgeSamp }; return; } if (!fadeMode || !capture) return; const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); const f2 = Math.max(0, Math.min(1, (ev.clientX - r.left - 10) / (r.width - 20))); fadeDragRef.current = true; setFadeA(f2); setFadeB(f2); }}
+                    if (nudgeMode && capture) { nudgeDragRef.current = { on:true, startX:ev.clientX, startN:nudgeSamp }; return; } if ((!fadeMode && !revMode) || !capture) return; const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); const f2 = Math.max(0, Math.min(1, (ev.clientX - r.left - 10) / (r.width - 20))); fadeDragRef.current = true; if (revMode) { setRevA(f2); setRevB(f2); } else { setFadeA(f2); setFadeB(f2); } }}
                     onPointerMove={(ev)=>{ if (nudgeDragRef.current.on && nudgeMode && capture) {
                       const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
                       const fracMoved = (ev.clientX - nudgeDragRef.current.startX) / (r.width - 20);
@@ -2388,8 +2459,8 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                         ns = Math.round(ns / beat) * beat;
                       }
                       setNudgeSamp(ns); return;
-                    } if (!fadeDragRef.current || !fadeMode) return; const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); const f2 = Math.max(0, Math.min(1, (ev.clientX - r.left - 10) / (r.width - 20))); setFadeB(prev => Math.max(f2, fadeA + 0.002)); if (f2 < fadeA) { setFadeA(f2); } }}
-                    onPointerUp={()=>{ if (nudgeDragRef.current.on) { nudgeDragRef.current.on = false; const d2 = nudgedCopy(); if (d2) replayIfPlaying({ data: d2 }); return; } if (fadeDragRef.current) { fadeDragRef.current = false; fadePreview(); } }}
+                    } if (!fadeDragRef.current || (!fadeMode && !revMode)) return; const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); const f2 = Math.max(0, Math.min(1, (ev.clientX - r.left - 10) / (r.width - 20))); if (revMode) { setRevB(prev => Math.max(f2, revA + 0.002)); if (f2 < revA) setRevA(f2); } else { setFadeB(prev => Math.max(f2, fadeA + 0.002)); if (f2 < fadeA) { setFadeA(f2); } } }}
+                    onPointerUp={()=>{ if (nudgeDragRef.current.on) { nudgeDragRef.current.on = false; const d2 = nudgedCopy(); if (d2) replayIfPlaying({ data: d2 }); return; } if (fadeDragRef.current) { fadeDragRef.current = false; if (revMode) { const d2 = revFlippedCopy(); if (d2) replayIfPlaying({ data: d2 }); } else fadePreview(); } }}
                     style={{ position:'relative', padding:'0 10px', cursor: nudgeMode ? 'grab' : (fadeMode ? 'crosshair' : 'default') }}>
                     <svg viewBox="0 0 900 150" preserveAspectRatio="none" style={{ width:'100%', height:C(0.29,225), display:'block' }}>
                       <defs>
@@ -2403,6 +2474,13 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                         <line key={gi} x1={x2} y1="0" x2={x2} y2="150" stroke={isBar?'rgba(255,255,255,0.2)':'rgba(255,255,255,0.08)'} strokeWidth={isBar?1:0.5} />
                       ); })}
                       <rect x={loopA*900} y="0" width={(loopB-loopA)*900} height="150" fill={selStation === 'clean' ? "rgba(232,184,0,0.05)" : "rgba(27,92,232,0.12)"} style={{ cursor: (capture && !(loopA <= 0.001 && loopB >= 0.999)) ? "grab" : "default" }} />
+                      {revMode && revB > revA && (
+                        <g>
+                          <rect x={revA*900} y="0" width={(revB-revA)*900} height="150" fill="rgba(255,157,92,0.13)" />
+                          <rect x={revA*900} y="0" width="1.5" height="150" fill="rgba(255,157,92,0.7)" />
+                          <rect x={revB*900 - 1.5} y="0" width="1.5" height="150" fill="rgba(255,157,92,0.7)" />
+                        </g>
+                      )}
                       {fadeMode && fadeB > fadeA && (
                         <>
                           <rect x={fadeA*900} y="0" width={(fadeB-fadeA)*900} height="150" fill="rgba(93,202,165,0.09)" />
@@ -2445,7 +2523,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                       <div onClick={()=>{ const next = !loopPlaying; setLoopPlaying(next);
                         if (next && capture) {
                           if (selStation === 'clean') {
-                            playCapture((nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data), loopA, loopB, capReverse);
+                            playCapture((revMode && revB - revA >= 0.005 ? (revFlippedCopy() || capture.data) : (nudgeMode && nudgeSamp !== 0 ? (nudgedCopy() || capture.data) : capture.data)), loopA, loopB, capReverse);
                           } else {
                             samplerLoopStop();
                             samplerOrbSet(true, capture.id);   // the engine IS the voice
@@ -2516,6 +2594,10 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                       {W('REVERSE', capReverse ? '#d8a6ff' : undefined)}
                     </div>
                     <div>
+                      <div onClick={()=>{ if (selStation !== 'clean') return; revToggle(); }} title="reverse a SECTION: arm, drag the span, process" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border: revMode ? '1px solid #ff9d5c' : '1px solid rgba(255,255,255,0.55)', boxShadow: revMode ? '0 0 18px rgba(255,157,92,0.4)' : 'none', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontSize:C(0.021,17), color: revMode ? '#ff9d5c' : 'rgba(255,255,255,0.85)' }}>⇋</div>
+                      {W(revMode && revB - revA >= 0.005 ? 'REV SECTION ·' : 'REV SECTION', revMode ? '#ff9d5c' : undefined)}
+                    </div>
+                    <div>
                       <div onClick={undoTake} style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.85)', fontSize:C(0.023,19) }}>↺</div>
                       {W('UNDO')}
                     </div>
@@ -2542,12 +2624,16 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                       {W('FIT+KEY')}
                     </div>
                     <div>
+                      <div onClick={()=>{ if (selStation !== 'clean') return; conformToTempo(); }} title="bake the loop at the song's tempo (varispeed conform)" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontSize:C(0.02,16), color:'rgba(255,255,255,0.85)' }}>♩=</div>
+                      {W('TO TEMPO')}
+                    </div>
+                    <div>
                       <div onClick={()=>{ if (selStation !== 'clean') return; padToBar(); }} title="append silence to the next bar (pitch untouched)" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontFamily:'Space Mono, monospace', fontSize:11, color:'rgba(255,255,255,0.85)' }}>‥|</div>
                       {W('PAD BAR')}
                     </div>
-                    {((fadeMode && fadeB - fadeA >= 0.005) || (nudgeMode && nudgeSamp !== 0)) && (
+                    {((fadeMode && fadeB - fadeA >= 0.005) || (nudgeMode && nudgeSamp !== 0) || (revMode && revB - revA >= 0.005)) && (
                       <div>
-                        <div onClick={()=>{ if (nudgeMode) nudgeProcess(); else fadeProcess(); }} style={{ width:C(0.072,60), height:C(0.072,60), margin:'0 auto', borderRadius:'50%', border:'1.5px solid rgba(93,202,165,0.9)', background:'rgba(93,202,165,0.07)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow:'0 0 22px rgba(93,202,165,0.4)' }}>
+                        <div onClick={()=>{ if (revMode) revProcess(); else if (nudgeMode) nudgeProcess(); else fadeProcess(); }} style={{ width:C(0.072,60), height:C(0.072,60), margin:'0 auto', borderRadius:'50%', border:'1.5px solid rgba(93,202,165,0.9)', background:'rgba(93,202,165,0.07)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow:'0 0 22px rgba(93,202,165,0.4)' }}>
                           <span style={{ fontSize:15, color:'#5dcaa5' }}>✓</span>
                         </div>
                         {W('PROCESS', '#5dcaa5')}
