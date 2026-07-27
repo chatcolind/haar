@@ -909,6 +909,7 @@ export function microcosmLoadSourceData(id: string, data: Float32Array): void {
 export function microcosmTapOn(orbId: string, master: boolean = false): void { (microcosmCore as any)?.tapOn(orbId, master); }
 export function microcosmCleanSync(orbId: string, srcId: string | null, gain: number): void { (microcosmCore as any)?.cleanSync(orbId, srcId, gain); }
 export function microcosmCleanGain(orbId: string, gain: number): void { (microcosmCore as any)?.cleanGain(orbId, gain); }
+export function microcosmCleanStrip(orbId: string, part: string, v: number): void { (microcosmCore as any)?.cleanStripFor(orbId, part, v); }
 export function microcosmRecordOutput(lenSamp: number, cb: (L: Float32Array, R: Float32Array) => void): void {
   (microcosmCore as any)?.recordOutput(lenSamp, cb);
 }

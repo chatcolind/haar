@@ -160,7 +160,7 @@ export class Microcosm {
     await this.ctx.audioWorklet.addModule('/microcosm-processor.js?v=' + Date.now());
     await this.ctx.audioWorklet.addModule('/recorder-processor.js?v=' + Date.now());
     this.node = new AudioWorkletNode(this.ctx, 'microcosm-processor', {
-      numberOfInputs: 1, numberOfOutputs: 10, outputChannelCount: [2,2,2,2,2,2,2,2,2,2],   // 0 = default, 1..8 = reels, 9 = THE DRY LANE (clean orbs)
+      numberOfInputs: 1, numberOfOutputs: 13, outputChannelCount: [2,2,2,2,2,2,2,2,2,2,2,2,2],   // 0 default, 1..8 reels, 9..12 CLEAN CHANNELS (per-orb native strips)
     });
     // nativeIn → worklet → filter → [dry + reverb→wet] → nativeOut
     this.nativeIn.connect(this.node);
@@ -271,12 +271,28 @@ export class Microcosm {
     this.nativeOut.connect(this.limiter);
     this.limiter.connect(this.tapeWobbleDelay as DelayNode);   // into tape
     (this.tapeMakeup as GainNode).connect(dest);      // tape out (post makeup) -> destination
-    // THE DRY LANE: worklet output 9 straight to the destination - clean orbs' voice,
-    // untouched by filter/reverb/limiter/tape. Space/tape return later as opt-in sends.
-    if (!this._dryGain) {
-      this._dryGain = this.ctx.createGain(); this._dryGain.gain.value = 1.0;
-      this.node?.connect(this._dryGain, 9);
-      this._dryGain.connect(dest);
+    // CLEAN CHANNELS: four native strips, one per lane (worklet outputs 9-12).
+    // Strip: EQ (3 solid Biquads) -> Compressor -> [space send + tape send, born 0] -> dry gain -> dest.
+    // Everything born flat/zero/dry - the strip shapes only when asked.
+    if (!this._cleanStrips) {
+      this._cleanStrips = [];
+      for (let ln = 0; ln < 4; ln++) {
+        const lo = this.ctx.createBiquadFilter(); lo.type = 'lowshelf'; lo.frequency.value = 200; lo.gain.value = 0;
+        const mid = this.ctx.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1200; mid.Q.value = 0.9; mid.gain.value = 0;
+        const hi = this.ctx.createBiquadFilter(); hi.type = 'highshelf'; hi.frequency.value = 5000; hi.gain.value = 0;
+        const comp = this.ctx.createDynamicsCompressor();
+        comp.threshold.value = 0; comp.ratio.value = 1; comp.attack.value = 0.01; comp.release.value = 0.2; comp.knee.value = 6;
+        const makeup = this.ctx.createGain(); makeup.gain.value = 1.0;
+        const spaceSend = this.ctx.createGain(); spaceSend.gain.value = 0;
+        const tapeSend = this.ctx.createGain(); tapeSend.gain.value = 0;
+        const dry = this.ctx.createGain(); dry.gain.value = 1.0;
+        this.node?.connect(lo, 9 + ln);
+        lo.connect(mid); mid.connect(hi); hi.connect(comp); comp.connect(makeup);
+        makeup.connect(dry); dry.connect(dest);
+        makeup.connect(spaceSend); spaceSend.connect(this.reverb);            // the space, from zero
+        makeup.connect(tapeSend); tapeSend.connect(this.tapeWobbleDelay as AudioNode);   // the master reel, from zero
+        this._cleanStrips.push({ lo, mid, hi, comp, makeup, spaceSend, tapeSend, dry });
+      }
     }
     // HAAR RECORDER: taps the true chain end (post tape makeup) - records what you hear (no click).
     if (!this._recNode) {
@@ -355,7 +371,6 @@ export class Microcosm {
     _gp.n++;
     if (Date.now() - _gp.t > 1000) {
       const lv = this.rack[this._currentEngine] ? this.rack[this._currentEngine].level : -1;
-      console.log('[grains/sec]', _gp.n, 'orb', this._currentEngine, 'level', lv, 'active', this.rack[this._currentEngine]?.active);
       _gp.n = 0; _gp.t = Date.now();
     }
     // GRAIN COMETS: queue the spawn notification — drained by the UI's own loop.
@@ -426,6 +441,7 @@ export class Microcosm {
       this.node.port.addEventListener('message', (ev: MessageEvent) => {
         const msg: any = ev.data;
         if (msg && msg.type === 'captured' && this.onCaptured) this.onCaptured(msg.id, new Float32Array(msg.buf));
+        if (msg && msg.type === 'cleanLane') { this._cleanLanes = this._cleanLanes || {}; this._cleanLanes[msg.orbId] = msg.lane; console.log('[clean] lane', msg.lane, '->', msg.orbId); }
       });
       this.node.port.start();
     }
@@ -557,9 +573,36 @@ export class Microcosm {
   // ---- dynamic rack (rack-by-orb-id) ----
   // Create a rack entry for an orb instance running a given engine recipe.
   // Idempotent: re-adding an existing orbId updates its engineType, keeps level/active.
+  private _cleanStrips: { lo: BiquadFilterNode; mid: BiquadFilterNode; hi: BiquadFilterNode; comp: DynamicsCompressorNode; makeup: GainNode; spaceSend: GainNode; tapeSend: GainNode; dry: GainNode }[] | null = null;
+  cleanStrip(lane: number, part: 'lo'|'mid'|'hi'|'threshold'|'ratio'|'attack'|'release'|'makeup'|'space'|'tape', v: number): void {
+    const st = this._cleanStrips && this._cleanStrips[lane];
+    if (!st) return;
+    if (part === 'lo') st.lo.gain.value = v;
+    else if (part === 'mid') st.mid.gain.value = v;
+    else if (part === 'hi') st.hi.gain.value = v;
+    else if (part === 'threshold') st.comp.threshold.value = v;
+    else if (part === 'ratio') st.comp.ratio.value = v;
+    else if (part === 'attack') st.comp.attack.value = v;
+    else if (part === 'release') st.comp.release.value = v;
+    else if (part === 'makeup') st.makeup.gain.value = v;
+    else if (part === 'space') st.spaceSend.gain.value = v;
+    else if (part === 'tape') st.tapeSend.gain.value = v;
+  }
+  cleanCompReduction(lane: number): number {
+    const st = this._cleanStrips && this._cleanStrips[lane];
+    return st ? st.comp.reduction : 0;
+  }
+  private _cleanLanes: Record<string, number> = {};
+  cleanStripFor(orbId: string, part: any, v: number): void {
+    // ensure the lane-map listener is alive (shares the captured listener)
+    (this as any).captureLiveEnsureListener?.();
+    const lane = this._cleanLanes ? this._cleanLanes[orbId] : undefined;
+    if (lane == null || lane < 0) return;
+    this.cleanStrip(lane, part, v);
+  }
   cleanSync(orbId: string, srcId: string | null, gain: number): void {
     // CLEAN orb player control: srcId null = off; otherwise (re)start at gain
-    if (!srcId) { this.node?.port.postMessage({ type: 'cleanOff', orbId }); return; }
+    if (!srcId) { this.node?.port.postMessage({ type: 'cleanOff', orbId }); if (this._cleanLanes) delete this._cleanLanes[orbId]; return; }
     this.node?.port.postMessage({ type: 'cleanOn', orbId, srcId, gain });
   }
   cleanGain(orbId: string, gain: number): void { this.node?.port.postMessage({ type: 'cleanGain', orbId, gain }); }

@@ -20,7 +20,7 @@ import {
   microcosmMonitor,
   microcosmLoadSourceData,
   microcosmRecordOutput, samplerLoopPlayStereo, samplerExportWavStereo,
-  microcosmCleanSync, microcosmCleanGain,
+  microcosmCleanSync, microcosmCleanGain, microcosmCleanStrip,
   samplerAnalyseRoot,
   microcosmInputLevel, microcosmInputDevices, microcosmCaptureLive,
   microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos,
@@ -408,6 +408,17 @@ export default function FieldPage() {
   }
   const [orbAgain, setOrbAgain] = useState(false);            // live engine playing over the capture
   const takeStackRef = useRef<{ id:string; data:Float32Array; bars:number }[]>([]);   // undo takes
+  const cleanStripRef = useRef<Record<string, Record<string, number>>>({});
+  const STRIP_DEFAULTS: Record<string, number> = { lo:0, mid:0, hi:0, threshold:0, ratio:1, attack:0.01, release:0.2, makeup:1, space:0, tape:0 };
+  function stripVal(id: string, part: string): number {
+    return (cleanStripRef.current[id] && cleanStripRef.current[id][part] !== undefined) ? cleanStripRef.current[id][part] : STRIP_DEFAULTS[part];
+  }
+  function setStrip(id: string, part: string, v: number) {
+    if (!cleanStripRef.current[id]) cleanStripRef.current[id] = {};
+    cleanStripRef.current[id][part] = v;
+    microcosmCleanStrip(id, part, v);
+    forceOrb(x=>x+1);
+  }
   const [rootRead, setRootRead] = useState<{ label:string; note:string; cents:number; kind:string }>({ label:'—', note:'', cents:0, kind:'none' });
   const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
   function analyseCapture(data: Float32Array) {
@@ -1024,13 +1035,11 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // METRONOME look-ahead scheduler — beats derived from the SHARED audio bar anchor,
   // so beat 1 (accent) always coincides with the progression's bar boundary.
   useEffect(() => {
-    console.log('[metro] effect run - metroOn:', metroOn);
     if (!metroOn) return;
     let scheduledUntil = microcosmAudioTime();   // audio-time up to which we've already scheduled
     const anchor0 = scheduledUntil;              // FIX: stable anchor when no progression is running.
     // (The old fallback re-read audioTime every tick, so the anchor rode alongside 'now' and the
     //  next beat stayed perpetually beyond the horizon - the silent-scheduler bug.)
-    console.log('[metro] scheduler starting - audioTime:', scheduledUntil);
     const tick = () => {
       const beatSec = 60 / bpm;
       const anchor = barAudioAnchorRef.current || anchor0;   // progression's anchor when live, else our latch
@@ -1833,7 +1842,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // RACK: activate ALL visible orbs' engines (present = playing)
   // per-orb level = the orb's OWN volume (the mixer fader is the single source of truth).
   // selection no longer changes volume; mute/solo still gate it.
-  function reapplyLevels(){ console.log('[reapply]', fieldOrbs.map(o => o.id + ':' + o.engineType + ':' + orbLevel(o.id).toFixed(2)).join(' ')); fieldOrbs.forEach(o => { const lv = orbLevel(o.id); microcosmEngineLevel(o.id, lv); if (o.engineType === 'clean') microcosmCleanGain(o.id, lv); }); }   // the dry lane hears the whole mixer vocabulary
+  function reapplyLevels(){ fieldOrbs.forEach(o => { const lv = orbLevel(o.id); microcosmEngineLevel(o.id, lv); if (o.engineType === 'clean') microcosmCleanGain(o.id, lv); }); }   // the dry lane hears the whole mixer vocabulary
   function orbLevel(id: string): number {
     if (mutedRef.current) return 0;
     if (muteRef.current[id]) return 0;                    // per-channel mute (mixer)
@@ -2131,12 +2140,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         el.style.zIndex = p.z < 0 ? '4' : '12';                // far side passes BEHIND the source star (star svg z=1? star sits behind; use orb layering)
       }
       // FIELD MODE idle drift: micro-orbits around each slot (a few px, tempo-locked) + centre orb breath
-      if (Math.floor(now / 5000) !== (window as any).__driftTick) {
-        (window as any).__driftTick = Math.floor(now / 5000);
-        const conn = Object.values(fieldWrapRefs.current).filter(e => e && e.isConnected);
-        console.log('[drift] refs:', Object.keys(fieldWrapRefs.current).length, 'connected:', conn.length,
-          'sample transform:', conn[0] ? (conn[0] as HTMLElement).style.transform : 'n/a');
-      }
+      // (drift diagnostic removed)
       for (const oid in fieldWrapRefs.current) {
         const el = fieldWrapRefs.current[oid];
         if (!el || !el.isConnected) continue;
@@ -2907,8 +2911,28 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 </div>
               </div>
 
+              {(() => { const fo2 = fieldOrbs.find(o=>o.id===focused); if (!fo2 || fo2.engineType !== 'clean') return null; return (
+                <div>
+                  <div style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', margin:'26px 0 12px' }}>EQ</div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:9 }}><span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.55)', width:74 }}>LO</span><input type="range" min="-12" max="12" step="0.5" value={stripVal(fo2.id, 'lo')} onChange={(e)=>setStrip(fo2.id, 'lo', parseFloat(e.target.value))} style={{ flex:1 }} /><span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.7)', width:52, textAlign:'right' }}>{stripVal(fo2.id,'lo').toFixed(1)+' dB'}</span></div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:9 }}><span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.55)', width:74 }}>MID</span><input type="range" min="-12" max="12" step="0.5" value={stripVal(fo2.id, 'mid')} onChange={(e)=>setStrip(fo2.id, 'mid', parseFloat(e.target.value))} style={{ flex:1 }} /><span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.7)', width:52, textAlign:'right' }}>{stripVal(fo2.id,'mid').toFixed(1)+' dB'}</span></div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:9 }}><span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.55)', width:74 }}>HI</span><input type="range" min="-12" max="12" step="0.5" value={stripVal(fo2.id, 'hi')} onChange={(e)=>setStrip(fo2.id, 'hi', parseFloat(e.target.value))} style={{ flex:1 }} /><span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.7)', width:52, textAlign:'right' }}>{stripVal(fo2.id,'hi').toFixed(1)+' dB'}</span></div>
+
+                  <div style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', margin:'22px 0 12px' }}>COMPRESSOR</div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:9 }}><span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.55)', width:74 }}>THRESH</span><input type="range" min="-60" max="0" step="1" value={stripVal(fo2.id, 'threshold')} onChange={(e)=>setStrip(fo2.id, 'threshold', parseFloat(e.target.value))} style={{ flex:1 }} /><span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.7)', width:52, textAlign:'right' }}>{stripVal(fo2.id,'threshold').toFixed(0)+' dB'}</span></div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:9 }}><span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.55)', width:74 }}>RATIO</span><input type="range" min="1" max="20" step="0.5" value={stripVal(fo2.id, 'ratio')} onChange={(e)=>setStrip(fo2.id, 'ratio', parseFloat(e.target.value))} style={{ flex:1 }} /><span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.7)', width:52, textAlign:'right' }}>{stripVal(fo2.id,'ratio').toFixed(1)+':1'}</span></div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:9 }}><span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.55)', width:74 }}>ATTACK</span><input type="range" min="0.001" max="0.3" step="0.001" value={stripVal(fo2.id, 'attack')} onChange={(e)=>setStrip(fo2.id, 'attack', parseFloat(e.target.value))} style={{ flex:1 }} /><span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.7)', width:52, textAlign:'right' }}>{(stripVal(fo2.id,'attack')*1000).toFixed(0)+' ms'}</span></div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:9 }}><span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.55)', width:74 }}>RELEASE</span><input type="range" min="0.05" max="1" step="0.01" value={stripVal(fo2.id, 'release')} onChange={(e)=>setStrip(fo2.id, 'release', parseFloat(e.target.value))} style={{ flex:1 }} /><span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.7)', width:52, textAlign:'right' }}>{(stripVal(fo2.id,'release')*1000).toFixed(0)+' ms'}</span></div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:9 }}><span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.55)', width:74 }}>MAKEUP</span><input type="range" min="0.5" max="3" step="0.05" value={stripVal(fo2.id, 'makeup')} onChange={(e)=>setStrip(fo2.id, 'makeup', parseFloat(e.target.value))} style={{ flex:1 }} /><span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.7)', width:52, textAlign:'right' }}>{stripVal(fo2.id,'makeup').toFixed(2)+'×'}</span></div>
+
+                  <div style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', margin:'22px 0 12px' }}>SENDS</div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:9 }}><span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.55)', width:74 }}>SPACE</span><input type="range" min="0" max="1" step="0.01" value={stripVal(fo2.id, 'space')} onChange={(e)=>setStrip(fo2.id, 'space', parseFloat(e.target.value))} style={{ flex:1 }} /><span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.7)', width:52, textAlign:'right' }}>{Math.round(stripVal(fo2.id,'space')*100)+'%'}</span></div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:9 }}><span style={{ fontSize:11, letterSpacing:'0.12em', color:'rgba(255,255,255,0.55)', width:74 }}>TAPE</span><input type="range" min="0" max="1" step="0.01" value={stripVal(fo2.id, 'tape')} onChange={(e)=>setStrip(fo2.id, 'tape', parseFloat(e.target.value))} style={{ flex:1 }} /><span style={{ fontSize:11, fontFamily:'Space Mono, monospace', color:'rgba(255,255,255,0.7)', width:52, textAlign:'right' }}>{Math.round(stripVal(fo2.id,'tape')*100)+'%'}</span></div>
+
+                </div>
+              ); })()}
               {/* VOICES — orbs + selected voice's sliders (UI ready; engine later) */}
-              <div>
+              <div style={{ display: fieldOrbs.find(o=>o.id===focused)?.engineType==='clean' ? 'none' : undefined }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:11 }}>
                   <span style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)' }}>VOICES</span>
                   <span onClick={()=>{ voicesRef.current[focused]=defaultVoices(); setSelVoice(null); forceOrb(x=>x+1); }}
@@ -2974,7 +2998,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
             <div style={{ position:'absolute', right:'3%', top:64, bottom: (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:60, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
               {/* SIGNAL PATH — effect-orbs on a thread of light; tap to edit (UI ready, not yet audible) */}
-              <div>
+              <div style={{ display: fieldOrbs.find(o=>o.id===focused)?.engineType==='clean' ? 'none' : undefined }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:11 }}>
                   <span style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)' }}>SIGNAL PATH</span>
                   <span onClick={()=>{ fxRef.current[focused]=defaultFx(); setSelFx(null); forceOrb(x=>x+1); }}
@@ -3044,7 +3068,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
               </div>
 
               {/* FLAVOUR — density + amount (real) */}
-              <div>
+              <div style={{ display: fieldOrbs.find(o=>o.id===focused)?.engineType==='clean' ? 'none' : undefined }}>
                 <div style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)', marginBottom:10 }}>FLAVOUR</div>
                 {/* flavour-orbs — per-orb tonal world (UI per-orb; engine palette still global) */}
                 <div style={{ display:'flex', gap:13, alignItems:'flex-start', marginBottom:15, flexWrap:'wrap' }}>

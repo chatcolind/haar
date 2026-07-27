@@ -381,10 +381,18 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
       this._clean = this._clean || {};
       const ex = this._clean[d.orbId];
       if (ex && ex.srcId === d.srcId) { ex.gain = d.gain != null ? d.gain : ex.gain; }
-      else { this._clean[d.orbId] = { srcId: d.srcId, pos: 0, gain: d.gain != null ? d.gain : 0.8 }; console.log('[clean] ON', d.orbId, '->', d.srcId); }
+      else {
+        // LANE ALLOCATION: four clean channels (worklet outputs 9-12), each with its own
+        // native strip (EQ -> comp -> sends -> dry). First free lane wins.
+        const used = new Set(); for (const k in this._clean) used.add(this._clean[k].lane);
+        let lane = 0; while (used.has(lane) && lane < 4) lane++;
+        if (lane >= 4) { console.warn('[clean] all 4 lanes busy - orb silent:', d.orbId); lane = -1; }
+        this._clean[d.orbId] = { srcId: d.srcId, pos: 0, gain: d.gain != null ? d.gain : 0.8, lane };
+        this.port.postMessage({ type: 'cleanLane', orbId: d.orbId, lane });
+      }
     }
-    if (d.type === 'cleanOff') { if (this._clean) delete this._clean[d.orbId]; console.log('[clean] off', d.orbId); }
-    if (d.type === 'cleanGain') { console.log('[clean] gain msg', d.orbId, '->', d.gain, '| player exists:', !!(this._clean && this._clean[d.orbId])); if (this._clean && this._clean[d.orbId]) this._clean[d.orbId].gain = d.gain; }
+    if (d.type === 'cleanOff') { if (this._clean) delete this._clean[d.orbId]; }
+    if (d.type === 'cleanGain') { if (this._clean && this._clean[d.orbId]) this._clean[d.orbId].gain = d.gain; }
     if (d.type === 'clearSlots') this.orbSlots = {};
     if (d.type === 'liveArm') { this.liveArmed = !!d.on; console.log('[live-ring]', this.liveArmed ? 'ARMED' : 'off'); }
 if (d.type === 'tapOn') {
@@ -443,17 +451,7 @@ if (d.type === 'tapOn') {
       for (let i = 0; i < this.liveSize; i += 16) { const v = this.liveRing[i]; sum += v * v; if (Math.abs(v) > mx) mx = Math.abs(v); }
       const rms = Math.sqrt(sum / (this.liveSize / 16));
       // v3 probe: head movement + energy in the exact read window (0.05-2s behind head)
-      const headMoved = this.liveWrite - (this._lastWp || 0);
-      this._lastWp = this.liveWrite;
-      let wsum = 0, wcnt = 0;
-      for (let b = Math.floor(this._sr * 0.05); b < this._sr * 2; b += 800) {
-        const idx = ((this.liveWrite - b) % this.liveSize + this.liveSize) % this.liveSize;
-        wsum += this.liveRing[idx] * this.liveRing[idx]; wcnt++;
-      }
-      console.log('[live-ring] rms:', rms.toFixed(5), 'peak:', mx.toFixed(4),
-        '| head moved:', headMoved, '| readwin rms:', Math.sqrt(wsum / wcnt).toFixed(5),
-        '| src.wp==head:', this.sources.live && this.sources.live.wp === this.liveWrite,
-        '| armed:', this.liveArmed);
+      // (live-ring diagnostic reporter removed - the ghost-hunt era is over)
     }
     // SAMPLER: pending tail-folded capture countdown
     if (this._tapPending && this._tap) {
@@ -631,29 +629,27 @@ if (d.type === 'tapOn') {
         }
       }
     }
-    // CLEAN PLAYER (per block, after the mix loop): born 100% dry, writes to OUTPUT 9 -
-    // the dry lane, native-routed straight to the destination. No filter, no reverb,
-    // no tape, no ring. EQ citizenship kept. Space/tape return later as opt-in sends.
-    {
-      const dry = outputs[9];
-      if (dry && dry[0] && this._clean) {
-        const dL = dry[0], dR = dry[1] || dry[0];
-        for (const coid in this._clean) {
-          const cp = this._clean[coid];
-          const csrc = this.sources[cp.srcId];
-          if (!csrc || !csrc.buf || csrc.len < 2) continue;
-          for (let i = 0; i < dL.length; i++) {
-            const p0 = Math.floor(cp.pos), p1 = (p0 + 1) % csrc.len;
-            const cfr = cp.pos - p0;
-            let cs = (csrc.buf[p0] * (1 - cfr) + csrc.buf[p1] * cfr) * cp.gain;
-            const cedge = 256;
-            if (cp.pos < cedge) cs *= cp.pos / cedge;
-            else if (cp.pos > csrc.len - cedge) cs *= (csrc.len - cp.pos) / cedge;
-            if (this.eqState[coid] && !this.eqState[coid].flat) { const eo = this._applyEQ(coid, cs, cs); dL[i] += eo[0]; dR[i] += eo[1]; }
-            else { dL[i] += cs; dR[i] += cs; }
-            cp.pos += 1;
-            if (cp.pos >= csrc.len) cp.pos = 0;
-          }
+    // CLEAN PLAYERS (per block): each orb on ITS OWN LANE (outputs 9-12) - the native
+    // channel strip (EQ -> comp -> sends -> dry) hangs off each lane individually.
+    if (this._clean) {
+      for (const coid in this._clean) {
+        const cp = this._clean[coid];
+        if (cp.lane == null || cp.lane < 0) continue;
+        const lane = outputs[9 + cp.lane];
+        if (!lane || !lane[0]) continue;
+        const csrc = this.sources[cp.srcId];
+        if (!csrc || !csrc.buf || csrc.len < 2) continue;
+        const dL = lane[0], dR = lane[1] || lane[0];
+        for (let i = 0; i < dL.length; i++) {
+          const p0 = Math.floor(cp.pos), p1 = (p0 + 1) % csrc.len;
+          const cfr = cp.pos - p0;
+          let cs = (csrc.buf[p0] * (1 - cfr) + csrc.buf[p1] * cfr) * cp.gain;
+          const cedge = 256;
+          if (cp.pos < cedge) cs *= cp.pos / cedge;
+          else if (cp.pos > csrc.len - cedge) cs *= (csrc.len - cp.pos) / cedge;
+          dL[i] += cs; dR[i] += cs;
+          cp.pos += 1;
+          if (cp.pos >= csrc.len) cp.pos = 0;
         }
       }
     }
