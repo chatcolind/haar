@@ -563,6 +563,26 @@ export default function FieldPage() {
     };
     requestAnimationFrame(armWait);
   }
+  function loudBake() {
+    // LOUD: raise the capture to -1dB peak - normalize as a CHOSEN act, baked, saved.
+    if (!capture) return;
+    const crx = capture as any;
+    let pk = 0;
+    for (let i = 0; i < capture.data.length; i++) { const av = Math.abs(capture.data[i]); if (av > pk) pk = av; }
+    if (crx.dataR) for (let i = 0; i < crx.dataR.length; i++) { const av = Math.abs(crx.dataR[i]); if (av > pk) pk = av; }
+    if (pk < 0.0001) { say('nothing to raise'); return; }
+    const g = 0.891 / pk;
+    if (g <= 1.02) { say('already loud'); return; }
+    const amp = (src: Float32Array) => { const o = src.slice(); for (let i = 0; i < o.length; i++) o[i] *= g; return o; };
+    takeStackRef.current.push(capture);
+    const nd = amp(capture.data);
+    const ndR = crx.dataR ? amp(crx.dataR) : undefined;
+    const cid = 'cap_' + Date.now();
+    microcosmLoadSourceData(cid, nd);
+    setCapture(ndR ? { id: cid, data: nd, dataR: ndR, bars: capture.bars } as any : { id: cid, data: nd, bars: capture.bars });
+    replayIfPlaying({ data: nd });
+    say('raised · +' + (20 * Math.log10(g)).toFixed(1) + ' dB · peak -1');
+  }
   function conformToTempo() {
     // PRINT TO TEMPO: bake the loop window at the song's bpm - varispeed conform
     // (pitch rides with time: the classic sampler sound). Pure math, no capture.
@@ -1813,7 +1833,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // RACK: activate ALL visible orbs' engines (present = playing)
   // per-orb level = the orb's OWN volume (the mixer fader is the single source of truth).
   // selection no longer changes volume; mute/solo still gate it.
-  function reapplyLevels(){ fieldOrbs.forEach(o => { microcosmEngineLevel(o.id, orbLevel(o.id)); }); }
+  function reapplyLevels(){ console.log('[reapply]', fieldOrbs.map(o => o.id + ':' + o.engineType + ':' + orbLevel(o.id).toFixed(2)).join(' ')); fieldOrbs.forEach(o => { const lv = orbLevel(o.id); microcosmEngineLevel(o.id, lv); if (o.engineType === 'clean') microcosmCleanGain(o.id, lv); }); }   // the dry lane hears the whole mixer vocabulary
   function orbLevel(id: string): number {
     if (mutedRef.current) return 0;
     if (muteRef.current[id]) return 0;                    // per-channel mute (mixer)
@@ -1841,7 +1861,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     // clean players re-arm with the transport (stop is not one-way)
     for (const o of fieldOrbs) if (o.engineType === 'clean') {
       const c2 = constellations.find(cc => cc.orbIds.includes(o.id));
-      if (c2) microcosmCleanSync(o.id, c2.sourceId, volRef.current[o.id] ?? 0.7);
+      if (c2) microcosmCleanSync(o.id, c2.sourceId, orbLevel(o.id));
     }
     if (!started.current) return;
     fieldOrbs.forEach(o => {
@@ -2628,6 +2648,10 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                       {W('TO TEMPO')}
                     </div>
                     <div>
+                      <div onClick={()=>{ if (selStation !== 'clean') return; loudBake(); }} title="raise to -1dB peak (a chosen act, baked into the wav)" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontSize:C(0.023,19), color:'rgba(255,255,255,0.85)' }}>▲</div>
+                      {W('LOUD')}
+                    </div>
+                    <div>
                       <div onClick={()=>{ if (selStation !== 'clean') return; padToBar(); }} title="append silence to the next bar (pitch untouched)" style={{ width:C(0.066,55), height:C(0.066,55), margin:'0 auto', borderRadius:'50%', border:'1px solid rgba(255,255,255,0.55)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', fontFamily:'Space Mono, monospace', fontSize:11, color:'rgba(255,255,255,0.85)' }}>‥|</div>
                       {W('PAD BAR')}
                     </div>
@@ -3250,7 +3274,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 const mut = !!muteRef.current[o.id];
                 const db = vol <= 0 ? '-∞' : (20*Math.log10(vol)).toFixed(0);
                 const exp = expandedChannel === o.id;
-                const setVol = (nv:number)=>{ volRef.current[o.id]=nv; microcosmEngineLevel(o.id, muteRef.current[o.id]?0:nv); forceOrb(x=>x+1); };
+                const setVol = (nv:number)=>{ volRef.current[o.id]=nv; reapplyLevelsRef.current(); forceOrb(x=>x+1); };   // one door: reapply serves every orb kind (solo math + dry lane included)
                 const toggleMute = ()=>{ const nm=!muteRef.current[o.id]; muteRef.current[o.id]=nm; microcosmEngineLevel(o.id, nm?0:(volRef.current[o.id]??0.7)); forceOrb(x=>x+1); };
                 const pan = panRef.current[o.id] ?? 0;
                 const fader = (

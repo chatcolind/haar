@@ -530,6 +530,8 @@ export class Microcosm {
     this.nativeOut.gain.setTargetAtTime(g, this.ctx.currentTime, 0.02);
   }
   setEngineLevel(id: string, level: number): void {
+    this.node?.port.postMessage({ type: 'cleanGain', orbId: id, gain: typeof level === 'number' ? level : 0 });   // the dry lane hears EVERY level change - routed at the one proven call
+
     if (this.rack[id]) this.rack[id].level = Math.max(0, Math.min(1, level));
   }
   // GRACEFUL JOIN: ramp an orb's level from 0 up to `target` over `seconds` so it blooms into

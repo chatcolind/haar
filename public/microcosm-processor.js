@@ -384,7 +384,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
       else { this._clean[d.orbId] = { srcId: d.srcId, pos: 0, gain: d.gain != null ? d.gain : 0.8 }; console.log('[clean] ON', d.orbId, '->', d.srcId); }
     }
     if (d.type === 'cleanOff') { if (this._clean) delete this._clean[d.orbId]; console.log('[clean] off', d.orbId); }
-    if (d.type === 'cleanGain') { if (this._clean && this._clean[d.orbId]) this._clean[d.orbId].gain = d.gain; }
+    if (d.type === 'cleanGain') { console.log('[clean] gain msg', d.orbId, '->', d.gain, '| player exists:', !!(this._clean && this._clean[d.orbId])); if (this._clean && this._clean[d.orbId]) this._clean[d.orbId].gain = d.gain; }
     if (d.type === 'clearSlots') this.orbSlots = {};
     if (d.type === 'liveArm') { this.liveArmed = !!d.on; console.log('[live-ring]', this.liveArmed ? 'ARMED' : 'off'); }
 if (d.type === 'tapOn') {
