@@ -312,6 +312,12 @@ export default function FieldPage() {
   const [planetOpen, setPlanetOpen] = useState(false);   // WORKBENCH: inside-the-planet dev view
   const [inputOn, setInputOn] = useState(false);   // SOURCES: live input door (dev chip)
   const [samplerOpen, setSamplerOpen] = useState(false);   // SAMPLER station
+  const [arrangeOpen, setArrangeOpen] = useState(false);   // ARRANGE - the tape room
+  const [arrTracks, setArrTracks] = useState<{ id:string; name:string; blocks:{ id:string; startBar:number; lenBars:number; name:string }[] }[]>(
+    () => Array.from({length:16}, (_,i)=>({ id:'track_'+(i+1), name:'TRACK '+(i+1), blocks:[] })));
+  const [arrZoom, setArrZoom] = useState(24);        // px per bar
+  const [arrScroll, setArrScroll] = useState(0);     // first visible bar
+  const [arrPlayhead, setArrPlayhead] = useState(0); // bar position while the tape runs
   const [samplerDevs, setSamplerDevs] = useState<{id:string;label:string}[]>([]);
   const [samplerDev, setSamplerDev] = useState<string>('');
   const [devListOpen, setDevListOpen] = useState(false);
@@ -2355,6 +2361,54 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         );
       })()}
       {/* SAMPLER - FINAL SCREEN. One centre axis, one label voice, framed wave, contrast floor. */}
+      {arrangeOpen && (
+        <div style={{ position:'fixed', inset:0, zIndex:900, background:'#07080c', display:'flex', flexDirection:'column', fontFamily:'Space Mono, monospace' }}>
+          {/* TRANSPORT */}
+          <div style={{ display:'flex', alignItems:'center', gap:26, padding:'18px 28px', borderBottom:'0.5px solid rgba(255,255,255,0.1)' }}>
+            <span style={{ fontSize:15, letterSpacing:'0.34em', color:'#9fb4c8' }}>ARRANGE</span>
+            <div style={{ flex:1 }} />
+            <span style={{ fontSize:13, color:'rgba(255,255,255,0.55)' }}>bar {Math.floor(arrPlayhead)+1}</span>
+            <span style={{ fontSize:13, color:'#7af5c8' }}>{bpm} BPM</span>
+            <div title="play the tape (rides the clock - block 4 wires sound)" style={{ width:46, height:46, borderRadius:'50%', border:'1.5px solid rgba(122,245,200,0.8)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'#7af5c8', fontSize:15 }}>▶</div>
+            <div title="record a take onto the selected track (block 3 wires the tape head)" style={{ width:46, height:46, borderRadius:'50%', border:'1.5px solid rgba(255,90,90,0.7)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'#ff5a5a', fontSize:17 }}>●</div>
+            <div onClick={()=>setArrangeOpen(false)} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.3)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)' }}>×</div>
+          </div>
+          {/* RULER */}
+          <div style={{ display:'flex', borderBottom:'0.5px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ width:120, flexShrink:0 }} />
+            <div style={{ flex:1, overflow:'hidden', position:'relative', height:26 }}>
+              {Array.from({length:64}, (_,i)=>i).map(bn => (
+                <span key={bn} style={{ position:'absolute', left:(bn-arrScroll)*arrZoom, top:5, fontSize:9, color: bn%4===0?'rgba(255,255,255,0.5)':'rgba(255,255,255,0.18)' }}>{bn%4===0? bn+1 : '·'}</span>
+              ))}
+            </div>
+          </div>
+          {/* TRACKS */}
+          <div style={{ flex:1, overflowY:'auto' }}>
+            {arrTracks.map(tr => (
+              <div key={tr.id} style={{ display:'flex', height:52, borderBottom:'0.5px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ width:120, flexShrink:0, display:'flex', alignItems:'center', paddingLeft:16, fontSize:10, letterSpacing:'0.12em', color:'rgba(255,255,255,0.45)', borderRight:'0.5px solid rgba(255,255,255,0.08)' }}>{tr.name}</div>
+                <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
+                  {Array.from({length:17}, (_,i)=>i*4).map(bn => (
+                    <div key={bn} style={{ position:'absolute', left:(bn-arrScroll)*arrZoom, top:0, bottom:0, width:0.5, background:'rgba(255,255,255,0.05)' }} />
+                  ))}
+                  {tr.blocks.map(blk => (
+                    <div key={blk.id} style={{ position:'absolute', left:(blk.startBar-arrScroll)*arrZoom, width:blk.lenBars*arrZoom-2, top:6, bottom:6, borderRadius:6, background:'rgba(159,180,200,0.18)', border:'0.5px solid rgba(159,180,200,0.5)', fontSize:9, color:'#9fb4c8', padding:'3px 6px', overflow:'hidden', cursor:'pointer' }}>{blk.name}</div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* footer: zoom */}
+          <div style={{ display:'flex', gap:14, padding:'10px 28px', borderTop:'0.5px solid rgba(255,255,255,0.1)', alignItems:'center' }}>
+            <span onClick={()=>setArrZoom(z=>Math.max(8, z-6))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:15 }}>−</span>
+            <span style={{ fontSize:10, color:'rgba(255,255,255,0.35)' }}>zoom</span>
+            <span onClick={()=>setArrZoom(z=>Math.min(80, z+6))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:15 }}>+</span>
+            <span onClick={()=>setArrScroll(sc=>Math.max(0, sc-4))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:13, marginLeft:18 }}>◂</span>
+            <span style={{ fontSize:10, color:'rgba(255,255,255,0.35)' }}>scroll</span>
+            <span onClick={()=>setArrScroll(sc=>sc+4)} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:13 }}>▸</span>
+          </div>
+        </div>
+      )}
       {samplerOpen && (() => {
         const H = dim.h || 800;
         const R = Math.max(430, H - 150);
@@ -3557,9 +3611,10 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 { k:'Source', col:'rgba(255,216,107,0.5)', bg:'rgba(255,216,107,0.06)', dot:'#ffd86b' },
                 { k:'Chords', col:'rgba(180,200,230,0.5)', bg:'rgba(180,200,230,0.05)', dot:'#8aa0d0' },
                 { k:'Rec',    col:'rgba(224,80,58,0.5)',   bg:'rgba(224,80,58,0.06)',   dot:'#ff7a5a' },
+                { k:'Arrange', col:'rgba(159,180,200,0.5)', bg:'rgba(159,180,200,0.06)', dot:'#9fb4c8' },
                 { k:'Mix',    col:'rgba(170,196,255,0.5)', bg:'rgba(170,196,255,0.06)', dot:'#aac4ff' },
               ].map(u => (
-                <div key={u.k} onClick={()=>{ if(u.k==='Rec') openSampler(); if(u.k==='Mix') openMix(); if(u.k==='Chords'){ setProgPickOct(octave + 4); setChordsOpen(true); } }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                <div key={u.k} onClick={()=>{ if(u.k==='Rec') openSampler(); if(u.k==='Arrange') setArrangeOpen(true); if(u.k==='Mix') openMix(); if(u.k==='Chords'){ setProgPickOct(octave + 4); setChordsOpen(true); } }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                   <div style={{ width:44, height:44, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, boxShadow:`0 0 16px 3px ${u.dot}55, inset 0 0 12px ${u.dot}22`, display:'flex', alignItems:'center', justifyContent:'center' }}>
                     <div style={{ width:7, height:7, borderRadius:'50%', background:u.dot }} />
                   </div>
