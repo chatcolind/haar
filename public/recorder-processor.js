@@ -11,7 +11,9 @@ class HaarRecorder extends AudioWorkletProcessor {
       const d = e.data || {};
       if (d.type === 'start') {
         this.asked = Math.max(1, d.lenSamp);
-        this.want = this.asked + Math.floor(sampleRate * 0.03);   // headroom for zero-cross splice
+        this.exact = !!d.exact;                       // BAR-TRUE: exactly asked samples back, no splice, no headroom
+        this.startFrame = d.startFrame || 0;          // BAR-TRUE: hold the head until this sample-clock frame
+        this.want = this.exact ? this.asked : this.asked + Math.floor(sampleRate * 0.03);   // headroom for zero-cross splice
         this.bufL = new Float32Array(this.want);
         this.bufR = new Float32Array(this.want);
         this.wp = 0;
@@ -25,7 +27,12 @@ class HaarRecorder extends AudioWorkletProcessor {
     const inp = inputs[0];
     if (!inp || !inp[0]) return true;
     const L = inp[0], R = inp[1] || inp[0];
-    for (let i = 0; i < L.length && this.wp < this.want; i++) {
+    let i0 = 0;
+    if (this.startFrame > currentFrame) {                   // the bar has not arrived
+      if (this.startFrame >= currentFrame + L.length) return true;
+      i0 = this.startFrame - currentFrame;                  // it falls inside this block: start on that sample
+    }
+    for (let i = i0; i < L.length && this.wp < this.want; i++) {
       this.bufL[this.wp] = L[i];
       this.bufR[this.wp] = R[i];
       this.wp++;
@@ -33,6 +40,12 @@ class HaarRecorder extends AudioWorkletProcessor {
     if (this.wp >= this.want) {
       const rawL = this.bufL, rawR = this.bufR, asked = this.asked;
       this.bufL = null; this.bufR = null; this.wp = 0; this.want = 0; this.asked = 0;
+      if (this.exact) {                                     // BAR-TRUE: hand back exactly what was asked, verbatim
+        this.exact = false; this.startFrame = 0;
+        this.port.postMessage({ type: 'done', bufL: rawL.buffer, bufR: rawR.buffer, len: rawL.length }, [rawL.buffer, rawR.buffer]);
+        console.log('[recorder] bar-true take complete -', rawL.length, 'samples verbatim');
+        return true;
+      }
       // ZERO-CROSS SPLICE (the razor law): start at the first upward zero crossing,
       // end at the last upward crossing within reach - the join meets at zero, no pop.
       // Every sample BETWEEN the cuts is verbatim.

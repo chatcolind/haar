@@ -917,6 +917,13 @@ export function microcosmEngineFire(orbId: string, on: boolean): void { (microco
 export function microcosmRecordOutput(lenSamp: number, cb: (L: Float32Array, R: Float32Array) => void): void {
   (microcosmCore as any)?.recordOutput(lenSamp, cb);
 }
+// BAR-TRUE BLOCK RECORD: the head holds until startFrame (sample clock), then takes exactly lenSamp - no splice.
+export function microcosmRecordBlock(startFrame: number, lenSamp: number, cb: (L: Float32Array, R: Float32Array) => void): void {
+  (microcosmCore as any)?.recordOutput(lenSamp, cb, { startFrame, exact: true });
+}
+export function microcosmTapeDecode(bytes: ArrayBuffer): Promise<AudioBuffer> { return (microcosmCore as any)?.tapeDecode(bytes); }
+export function microcosmTapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0): void { (microcosmCore as any)?.tapePlay(buf, when, gain, offset); }
+export function microcosmTapeStop(): void { (microcosmCore as any)?.tapeStopAll(); }
 // (samplerFoldTail removed - prints are exact recordings, no processing between recorder and bench)
 
 

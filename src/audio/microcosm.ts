@@ -300,6 +300,10 @@ export class Microcosm {
       const recMute = this.ctx.createGain(); recMute.gain.value = 0;
       this._recNode.connect(recMute); recMute.connect(this.ctx.destination);   // graph pull, silent
       (this.tapeMakeup as GainNode).connect(this._recNode);
+      // CLEAN dry lanes run straight to destination and bypassed this tap - the recorder must hear them too
+      // (the standing 'recorder does not hear clean orbs' debt). Timeline players, when built, go to destination
+      // directly and stay OUT of this tap by construction - the performance tap law.
+      for (const st of (this._cleanStrips || [])) st.dry.connect(this._recNode);
     }
   }
   // ── METRONOME: warm, round woodblock/rim knock, on its own gain bus ──
@@ -414,7 +418,7 @@ export class Microcosm {
   onCaptured: ((id: string, data: Float32Array) => void) | null = null;
   private _recNode: AudioWorkletNode | null = null;
   private _dryGain: GainNode | null = null;
-  recordOutput(lenSamp: number, cb: (L: Float32Array, R: Float32Array) => void): void {
+  recordOutput(lenSamp: number, cb: (L: Float32Array, R: Float32Array) => void, opts?: { startFrame?: number; exact?: boolean }): void {
     // record the literal output, STEREO, UNTOUCHED - the tape machine at the chain's end
     if (!this._recNode) { console.warn('[recorder] not connected yet'); return; }
     const handler = (ev: MessageEvent) => {
@@ -426,9 +430,25 @@ export class Microcosm {
     };
     this._recNode.port.addEventListener('message', handler);
     this._recNode.port.start();
-    this._recNode.port.postMessage({ type: 'start', lenSamp });
+    this._recNode.port.postMessage({ type: 'start', lenSamp, startFrame: opts?.startFrame || 0, exact: !!opts?.exact });
   }
   tapOn(orbId: string, master: boolean = false): void { this.node?.port.postMessage({ type: 'tapOn', orbId, master }); }
+  // ── TAPE PLAYERS (ARRANGE block 4): native buffer players scheduled on the audio clock, straight to
+  // destination. They never touch the worklet or the recorder tap - a take can never hear the tape.
+  private _tape: { src: AudioBufferSourceNode; g: GainNode }[] = [];
+  async tapeDecode(bytes: ArrayBuffer): Promise<AudioBuffer> { return await this.ctx.decodeAudioData(bytes.slice(0)); }
+  tapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0): void {
+    const src = this.ctx.createBufferSource(); src.buffer = buf;
+    const g = this.ctx.createGain(); g.gain.value = gain;
+    src.connect(g); g.connect(this.ctx.destination);
+    src.start(Math.max(when, this.ctx.currentTime), offset);
+    const rec = { src, g }; this._tape.push(rec);
+    src.onended = () => { const i = this._tape.indexOf(rec); if (i >= 0) this._tape.splice(i, 1); try { g.disconnect(); } catch {} };
+  }
+  tapeStopAll(): void {
+    for (const t of this._tape) { try { t.src.stop(); } catch {} try { t.g.disconnect(); } catch {} }
+    this._tape = [];
+  }
   tapOff(): void { this.node?.port.postMessage({ type: 'tapOff' }); }
   captureTap(id: string, lenSamp: number, tailSamp: number): void {
     // listener setup is shared with captureLive (lazy, attach-once)
