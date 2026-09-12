@@ -532,8 +532,12 @@ export class Microcosm {
   // ── MOSAIC ENGINE ──────────────────────────────────────────────────────
   // Continuously spawns overlapping grains from the live ring buffer at
   // octave-stacked speeds. Activity controls density + number of voices.
-  setEngineActive(id: string, on: boolean): void {
-    if (this.rack[id]) this.rack[id].active = on;
+  setEngineActive(id: string, on: boolean, fromFinger: boolean = false): void {
+    if (!this.rack[id]) return;
+    // TOUCH law at the proven layer: an armed orb can only be switched ON by the finger.
+    // Every other door (transport re-arm, song load, orb join, level) may switch it off, never on.
+    if (on && !fromFinger && this.engineMode && this.engineMode[id] === 'touch') return;
+    this.rack[id].active = on;
   }
   // ── DRONE / TOUCH ──────────────────────────────────────────────────────
   // DRONE: free-running, sounds from the moment it opens (the original behaviour).
@@ -552,7 +556,7 @@ export class Microcosm {
   getEngineMode(id: string): string { return this.engineMode[id] || 'drone'; }
   engineFire(id: string, on: boolean): void {
     if (this.getEngineMode(id) !== 'touch') return;   // drone orbs ignore the finger
-    this.setEngineActive(id, on);
+    this.setEngineActive(id, on, true);
   }
   setPan(id: string, pan: number): void {
     this.node?.port.postMessage({ type: 'enginePan', id, pan: Math.max(-1, Math.min(1, pan)) });

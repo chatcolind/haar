@@ -1086,7 +1086,9 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
     for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
   }
-  const playAtRef = useRef(playAt); playAtRef.current = playAt;   // live mirror for MIDI closures
+  const playAtRef = useRef(playAt); playAtRef.current = playAt;
+  const touchKeysRef = useRef<Set<number>>(new Set());   // TOUCH: MIDI keys currently down - release fires only when the last lifts (legato)
+  const releaseTouchRef = useRef(releaseTouch); releaseTouchRef.current = releaseTouch;   // live mirror for MIDI note-off   // live mirror for MIDI closures
   const transportRef = useRef({ engage: () => {}, release: () => {}, stop: () => {}, playpause: () => {}, octave: (d:number) => {} });
   transportRef.current = {
     engage: () => { if (prog.length && !progRunning) runProg(); },
@@ -1315,6 +1317,11 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // ACTION HANDLERS: Haar's verbs, exposed to the binding engine. Refs keep them live.
   useEffect(() => {
     registerActionHandlers({
+      release: (id, param) => {
+        if (id !== 'conductor.note' || typeof param !== 'number') return;
+        touchKeysRef.current.delete(60 + param);
+        if (touchKeysRef.current.size === 0) releaseTouchRef.current();   // TOUCH: last finger off
+      },
       trigger: (id, param) => {
         const liveConsts = () => constRef.current.filter(x => x.orbIds.length > 0);
         if (id === 'conductor.note' && typeof param === 'number') {
@@ -1324,6 +1331,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           let rootMidi = 60 + rootPc; if (rootMidi > 66) rootMidi -= 12;
           const semis = midiNote - rootMidi;
           const noteName = NOTES[((midiNote % 12) + 12) % 12];
+          touchKeysRef.current.add(midiNote);
           playAtRef.current(noteName, semis);
         }
         if (id === 'const.mute' && typeof param === 'number') {
@@ -1949,6 +1957,12 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const noteSemis = snapToScale(semis + octave * 12);   // SCALE-LOCK: snap to key when on (else raw)
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
     for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
+    // TOUCH: a key press is also the finger - armed orbs start at this pitch (drone orbs ignore fire)
+    for (const o of fieldOrbs) microcosmEngineFire(o.id, true);
+  }
+  // TOUCH release: the finger comes off - every armed orb stops (its own tail finishes naturally)
+  function releaseTouch() {
+    for (const o of fieldOrbs) microcosmEngineFire(o.id, false);
   }
   // double-click a note to LOCK it as the root (yellow); single tap to play
   // `semis` = semitone distance from current locked root
@@ -3519,7 +3533,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 const label = scaleLock ? (FLAT_NAMES[idx] + octNum) : noteLabel;   // flats+oct when locked
                 const sz = isLock ? 34 : (scaleLock ? 26 : (sharp ? 17 : 26));   // all scale notes same size when locked
                 cells.push(
-                  <div key={off} onClick={()=>tapNote(n, off)} title={noteLabel}
+                  <div key={off} onPointerDown={()=>tapNote(n, off)} onPointerUp={releaseTouch} onPointerLeave={releaseTouch} title={noteLabel}
                     style={{ width:sz, height:sz, borderRadius:'50%', cursor:'pointer', flexShrink:0, transition:'all 0.3s ease',
                       display:'flex', alignItems:'center', justifyContent:'center',
                       fontSize: isLock?12:(scaleLock?10:(sharp?8:10)), fontWeight: (isLock||isPlay)?700:500,

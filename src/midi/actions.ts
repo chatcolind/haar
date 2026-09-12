@@ -34,6 +34,8 @@ export type ActionParam = number | { col: number; row: number } | undefined;
 
 export type ActionHandlers = {
   trigger: (id: TriggerActionId, param?: ActionParam) => void;
+  // release: the finger comes off a trigger. Optional - only note-shaped verbs have one.
+  release?: (id: TriggerActionId, param?: ActionParam) => void;
   continuous: (id: ContinuousActionId, value: number, param?: ActionParam) => void;
   // continuous state read-back: pickup needs "where is this value now?"
   readContinuous: (id: ContinuousActionId, param?: ActionParam) => number;
@@ -46,6 +48,9 @@ export function registerActionHandlers(h: ActionHandlers) { handlers = h; }
 
 export function dispatchTrigger(id: TriggerActionId, param?: ActionParam) {
   handlers?.trigger(id, param);
+}
+export function dispatchRelease(id: TriggerActionId, param?: ActionParam) {
+  handlers?.release?.(id, param);
 }
 export function dispatchContinuous(id: ContinuousActionId, value: number, param?: ActionParam) {
   handlers?.continuous(id, value, param);

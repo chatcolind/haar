@@ -4,7 +4,7 @@
 
 import { midiSubscribe, type MidiMessage } from './midi';
 import {
-  dispatchTrigger, dispatchContinuous, readContinuous,
+  dispatchTrigger, dispatchRelease, dispatchContinuous, readContinuous,
   type TriggerActionId, type ContinuousActionId, type ActionParam,
 } from './actions';
 
@@ -222,9 +222,10 @@ function handle(m: MidiMessage) {
           else dispatchTrigger('orb.select', { col, row: vrow - 1 });
         }
       }
-    } else if (s.kind === 'noterange' && m.type === 'noteon' && m.channel === s.channel
+    } else if (s.kind === 'noterange' && (m.type === 'noteon' || m.type === 'noteoff') && m.channel === s.channel
                && m.data1 >= s.low && m.data1 <= s.high) {
-      dispatchTrigger('conductor.note', m.data1 - s.rootMidi);  // semis from zone root; absolute-key handling stays in the handler
+      if (m.type === 'noteon') dispatchTrigger('conductor.note', m.data1 - s.rootMidi);
+      else dispatchRelease('conductor.note', m.data1 - s.rootMidi);   // TOUCH: the finger comes off  // semis from zone root; absolute-key handling stays in the handler
     }
   }
 }
