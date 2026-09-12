@@ -535,6 +535,25 @@ export class Microcosm {
   setEngineActive(id: string, on: boolean): void {
     if (this.rack[id]) this.rack[id].active = on;
   }
+  // ── DRONE / TOUCH ──────────────────────────────────────────────────────
+  // DRONE: free-running, sounds from the moment it opens (the original behaviour).
+  // TOUCH: armed and silent; sounds only while held. Duration lives in the finger.
+  // The mode sits ABOVE setEngineActive - that setter keeps its plain meaning
+  // (sounding or not) so every existing door through it behaves unchanged.
+  // Release never clears grains: in-flight grains finish naturally, so the tail
+  // is the engine's own grain length and there is no cut click.
+  engineMode: Record<string, string> = {};
+  setEngineMode(id: string, mode: string): void {
+    if (!this.rack[id]) return;
+    this.engineMode[id] = (mode === 'touch') ? 'touch' : 'drone';
+    // arming silences immediately; returning to drone resumes the free run
+    this.setEngineActive(id, this.engineMode[id] === 'drone');
+  }
+  getEngineMode(id: string): string { return this.engineMode[id] || 'drone'; }
+  engineFire(id: string, on: boolean): void {
+    if (this.getEngineMode(id) !== 'touch') return;   // drone orbs ignore the finger
+    this.setEngineActive(id, on);
+  }
   setPan(id: string, pan: number): void {
     this.node?.port.postMessage({ type: 'enginePan', id, pan: Math.max(-1, Math.min(1, pan)) });
   }
@@ -622,11 +641,13 @@ export class Microcosm {
     if (this.engineSubdiv[orbId] === undefined) this.engineSubdiv[orbId] = 2;       // eighth notes
     if (this.engineFill[orbId] === undefined) this.engineFill[orbId] = 1;           // full fill
     if (this.engineSeed[orbId] === undefined) { this.engineSeed[orbId] = 1; this.engineGridN[orbId] = 0; }
+    if (this.engineMode[orbId] === undefined) this.engineMode[orbId] = 'drone';  // born DRONE - free-running, as it always was
   }
   // Remove an orb instance from the rack entirely.
   removeOrb(orbId: string): void {
     delete this.rack[orbId];
     delete this.engineTickAccum[orbId];
+    delete this.engineMode[orbId];
   }
   anyEngineActive(): boolean {
     return Object.values(this.rack).some(e => e.active);

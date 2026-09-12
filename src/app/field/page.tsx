@@ -21,6 +21,7 @@ import {
   microcosmLoadSourceData,
   microcosmRecordOutput, samplerLoopPlayStereo, samplerExportWavStereo,
   microcosmCleanSync, microcosmCleanGain, microcosmCleanStrip,
+  microcosmSetEngineMode, microcosmGetEngineMode, microcosmEngineFire,
   samplerAnalyseRoot,
   microcosmInputLevel, microcosmInputDevices, microcosmCaptureLive,
   microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos,
@@ -1612,6 +1613,10 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // MIGRATION (run once from the console): window.haarMigrateSongs() - every localStorage
   // song becomes a real file in Haar/Songs. Existing files with the same name are overwritten.
   useEffect(() => {
+    // DRONE / TOUCH console bench: prove the mode by ear before it has a face.
+    // haarMode('orb_x','touch') arms and silences; haarFire('orb_x',true/false) is the finger.
+    (window as any).haarMode = (id: string, m: string) => { microcosmSetEngineMode(id, m); return microcosmGetEngineMode(id); };
+    (window as any).haarFire = (id: string, on: boolean) => microcosmEngineFire(id, on);
     (window as any).haarMigrateSongs = async () => {
       let ok = await hasHome(); if (!ok) ok = await pickHome(); if (!ok) return 'no home picked';
       const idx = JSON.parse(localStorage.getItem('haar_songs_index') || '[]');
@@ -2959,6 +2964,10 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                   <div onClick={()=>{ soloSetRef.current[focused]=!soloSetRef.current[focused]; reapplyLevels(); forceOrb(x=>x+1); }}
                     style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11,
                       background: soloSetRef.current[focused]?'rgba(122,245,200,0.3)':'transparent', border:`1px solid ${soloSetRef.current[focused]?'rgba(122,245,200,0.8)':'rgba(122,245,200,0.45)'}`, color: soloSetRef.current[focused]?'#a6fff2':'rgba(122,245,200,0.85)' }}>S</div>
+                  <div onClick={()=>{ const m = microcosmGetEngineMode(focused)==='touch' ? 'drone' : 'touch'; microcosmSetEngineMode(focused, m); forceOrb(x=>x+1); }}
+                    title="DRONE / TOUCH - armed orbs are silent until played"
+                    style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11,
+                      background: microcosmGetEngineMode(focused)==='touch'?'rgba(159,180,200,0.3)':'transparent', border:`1px solid ${microcosmGetEngineMode(focused)==='touch'?'rgba(159,180,200,0.9)':'rgba(159,180,200,0.45)'}`, color: microcosmGetEngineMode(focused)==='touch'?'#cfe0ee':'rgba(159,180,200,0.85)' }}>T</div>
                   <input type="range" min={0} max={1} step={0.01} value={volRef.current[focused] ?? 0.7}
                     onChange={(e)=>{ const v=parseFloat(e.target.value); volRef.current[focused]=v; microcosmEngineLevel(focused, orbLevel(focused)); forceOrb(x=>x+1); }}
                     style={{ flex:1, accentColor:'#d8a6ff' }} />

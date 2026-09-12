@@ -910,6 +910,10 @@ export function microcosmTapOn(orbId: string, master: boolean = false): void { (
 export function microcosmCleanSync(orbId: string, srcId: string | null, gain: number): void { (microcosmCore as any)?.cleanSync(orbId, srcId, gain); }
 export function microcosmCleanGain(orbId: string, gain: number): void { (microcosmCore as any)?.cleanGain(orbId, gain); }
 export function microcosmCleanStrip(orbId: string, part: string, v: number): void { (microcosmCore as any)?.cleanStripFor(orbId, part, v); }
+// DRONE / TOUCH: mode is the arm, fire is the finger. Drone orbs ignore fire.
+export function microcosmSetEngineMode(orbId: string, mode: string): void { (microcosmCore as any)?.setEngineMode(orbId, mode); }
+export function microcosmGetEngineMode(orbId: string): string { return (microcosmCore as any)?.getEngineMode(orbId) || 'drone'; }
+export function microcosmEngineFire(orbId: string, on: boolean): void { (microcosmCore as any)?.engineFire(orbId, on); }
 export function microcosmRecordOutput(lenSamp: number, cb: (L: Float32Array, R: Float32Array) => void): void {
   (microcosmCore as any)?.recordOutput(lenSamp, cb);
 }
