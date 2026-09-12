@@ -1,3 +1,4 @@
+import { perfEmit } from '../perf/bus';
 import * as Tone from 'tone';
 import { EffectName, createEffectNode, applyDotLive, applyDotRelease } from './effects';
 import { Voice } from './voice';
@@ -911,9 +912,9 @@ export function microcosmCleanSync(orbId: string, srcId: string | null, gain: nu
 export function microcosmCleanGain(orbId: string, gain: number): void { (microcosmCore as any)?.cleanGain(orbId, gain); }
 export function microcosmCleanStrip(orbId: string, part: string, v: number): void { (microcosmCore as any)?.cleanStripFor(orbId, part, v); }
 // DRONE / TOUCH: mode is the arm, fire is the finger. Drone orbs ignore fire.
-export function microcosmSetEngineMode(orbId: string, mode: string): void { (microcosmCore as any)?.setEngineMode(orbId, mode); }
+export function microcosmSetEngineMode(orbId: string, mode: string): void { perfEmit('mode', orbId, [mode === 'touch' ? 1 : 0]); (microcosmCore as any)?.setEngineMode(orbId, mode); }
 export function microcosmGetEngineMode(orbId: string): string { return (microcosmCore as any)?.getEngineMode(orbId) || 'drone'; }
-export function microcosmEngineFire(orbId: string, on: boolean): void { (microcosmCore as any)?.engineFire(orbId, on); }
+export function microcosmEngineFire(orbId: string, on: boolean): void { perfEmit('fire', orbId, [on ? 1 : 0]); (microcosmCore as any)?.engineFire(orbId, on); }
 export function microcosmRecordOutput(lenSamp: number, cb: (L: Float32Array, R: Float32Array) => void): void {
   (microcosmCore as any)?.recordOutput(lenSamp, cb);
 }
@@ -924,6 +925,8 @@ export function microcosmRecordBlock(startFrame: number, lenSamp: number, cb: (L
 export function microcosmTapeDecode(bytes: ArrayBuffer): Promise<AudioBuffer> { return (microcosmCore as any)?.tapeDecode(bytes); }
 export function microcosmTapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0): void { (microcosmCore as any)?.tapePlay(buf, when, gain, offset); }
 export function microcosmTapeStop(): void { (microcosmCore as any)?.tapeStopAll(); }
+export function microcosmRecordOpen(startFrame: number, cb: (L: Float32Array, R: Float32Array) => void): void { (microcosmCore as any)?.recordOpen(startFrame, cb); }
+export function microcosmRecordStopAt(frame: number): void { (microcosmCore as any)?.recordStopAt(frame); }
 // (samplerFoldTail removed - prints are exact recordings, no processing between recorder and bench)
 
 
@@ -1027,7 +1030,7 @@ export function microcosmAddOrb(orbId: string, engineType: string, level: number
   // spike bench dismantled - worklet reverted; family verdicts live in HAAR_HANDOVER (LATHE 70, COMB 75)
 }
 export function microcosmRemoveOrb(orbId: string): void { (microcosmCore as any)?.removeOrb(orbId); }
-export function microcosmEngineLevel(id: string, level: number): void { microcosmCore?.setEngineLevel(id, level); }
+export function microcosmEngineLevel(id: string, level: number): void { perfEmit('level', id, [level]); microcosmCore?.setEngineLevel(id, level); }
 export function microcosmFadeInEngine(id: string, target: number, seconds?: number): void { (microcosmCore as any)?.fadeInEngine(id, target, seconds); }
 export function microcosmMasterLevel(v: number): void { (microcosmCore as any)?.setMasterGain(v); }
 // DEV A/B: recipe-vs-legacy tunnel toggle (temporary scaffolding)
@@ -1036,12 +1039,12 @@ export function microcosmRecipeAB(on: boolean): void { const M = require('./micr
 export function microcosmRecipeGet(id: string): any { const M = require('./microcosm'); return (M.Microcosm as any).recipeGet(id); }
 export function microcosmRecipeSet(id: string, key: string, value: number): void { const M = require('./microcosm'); (M.Microcosm as any).recipeSet(id, key, value); }
 export function microcosmRecipeReset(id: string): void { const M = require('./microcosm'); (M.Microcosm as any).recipeReset(id); }
-export function microcosmEnginePan(id: string, pan: number): void { (microcosmCore as any)?.setPan(id, pan); }
-export function microcosmEngineEQ(id: string, lo: number, mid: number, hi: number): void { (microcosmCore as any)?.setEQ(id, lo, mid, hi); }
+export function microcosmEnginePan(id: string, pan: number): void { perfEmit('pan', id, [pan]); (microcosmCore as any)?.setPan(id, pan); }
+export function microcosmEngineEQ(id: string, lo: number, mid: number, hi: number): void { perfEmit('eq', id, [lo, mid, hi]); (microcosmCore as any)?.setEQ(id, lo, mid, hi); }
 export function microcosmActivity(a: number): void { microcosmCore?.setActivity(a); }
 export function microcosmGrainSpread(x: number): void { microcosmCore?.setGrainSpread(x); }
 export function microcosmPitchSpread(y: number): void { microcosmCore?.setPitchSpread(y); }
-export function microcosmOrbXY(id: string, x: number, y: number): void { (microcosmCore as any)?.setOrbXY(id, x, y); }
+export function microcosmOrbXY(id: string, x: number, y: number): void { perfEmit('xy', id, [x, y]); (microcosmCore as any)?.setOrbXY(id, x, y); }
 export function microcosmOrbSlot(orbId: string, slot: number): void { (microcosmCore as any)?.setOrbSlot(orbId, slot); }
 export function microcosmConstTape(slot: number, amount: number): void { (microcosmCore as any)?.setConstTape(slot, amount); }
 export function microcosmConstTapeBalance(slot: number, k: 'hiss'|'sat'|'wow'|'roll', v: number): void { (microcosmCore as any)?.setConstTapeBalance(slot, k, v); }
@@ -1112,19 +1115,19 @@ export async function microcosmLoadSource(id: string, file: File): Promise<{ dur
 }
 export function microcosmRemoveSource(id: string): void { (microcosmCore as any)?.removeSource(id); }
 export function microcosmFreezeSource(id: string, seconds?: number): void { (microcosmCore as any)?.freezeSource(id, seconds); }
-export function microcosmFauveOn(orbId: string, srcId: string, minMs?: number, gain?: number): void { (microcosmCore as any)?.fauveOn(orbId, srcId, minMs, gain); }
-export function microcosmFauveOff(orbId: string): void { (microcosmCore as any)?.fauveOff(orbId); }
+export function microcosmFauveOn(orbId: string, srcId: string, minMs?: number, gain?: number): void { perfEmit('fauve.on', orbId, [minMs ?? 0, gain ?? 0], srcId); (microcosmCore as any)?.fauveOn(orbId, srcId, minMs, gain); }
+export function microcosmFauveOff(orbId: string): void { perfEmit('fauve.off', orbId); (microcosmCore as any)?.fauveOff(orbId); }
 export function microcosmFauveOffAll(): void { (microcosmCore as any)?.fauveOffAll(); }
-export function microcosmFauveParam(orbId: string, key: string, value: number): void { (microcosmCore as any)?.fauveParam(orbId, key, value); }
+export function microcosmFauveParam(orbId: string, key: string, value: number): void { perfEmit('fauve.param', orbId, [value], key); (microcosmCore as any)?.fauveParam(orbId, key, value); }
 export function microcosmFauveUpdatePitch(orbId: string): void { (microcosmCore as any)?.fauveUpdatePitch(orbId); }
 export function microcosmSourcePosition(id: string, position: number, spray?: number): void { (microcosmCore as any)?.setSourcePosition(id, position, spray); }
 export function microcosmEngineSource(orbId: string, sourceId: string): void { (microcosmCore as any)?.setEngineSource(orbId, sourceId); }
-export function microcosmOrbPosition(orbId: string, position: number, spray?: number): void { (microcosmCore as any)?.setOrbPosition(orbId, position, spray); }
-export function microcosmOrbAbsence(orbId: string, v: number): void { (microcosmCore as any)?.setOrbAbsence(orbId, v); }
-export function microcosmOrbChaos(orbId: string, v: number): void { (microcosmCore as any)?.setOrbChaos(orbId, v); }
+export function microcosmOrbPosition(orbId: string, position: number, spray?: number): void { perfEmit('position', orbId, [position, spray ?? -1]); (microcosmCore as any)?.setOrbPosition(orbId, position, spray); }
+export function microcosmOrbAbsence(orbId: string, v: number): void { perfEmit('absence', orbId, [v]); (microcosmCore as any)?.setOrbAbsence(orbId, v); }
+export function microcosmOrbChaos(orbId: string, v: number): void { perfEmit('chaos', orbId, [v]); (microcosmCore as any)?.setOrbChaos(orbId, v); }
 export function microcosmOrbConstTranspose(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbConstTranspose(orbId, semis); }
-export function microcosmOrbTuning(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbTuning(orbId, semis); }
-export function microcosmOrbRegister(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbRegister(orbId, semis); }
+export function microcosmOrbTuning(orbId: string, semis: number): void { perfEmit('tuning', orbId, [semis]); (microcosmCore as any)?.setOrbTuning(orbId, semis); }
+export function microcosmOrbRegister(orbId: string, semis: number): void { perfEmit('register', orbId, [semis]); (microcosmCore as any)?.setOrbRegister(orbId, semis); }
 export function microcosmOrbChordStep(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbChordStep(orbId, semis); }
 export function microcosmOrbConductor(orbId: string, semis: number): void { (microcosmCore as any)?.setOrbConductor(orbId, semis); }
 export function microcosmSetSpace(w: number): void { microcosmCore?.setSpace(w); }

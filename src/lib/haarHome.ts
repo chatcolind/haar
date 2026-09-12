@@ -143,7 +143,7 @@ export async function openInstrumentFile(): Promise<string | null> {
 // ── SONGS: a song is a PACKAGE on disk - Haar/Songs/<name>/song.json + blocks/*.wav ──
 // Blocks are recorded audio: immutable, never overwritten. The song file owns position.
 // Move a song folder and its audio goes with it. Nothing lives outside the package.
-export type HaarBlock = { id: string; startBar: number; lenBars: number; name: string; file: string };
+export type HaarBlock = { id: string; startBar: number; lenBars: number; name: string; file: string; srcBars?: number; offset?: number; perf?: string; instrument?: string };
 export type HaarTrack = { id: string; name: string; blocks: HaarBlock[] };
 export type HaarSong  = { name: string; bpm: number; tracks: HaarTrack[] };
 
@@ -197,6 +197,19 @@ export async function readSongFile(name: string): Promise<HaarSong | null> {
   if (!dir) return null;
   try { const fh = await dir.getFileHandle('song.json'); return JSON.parse(await (await fh.getFile()).text()) as HaarSong; }
   catch { return null; }
+}
+
+// Generic package writer: Songs/<song>/<dir>/<file>. Immutable by default - an existing file is left alone
+// (sources and instrument snapshots dedupe by name); overwrite=true for files that are meant to update.
+export async function writeInPackage(song: string, dir: string, file: string, data: ArrayBuffer | string, overwrite: boolean = false): Promise<boolean> {
+  const sd = await songDir(song);
+  if (!sd) return false;
+  const d = await sd.getDirectoryHandle(dir, { create: true });
+  if (!overwrite) { try { await d.getFileHandle(file); return true; } catch {} }
+  const fh = await d.getFileHandle(file, { create: true });
+  const w = await fh.createWritable(); await w.write(data); await w.close();
+  console.log('[home] wrote', 'Haar/Songs/' + song + '/' + dir + '/' + file);
+  return true;
 }
 
 export async function hasHome(): Promise<boolean> { return (await getHome()) !== null; }

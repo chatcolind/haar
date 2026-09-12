@@ -19,7 +19,7 @@ import {
   microcosmInputOn, microcosmInputOff, microcosmLiveArm, microcosmSynthOn, microcosmSynthOff,
   microcosmMonitor,
   microcosmLoadSourceData,
-  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeStop, samplerLoopPlayStereo, samplerExportWavStereo,
+  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
   microcosmCleanSync, microcosmCleanGain, microcosmCleanStrip,
   microcosmSetEngineMode, microcosmGetEngineMode, microcosmEngineFire,
   samplerAnalyseRoot,
@@ -27,7 +27,8 @@ import {
   microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos,
   samplerExportWav, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
 } from '../../audio/engine';
-import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs, writeBlock, writeSongFile, readBlock, readSongFile } from '../../lib/haarHome';
+import { perfEmit, perfClock, perfArm, perfDisarm } from '../../perf/bus';
+import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs, writeBlock, writeSongFile, readBlock, readSongFile, writeInPackage } from '../../lib/haarHome';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
 // id is the orb INSTANCE id (unique); engineType is which scattering recipe it runs.
@@ -314,7 +315,7 @@ export default function FieldPage() {
   const [inputOn, setInputOn] = useState(false);   // SOURCES: live input door (dev chip)
   const [samplerOpen, setSamplerOpen] = useState(false);   // SAMPLER station
   const [arrangeOpen, setArrangeOpen] = useState(false);   // ARRANGE - the tape room
-  const [arrTracks, setArrTracks] = useState<{ id:string; name:string; blocks:{ id:string; startBar:number; lenBars:number; name:string; file:string }[] }[]>(
+  const [arrTracks, setArrTracks] = useState<{ id:string; name:string; blocks:{ id:string; startBar:number; lenBars:number; name:string; file:string; srcBars?:number; offset?:number; perf?:string; instrument?:string }[] }[]>(
     () => Array.from({length:16}, (_,i)=>({ id:'track_'+(i+1), name:'TRACK '+(i+1), blocks:[] })));
   const [arrZoom, setArrZoom] = useState(24);        // px per bar
   const [arrScroll, setArrScroll] = useState(0);     // first visible bar
@@ -326,6 +327,21 @@ export default function FieldPage() {
   const [arrSongName] = useState('untitled');               // the song package on disk - Haar/Songs/untitled/
   const arrTracksRef = useRef(arrTracks); arrTracksRef.current = arrTracks;   // live mirror for the take callback
   const arrRecBusyRef = useRef(false);
+  const [arrRec, setArrRec] = useState<'idle'|'armed'|'rolling'>('idle');
+  const arrRecRef = useRef<{ startTime: number; startBar: number; trackIdx: number; spb: number } | null>(null);
+  const [arrRecBar, setArrRecBar] = useState(0);                         // bar count while rolling
+  useEffect(() => {                                                      // the pulse for the armed light
+    const st = document.createElement('style'); st.textContent = '@keyframes haarPulse{0%,100%{opacity:1}50%{opacity:0.35}}'; document.head.appendChild(st);
+    return () => { st.remove(); };
+  }, []);
+  useEffect(() => {
+    if (arrRec !== 'rolling') { setArrRecBar(0); return; }
+    const t = window.setInterval(() => { const r = arrRecRef.current; if (r) setArrRecBar(Math.floor((microcosmAudioTime() - r.startTime) / r.spb) + 1); }, 120);
+    return () => window.clearInterval(t);
+  }, [arrRec]);
+  const hash8 = (t: string) => { let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(16).padStart(8, '0'); };
+  const b64ToBytes = (b64: string) => { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; };
+  useEffect(() => { perfClock(() => microcosmAudioTime()); }, []);   // the bus stamps on the audio clock
   const [arrPlaying, setArrPlaying] = useState(false);
   const arrBufRef = useRef<Record<string, AudioBuffer>>({});   // decoded blocks, by id
   const arrRafRef = useRef(0);
@@ -1657,7 +1673,8 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   function listSongs(): {name:string;ts:number}[] {
     try { return JSON.parse(localStorage.getItem('haar_songs_index') || '[]'); } catch { return []; }
   }
-  function saveSong(name: string) {
+  // THE INSTRUMENT, as JSON - what SAVE INSTRUMENT writes, and what a take snapshots into its song package.
+  function buildInstrumentJson(name: string): string {
     const orbs = fieldOrbs.map(o => ({
       id:o.id, engineType:o.engineType, label:o.label, colorKey:o.colorKey,
       vol: volRef.current[o.id] ?? 0.7, dens: densRef.current[o.id] ?? 0.5,
@@ -1683,7 +1700,10 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       const sb = sourceBytesRef.current[c.sourceId];
       if (sb) { sourceMeta[c.sourceId] = { name: sb.name }; idbSet('src_'+c.sourceId, sb).catch(err=>console.warn('[idb] save failed', c.sourceId, err)); }
     }
-    const songJson = JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, key: { lockKey, scaleLock, scaleMode, octave }, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta });
+    return JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, key: { lockKey, scaleLock, scaleMode, octave }, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta });
+  }
+  function saveSong(name: string) {
+    const songJson = buildInstrumentJson(name);
     localStorage.setItem('haar_song_'+name, songJson);
     // the home: the song becomes a REAL FILE too (localStorage stays the working store)
     (async () => {
@@ -1971,6 +1991,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const hz = rootHz * Math.pow(2, (snapped / 12) + octave + (progTransposeRef.current/12));
     microcosmSourceFreq(hz);
     setPlayNote(note); setPlaySemi(snapped);
+    perfEmit('note.on', '', [snapped, octave], note);   // the musical event - what you edit
     // CONDUCTOR: push the note offset to SAMPLE orbs (default/synth already moved via SourceFreq)
     const noteSemis = snapToScale(semis + octave * 12);   // SCALE-LOCK: snap to key when on (else raw)
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
@@ -1980,6 +2001,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   }
   // TOUCH release: the finger comes off - every armed orb stops (its own tail finishes naturally)
   function releaseTouch() {
+    perfEmit('note.off', '', [], undefined);
     for (const o of fieldOrbs) microcosmEngineFire(o.id, false);
   }
   // double-click a note to LOCK it as the root (yellow); single tap to play
@@ -2103,41 +2125,58 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     xyRef.current = next; setXyMap(next);
     microcosmOrbXY(id, nx, ny);   // PER-ORB: only this orb's grains change; others keep their shaping
   }
-  // ── ARRANGE RECORD HEAD: arm on the NEXT bar, take exactly N bars from the performance tap,
-  // land it as a wav in the song package and a block on the selected track. The song file follows.
+  // ── ARRANGE RECORD HEAD (open-ended, bar-true). REC arms on the NEXT bar and rolls. REC again stops on
+  // the NEXT bar - a take is always whole bars. Body one (wav) and body two (performance + instrument
+  // snapshot) land together in the song package; a block appears on the selected track; the song file follows.
   async function arrRecord() {
-    if (arrRecBusyRef.current) return;
-    if (state !== 'playing') await doStart();                 // one press: roll the transport AND arm
     const SR = 48000;                                        // H6 law: the context runs at 48k
-    const spb = (60 / bpm) * 4;                              // seconds per bar, 4/4
+    if (arrRec !== 'idle') {
+      const r = arrRecRef.current; if (!r) return;
+      const now = microcosmAudioTime();
+      const stopAt = r.startTime + Math.max(1, Math.ceil((now - r.startTime) / r.spb + 0.02)) * r.spb;   // next bar, never under one bar
+      microcosmRecordStopAt(Math.round(stopAt * SR));
+      setArrStatus('STOPPING · on the bar');
+      return;
+    }
+    if (state !== 'playing') await doStart();
+    const spb = (60 / bpm) * 4;
     const now = microcosmAudioTime();
     const anchor = barAudioAnchorRef.current || now;
     const nextBar = anchor + Math.ceil((now - anchor) / spb + 0.02) * spb;   // never THIS bar - the next one
-    const startFrame = Math.round(nextBar * SR);
-    const lenSamp = Math.round(arrRecBars * spb * SR);
     const startBar = Math.floor(arrPlayhead);
     const trackIdx = arrSelTrack;
-    const bars = arrRecBars;
-    arrRecBusyRef.current = true;
-    setArrStatus('ARMED · next bar · ' + bars + ' bars');
-    window.setTimeout(() => setArrStatus('REC · ' + bars + ' bars'), Math.max(0, (nextBar - now) * 1000));
-    microcosmRecordBlock(startFrame, lenSamp, async (L, R) => {
+    arrRecRef.current = { startTime: nextBar, startBar, trackIdx, spb };
+    setArrRec('armed');
+    perfArm(nextBar);                                        // body two starts listening, stamped from the bar
+    setArrStatus('ARMED · rolls on the next bar');
+    window.setTimeout(() => { setArrRec(r => r === 'armed' ? 'rolling' : r); setArrStatus('REC · press again to stop on the bar'); }, Math.max(0, (nextBar - now) * 1000));
+    microcosmRecordOpen(Math.round(nextBar * SR), async (L, R) => {
+      const bars = Math.max(1, Math.round(L.length / (spb * SR)));
       const id = 'blk_' + Date.now();
       const file = id + '.wav';
       const bytes = samplerExportWavStereo(L, R, id, SR, true) as ArrayBuffer;
       const onDisk = await writeBlock(arrSongName, file, bytes);
       const cur = arrTracksRef.current;
-      const block = { id, startBar, lenBars: bars, name: 'TAKE ' + (cur[trackIdx].blocks.length + 1), file };
+      // BODY TWO: the performance in bars, and the instrument that made it, snapshotted into the package
+      const events = perfDisarm().map(e => ({ ...e, t: Math.round((e.t / spb) * 10000) / 10000 }));
+      const instrName = (currentSongName || 'untitled').replace(/[^\w\- ]/g, '_');
+      const instrJson = buildInstrumentJson(instrName);
+      const instrFile = instrName + '_' + hash8(instrJson) + '.json';
+      await writeInPackage(arrSongName, 'instruments', instrFile, instrJson);
+      for (const c of constellations) { const sb = sourceBytesRef.current[c.sourceId]; if (sb) await writeInPackage(arrSongName, 'sources', c.sourceId + '.wav', b64ToBytes(sb.b64)); }
+      const perfFile = id + '.perf.json';
+      await writeInPackage(arrSongName, 'blocks', perfFile, JSON.stringify({ bars, bpm, instrument: instrFile, events }));
+      const block = { id, startBar, lenBars: bars, srcBars: bars, name: 'TAKE ' + (cur[trackIdx].blocks.length + 1), file, perf: perfFile, instrument: instrFile };
       const next = cur.map((t, i) => i === trackIdx ? { ...t, blocks: [...t.blocks, block] } : t);
       setArrTracks(next);
       await writeSongFile({ name: arrSongName, bpm, tracks: next });
-      arrRecBusyRef.current = false;
+      setArrRec('idle'); arrRecRef.current = null;
       setArrStatus((onDisk ? 'landed · ' : 'landed but NOT on disk (no home) · ') + block.name + ' · ' + bars + ' bars · ' + (L.length / SR).toFixed(2) + ' s');
       console.log('[arrange] block landed', block, onDisk ? 'on disk' : 'NOT on disk');
     });
   }
   // ── ARRANGE PLAY (block 4): every block a native player scheduled on the audio clock from the next bar,
-  // playhead sweeps. Second press stops. Players go straight to destination - the record tap never hears them.
+  // playhead sweeps. Second press stops and returns the head. Players go straight to destination - the record tap never hears them.
   async function arrPlay() {
     if (arrPlaying) { microcosmTapeStop(); cancelAnimationFrame(arrRafRef.current); setArrPlaying(false); setArrPlayhead(arrPlayFromRef.current); setArrStatus('tape stopped · head back to bar ' + (arrPlayFromRef.current + 1)); return; }
     if (state !== 'playing') await doStart();
@@ -2473,9 +2512,9 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
             <div style={{ flex:1 }} />
             <span style={{ fontSize:13, color:'rgba(255,255,255,0.55)' }}>bar {Math.floor(arrPlayhead)+1}</span>
             <span style={{ fontSize:13, color:'#7af5c8' }}>{bpm} BPM</span>
-            <span style={{ fontSize:12, letterSpacing:'0.12em', color:'rgba(255,120,120,0.85)', minWidth:220 }}>{arrStatus}</span>
+            <span style={{ fontSize: arrRec==='rolling' ? 15 : 12, fontWeight: arrRec==='rolling' ? 700 : 400, letterSpacing:'0.12em', color: arrRec==='idle' ? 'rgba(255,120,120,0.85)' : '#ff5a5a', minWidth:260 }}>{arrRec==='rolling' ? 'REC · bar ' + arrRecBar : arrStatus}</span>
             <div onClick={arrPlay} title="play the tape from the playhead - press again to stop" style={{ width:46, height:46, borderRadius:'50%', border:'1.5px solid rgba(122,245,200,0.8)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'#7af5c8', fontSize:15 }}>▶</div>
-            <div onClick={arrRecord} title="record a take onto the selected track - arms on the next bar" style={{ width:46, height:46, borderRadius:'50%', border:'1.5px solid rgba(255,90,90,0.7)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'#ff5a5a', fontSize:17 }}>●</div>
+            <div onClick={arrRecord} title="REC: arms on the next bar and rolls. REC again: stops on the next bar." style={{ width:46, height:46, borderRadius:'50%', border: arrRec==='idle' ? '1.5px solid rgba(255,90,90,0.7)' : '2px solid #ff5a5a', boxShadow: arrRec==='rolling' ? 'inset 0 0 0 46px rgba(255,90,90,0.55)' : 'none', animation: arrRec==='armed' ? 'haarPulse 0.7s ease-in-out infinite' : 'none', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'#ff5a5a', fontSize:17 }}>●</div>
             <div onClick={()=>setArrangeOpen(false)} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.3)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)' }}>×</div>
           </div>
           {/* RULER */}

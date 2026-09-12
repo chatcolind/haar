@@ -19,11 +19,17 @@ class HaarRecorder extends AudioWorkletProcessor {
         this.wp = 0;
         console.log('[recorder] rolling -', (this.want / sampleRate).toFixed(2), 's stereo');
       }
-      if (d.type === 'stop') { this.bufL = null; this.bufR = null; this.wp = 0; this.want = 0; }
+      if (d.type === 'startOpen') {                  // BAR-TRUE, OPEN-ENDED: hold until startFrame, roll until stopAt
+        this.open = true; this.stopAt = 0; this.startFrame = d.startFrame || 0;
+        this.chunksL = []; this.chunksR = []; this.curL = new Float32Array(1 << 20); this.curR = new Float32Array(1 << 20); this.wp = 0;
+        console.log('[recorder] open head armed, startFrame', this.startFrame);
+      }
+      if (d.type === 'stopAt') { if (this.open) this.stopAt = d.frame; }
+      if (d.type === 'stop') { this.bufL = null; this.bufR = null; this.wp = 0; this.want = 0; this.open = false; }
     };
   }
   process(inputs) {
-    if (!this.bufL) return true;
+    if (!this.bufL && !this.open) return true;
     const inp = inputs[0];
     if (!inp || !inp[0]) return true;
     const L = inp[0], R = inp[1] || inp[0];
@@ -31,6 +37,15 @@ class HaarRecorder extends AudioWorkletProcessor {
     if (this.startFrame > currentFrame) {                   // the bar has not arrived
       if (this.startFrame >= currentFrame + L.length) return true;
       i0 = this.startFrame - currentFrame;                  // it falls inside this block: start on that sample
+    }
+    if (this.open) {
+      const stopAt = this.stopAt || Infinity;
+      for (let i = i0; i < L.length; i++) {
+        if (currentFrame + i >= stopAt) { this._finishOpen(); return true; }
+        if (this.wp >= this.curL.length) { this.chunksL.push(this.curL); this.chunksR.push(this.curR); this.curL = new Float32Array(1 << 20); this.curR = new Float32Array(1 << 20); this.wp = 0; }
+        this.curL[this.wp] = L[i]; this.curR[this.wp] = R[i]; this.wp++;
+      }
+      return true;
     }
     for (let i = i0; i < L.length && this.wp < this.want; i++) {
       this.bufL[this.wp] = L[i];
@@ -64,4 +79,14 @@ class HaarRecorder extends AudioWorkletProcessor {
     return true;
   }
 }
+HaarRecorder.prototype._finishOpen = function () {
+  const total = this.chunksL.reduce((n, c) => n + c.length, 0) + this.wp;
+  const oL = new Float32Array(total), oR = new Float32Array(total);
+  let off = 0;
+  for (let i = 0; i < this.chunksL.length; i++) { oL.set(this.chunksL[i], off); oR.set(this.chunksR[i], off); off += this.chunksL[i].length; }
+  oL.set(this.curL.subarray(0, this.wp), off); oR.set(this.curR.subarray(0, this.wp), off);
+  this.open = false; this.stopAt = 0; this.startFrame = 0; this.chunksL = []; this.chunksR = []; this.curL = null; this.curR = null; this.wp = 0;
+  this.port.postMessage({ type: 'done', bufL: oL.buffer, bufR: oR.buffer, len: oL.length }, [oL.buffer, oR.buffer]);
+  console.log('[recorder] open take complete -', oL.length, 'samples verbatim');
+};
 registerProcessor('haar-recorder', HaarRecorder);

@@ -432,6 +432,19 @@ export class Microcosm {
     this._recNode.port.start();
     this._recNode.port.postMessage({ type: 'start', lenSamp, startFrame: opts?.startFrame || 0, exact: !!opts?.exact });
   }
+  // OPEN-ENDED BAR-TRUE RECORD: the head holds until startFrame, rolls, and stops on the exact frame
+  // recordStopAt names. The take comes back as whole bars.
+  recordOpen(startFrame: number, cb: (L: Float32Array, R: Float32Array) => void): void {
+    if (!this._recNode) { console.warn('[recorder] not connected yet'); return; }
+    const handler = (ev: MessageEvent) => {
+      const m: any = ev.data;
+      if (m && m.type === 'done') { this._recNode!.port.removeEventListener('message', handler); cb(new Float32Array(m.bufL), new Float32Array(m.bufR)); }
+    };
+    this._recNode.port.addEventListener('message', handler);
+    this._recNode.port.start();
+    this._recNode.port.postMessage({ type: 'startOpen', startFrame });
+  }
+  recordStopAt(frame: number): void { this._recNode?.port.postMessage({ type: 'stopAt', frame }); }
   tapOn(orbId: string, master: boolean = false): void { this.node?.port.postMessage({ type: 'tapOn', orbId, master }); }
   // ── TAPE PLAYERS (ARRANGE block 4): native buffer players scheduled on the audio clock, straight to
   // destination. They never touch the worklet or the recorder tap - a take can never hear the tape.
