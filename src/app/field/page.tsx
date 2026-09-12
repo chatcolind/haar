@@ -27,7 +27,7 @@ import {
   microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos,
   samplerExportWav, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
 } from '../../audio/engine';
-import { writeWav, writeSong, hasHome, pickHome, openSongFile, saveSongAs, saveWavAs } from '../../lib/haarHome';
+import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs } from '../../lib/haarHome';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
 // id is the orb INSTANCE id (unique); engineType is which scattering recipe it runs.
@@ -1595,7 +1595,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     microcosmCleanSync(PREVIEW_ID, null, 0);
     microcosmRemoveOrb(PREVIEW_ID);
   }
-  // ---- SAVE / RECALL songs (Universe) — localStorage ----
+  // ---- SAVE / RECALL instruments (was Universe) — localStorage cache; disk is Haar/Instruments ----
   const [songMenu, setSongMenu] = useState<null | 'save' | 'open'>(null);
   const [songName, setSongName] = useState('');
   const [currentSongName, setCurrentSongName] = useState<string>('');   // the loaded/saved song, for the header
@@ -1631,7 +1631,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       let n = 0;
       for (const sg of idx) {
         const j = localStorage.getItem('haar_song_' + sg.name);
-        if (j && await writeSong(sg.name, j)) n++;
+        if (j && await writeInstrument(sg.name, j)) n++;
       }
       return n + ' songs written to Haar/Songs';
     };
@@ -1669,7 +1669,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     localStorage.setItem('haar_song_'+name, songJson);
     // the home: the song becomes a REAL FILE too (localStorage stays the working store)
     (async () => {
-      const saved = await saveSongAs(name, songJson);       // THE DIALOG - you choose where, every time
+      const saved = await saveInstrumentAs(name, songJson);       // THE DIALOG - you choose where, every time
       console.log(saved ? '[song] saved as ' + saved : '[song] save dialog cancelled');
     })();
     const idx = listSongs().filter(s=>s.name!==name); idx.push({name, ts:Date.now()});
@@ -3608,9 +3608,9 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
             </div>
           </div>
 
-          {/* UNIVERSES — absolutely centred under middle C */}
+          {/* INSTRUMENTS — absolutely centred under middle C */}
           <div className="haar-section" style={{ position:'absolute', left:'50%', bottom:0, transform:'translateX(-50%)', display:'flex', flexDirection:'column', alignItems:'center' }}>
-            <div className="haar-sectionlbl" style={{ ...zlabel, alignSelf:'center' }}>UNIVERSES</div>
+            <div className="haar-sectionlbl" style={{ ...zlabel, alignSelf:'center' }}>INSTRUMENTS</div>
             <div style={{ display:'flex', alignItems:'flex-end', gap:30 }}>
               <div onClick={()=>setSongMenu('save')} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(122,245,200,0.5)', background:'rgba(122,245,200,0.06)', boxShadow:'0 0 18px 3px rgba(122,245,200,0.4), inset 0 0 14px rgba(122,245,200,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -3618,7 +3618,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 </div>
                 <div className="haar-lbl" style={{ fontSize:12.5, color:'#a6fff2', marginTop:8 }}>Save</div>
               </div>
-              <div onClick={()=>(async ()=>{ const txt = await openSongFile(); if (txt) { try { const data = JSON.parse(txt); await loadSongData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } })()} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+              <div onClick={()=>(async ()=>{ const txt = await openInstrumentFile(); if (txt) { try { const data = JSON.parse(txt); await loadSongData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } })()} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(216,166,255,0.5)', background:'rgba(216,166,255,0.06)', boxShadow:'0 0 18px 3px rgba(216,166,255,0.4), inset 0 0 14px rgba(216,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#d8a6ff" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M3 5h5l2 2h7v9H3z"/></g></svg>
                 </div>
@@ -3840,8 +3840,8 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           <div onClick={(e)=>e.stopPropagation()} style={{ width:440, maxWidth:'90vw', background:'rgba(14,16,26,0.97)', border:'0.5px solid rgba(255,255,255,0.14)', borderRadius:18, padding:'28px 30px' }}>
             {songMenu==='save' ? (
               <>
-                <div style={{ fontSize:12, letterSpacing:'0.2em', color:'#7af5c8', fontFamily:'monospace', marginBottom:20 }}>SAVE UNIVERSE</div>
-                <input autoFocus value={songName} onChange={(e)=>setSongName(e.target.value)} placeholder="name this universe"
+                <div style={{ fontSize:12, letterSpacing:'0.2em', color:'#7af5c8', fontFamily:'monospace', marginBottom:20 }}>SAVE INSTRUMENT</div>
+                <input autoFocus value={songName} onChange={(e)=>setSongName(e.target.value)} placeholder="name this instrument"
                   onKeyDown={(e)=>{ if(e.key==='Enter' && songName.trim()) saveSong(songName.trim()); }}
                   style={{ width:'100%', boxSizing:'border-box', padding:'13px 16px', borderRadius:10, background:'rgba(255,255,255,0.05)', border:'0.5px solid rgba(255,255,255,0.2)', color:'#fff', fontSize:16, outline:'none', marginBottom:22 }} />
                 <div style={{ display:'flex', justifyContent:'flex-end', gap:16 }}>
@@ -3851,13 +3851,13 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
               </>
             ) : (
               <>
-                <div style={{ fontSize:12, letterSpacing:'0.2em', color:'#d8a6ff', fontFamily:'monospace', marginBottom:20 }}>OPEN UNIVERSE</div>
-                <div onClick={async ()=>{ const txt = await openSongFile(); if (txt) { try { const data = JSON.parse(txt); setSongMenu(null); await loadSongData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } }}
+                <div style={{ fontSize:12, letterSpacing:'0.2em', color:'#d8a6ff', fontFamily:'monospace', marginBottom:20 }}>OPEN INSTRUMENT</div>
+                <div onClick={async ()=>{ const txt = await openInstrumentFile(); if (txt) { try { const data = JSON.parse(txt); setSongMenu(null); await loadSongData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } }}
                   style={{ padding:'13px 16px', marginBottom:14, borderRadius:10, cursor:'pointer', textAlign:'center', border:'1px solid rgba(122,245,200,0.4)', color:'#7af5c8', fontSize:13, letterSpacing:'0.12em' }}>
                   BROWSE FOLDERS · Haar/Songs
                 </div>
                 {listSongs().length===0 ? (
-                  <div style={{ fontSize:14, color:'rgba(255,255,255,0.4)', padding:'10px 0 20px' }}>no saved universes yet</div>
+                  <div style={{ fontSize:14, color:'rgba(255,255,255,0.4)', padding:'10px 0 20px' }}>no saved instruments yet</div>
                 ) : (
                   <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:'46vh', overflowY:'auto', marginBottom:18 }}>
                     {listSongs().sort((a,b)=>b.ts-a.ts).slice(0,5).map(sg => (

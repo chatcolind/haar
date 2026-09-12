@@ -73,22 +73,22 @@ export async function writeWav(name: string, bytes: ArrayBuffer): Promise<boolea
   return true;
 }
 
-export async function songsDir(): Promise<FileSystemDirectoryHandle | null> {
+export async function instrumentsDir(): Promise<FileSystemDirectoryHandle | null> {
   const home = await getHome();
   if (!home) return null;
   const haar = await home.getDirectoryHandle('Haar', { create: true });
-  return haar.getDirectoryHandle('Songs', { create: true });
+  return haar.getDirectoryHandle('Instruments', { create: true });
 }
 
-export async function writeSong(name: string, json: string): Promise<boolean> {
-  const dir = await songsDir();
+export async function writeInstrument(name: string, json: string): Promise<boolean> {
+  const dir = await instrumentsDir();
   if (!dir) return false;
   // songs OVERWRITE by name (unlike wavs): saving a song again updates it - the expected verb
   const fh = await dir.getFileHandle(name + '.json', { create: true });
   const w = await fh.createWritable();
   await w.write(json);
   await w.close();
-  console.log('[home] wrote', 'Haar/Songs/' + name + '.json');
+  console.log('[home] wrote', 'Haar/Instruments/' + name + '.json');
   return true;
 }
 
@@ -109,14 +109,14 @@ export async function saveWavAs(name: string, bytes: ArrayBuffer): Promise<strin
   } catch { return null; }   // cancelled
 }
 
-export async function saveSongAs(name: string, json: string): Promise<string | null> {
+export async function saveInstrumentAs(name: string, json: string): Promise<string | null> {
   // THE SAVE DIALOG - every save. See the folders, make new ones, choose. 1999 rules.
   try {
-    const dir = await songsDir();
+    const dir = await instrumentsDir();
     // @ts-ignore
     const fh = await window.showSaveFilePicker({
       suggestedName: name + '.json',
-      types: [{ description: 'Haar song', accept: { 'application/json': ['.json'] } }],
+      types: [{ description: 'Haar instrument', accept: { 'application/json': ['.json'] } }],
       startIn: dir || 'documents',
     });
     const w = await fh.createWritable();
@@ -126,18 +126,77 @@ export async function saveSongAs(name: string, json: string): Promise<string | n
   } catch { return null; }   // cancelled
 }
 
-export async function openSongFile(): Promise<string | null> {
+export async function openInstrumentFile(): Promise<string | null> {
   // browse the library: OS picker rooted in Haar/Songs (folders, subfolders, 500 songs - Finder's problem, solved)
   try {
-    const dir = await songsDir();
+    const dir = await instrumentsDir();
     // @ts-ignore
     const [fh] = await window.showOpenFilePicker({
-      types: [{ description: 'Haar songs', accept: { 'application/json': ['.json'] } }],
+      types: [{ description: 'Haar instruments', accept: { 'application/json': ['.json'] } }],
       startIn: dir || 'documents',
     });
     const f = await fh.getFile();
     return await f.text();
   } catch { return null; }   // cancelled
+}
+
+// ── SONGS: a song is a PACKAGE on disk - Haar/Songs/<name>/song.json + blocks/*.wav ──
+// Blocks are recorded audio: immutable, never overwritten. The song file owns position.
+// Move a song folder and its audio goes with it. Nothing lives outside the package.
+export type HaarBlock = { id: string; startBar: number; lenBars: number; name: string; file: string };
+export type HaarTrack = { id: string; name: string; blocks: HaarBlock[] };
+export type HaarSong  = { name: string; bpm: number; tracks: HaarTrack[] };
+
+export async function songDir(name: string, create: boolean = true): Promise<FileSystemDirectoryHandle | null> {
+  const home = await getHome();
+  if (!home) return null;
+  try {
+    const haar  = await home.getDirectoryHandle('Haar', { create: true });
+    const songs = await haar.getDirectoryHandle('Songs', { create: true });
+    return await songs.getDirectoryHandle(name, { create });
+  } catch { return null; }   // create=false and the song does not exist
+}
+export async function blocksDir(song: string): Promise<FileSystemDirectoryHandle | null> {
+  const dir = await songDir(song);
+  return dir ? dir.getDirectoryHandle('blocks', { create: true }) : null;
+}
+export async function writeBlock(song: string, file: string, bytes: ArrayBuffer): Promise<boolean> {
+  const dir = await blocksDir(song);
+  if (!dir) return false;
+  // blocks NEVER overwrite: a block file is unique by id, so a collision is a bug - refuse loudly
+  try { await dir.getFileHandle(file); console.warn('[home] block exists, refusing overwrite:', file); return false; } catch {}
+  const fh = await dir.getFileHandle(file, { create: true });
+  const w = await fh.createWritable();
+  await w.write(bytes);
+  await w.close();
+  console.log('[home] wrote', 'Haar/Songs/' + song + '/blocks/' + file);
+  return true;
+}
+export async function readBlock(song: string, file: string): Promise<ArrayBuffer | null> {
+  const dir = await songDir(song, false);
+  if (!dir) return null;
+  try {
+    const blocks = await dir.getDirectoryHandle('blocks');
+    const fh = await blocks.getFileHandle(file);
+    return await (await fh.getFile()).arrayBuffer();
+  } catch { return null; }
+}
+export async function writeSongFile(song: HaarSong): Promise<boolean> {
+  const dir = await songDir(song.name);
+  if (!dir) return false;
+  // the song file OVERWRITES: saving again updates the arrangement, the blocks stay put
+  const fh = await dir.getFileHandle('song.json', { create: true });
+  const w = await fh.createWritable();
+  await w.write(JSON.stringify(song, null, 2));
+  await w.close();
+  console.log('[home] wrote', 'Haar/Songs/' + song.name + '/song.json');
+  return true;
+}
+export async function readSongFile(name: string): Promise<HaarSong | null> {
+  const dir = await songDir(name, false);
+  if (!dir) return null;
+  try { const fh = await dir.getFileHandle('song.json'); return JSON.parse(await (await fh.getFile()).text()) as HaarSong; }
+  catch { return null; }
 }
 
 export async function hasHome(): Promise<boolean> { return (await getHome()) !== null; }
