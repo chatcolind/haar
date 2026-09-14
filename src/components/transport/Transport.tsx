@@ -14,7 +14,8 @@ export type TransportProps = {
   target: string;                  // record-target track label, e.g. "2 bass"
   status: string;
   click?: boolean; loop?: boolean; loopBars?: number;
-  sky?: string; onCycleSky?: () => void;               // Build's weather - tap to change it, however inspired you are
+  sky?: string; onCycleSky?: () => void;
+  compact?: boolean;                                  // in Build: a capsule - position, play, REC, target - opens on hover               // Build's weather - tap to change it, however inspired you are
   onToStart: () => void; onStop: () => void; onPlay: () => void; onRec: () => void;
   onCycleTarget: () => void;
   onToggleClick?: () => void; onToggleLoop?: () => void; onCycleLoopBars?: () => void;
@@ -33,6 +34,8 @@ export default function Transport(p: TransportProps) {
   });
   const [hidden, setHidden] = useState(false);
   const [folded, setFolded] = useState(false);
+  const [open, setOpen] = useState(false);
+  const closeT = useRef(0);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState(p.songName);
@@ -90,9 +93,13 @@ export default function Transport(p: TransportProps) {
     ? { position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1000, justifyContent: 'center', borderRadius: 0, borderTop: '0.5px solid rgba(159,180,200,0.35)' }
     : { position: 'fixed', left: pos.x, top: pos.y, zIndex: 1000, borderRadius: 10, border: '0.5px solid rgba(159,180,200,0.35)' };
 
+  const capsule = p.compact && !open;
   return (
-    <div style={{ ...frame, display: 'flex', flexDirection: 'column', background: 'rgba(7,8,12,0.94)', backdropFilter: 'blur(10px)', fontFamily: 'Space Mono, monospace', fontSize: 12, color: '#fff', boxShadow: '0 8px 28px rgba(0,0,0,0.5)' }}>
-      {folded ? (
+    <div onPointerEnter={() => { window.clearTimeout(closeT.current); setOpen(true); }} onPointerLeave={() => { closeT.current = window.setTimeout(() => setOpen(false), 900); }}
+      style={{ ...frame, display: 'flex', flexDirection: 'column', background: 'rgba(7,8,12,0.94)', backdropFilter: 'blur(10px)', fontFamily: 'Space Mono, monospace', fontSize: 12, color: '#fff', boxShadow: '0 8px 28px rgba(0,0,0,0.5)' }}>
+      {capsule ? (
+        <div style={{ display: 'flex', alignItems: 'center' }}>{grip}{position}{buttons}{target}</div>
+      ) : folded ? (
         <>
           <div style={{ display: 'flex', alignItems: 'center', borderBottom: '0.5px solid rgba(255,255,255,0.1)' }}>{grip}{position}{buttons}{target}</div>
           <div style={{ display: 'flex', alignItems: 'center' }}>{song}{tempo}{toggles}{status}</div>

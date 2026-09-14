@@ -331,6 +331,8 @@ export default function FieldPage() {
   const [arrSelBlock, setArrSelBlock] = useState<string | null>(null);               // the song package on disk - Haar/Songs/untitled/
   const arrTracksRef = useRef(arrTracks); arrTracksRef.current = arrTracks;   // live mirror for the take callback
   const arrRecBusyRef = useRef(false);
+  const [trackPick, setTrackPick] = useState(false);            // the tracks fanned out under TO
+  const [sourceOpen, setSourceOpen] = useState(false);          // SOURCE: where sound comes in - the live input, and (next) the wavs
   // NOTES ARE RIPPLES: a pressed key sends a ring out over the sea toward the horizon (THE REEL)
   const rippleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const ripplesRef = useRef<{ t0: number; x: number; hue: string }[]>([]);
@@ -2036,7 +2038,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     microcosmSourceFreq(hz);
     setPlayNote(note); setPlaySemi(snapped);
     perfEmit('note.on', '', [snapped, octave], note);   // the musical event - what you edit
-    ripplesRef.current.push({ t0: performance.now(), x: window.innerWidth / 2, hue: 'rgba(255,214,190,0.9)' });
+    ripplesRef.current.push({ t0: performance.now(), x: window.innerWidth / 2, hue: arrRecRef.current ? 'rgba(255,120,130,0.95)' : 'rgba(255,214,190,0.9)' });
     // CONDUCTOR: push the note offset to SAMPLE orbs (default/synth already moved via SourceFreq)
     const noteSemis = snapToScale(semis + octave * 12);   // SCALE-LOCK: snap to key when on (else raw)
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
@@ -2685,7 +2687,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       {/* SAMPLER - FINAL SCREEN. One centre axis, one label voice, framed wave, contrast floor. */}
       <canvas ref={rippleCanvasRef} style={{ position: 'fixed', inset: 0, zIndex: 2, pointerEvents: 'none' }} />
       <Sky scene={arrangeOpen ? 'skye' : samplerOpen ? 'catatumbo' : focused ? 'aurora' : buildSky} zIndex={arrangeOpen ? 899 : -1} />
-      <Transport
+      {arrangeOpen && <Transport
         songName={arrSongName} posBar={arrPlayhead} bpm={bpm} playing={arrPlaying} rec={arrRec} recBar={arrRecBar}
         target={(arrSelTrack + 1) + ' ' + (arrTracks[arrSelTrack]?.name || '').replace(/^TRACK \d+$/, '')}
         status={arrStatus}
@@ -2697,7 +2699,23 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         onPlay={() => { if (!arrPlaying) arrPlay(); }}
         onRec={arrRecord}
         onCycleTarget={() => setArrSelTrack(i => (i + 1) % arrTracks.length)}
-      />
+      />}
+      {/* SKY - Build's weather, yours to change. Glass, top-right. */}
+      {!arrangeOpen && <div onClick={cycleSky} title="the sky over Build - tap to change the weather" style={{ position:'fixed', top:22, right:24, zIndex:60, padding:'7px 14px', borderRadius:16, cursor:'pointer', fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize:11, letterSpacing:'0.14em', color:'#ffd2b0', border:'1px solid rgba(255,210,176,0.35)', background:'linear-gradient(180deg, rgba(60,30,70,0.32), rgba(20,12,30,0.38))', backdropFilter:'blur(18px)', WebkitBackdropFilter:'blur(18px)', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.18)' }}>sky · {SKY_NAMES[buildSky]}</div>}
+      {/* SOURCE - where sound comes in. Opens from the Source door. */}
+      {!arrangeOpen && sourceOpen && <div onClick={(e)=>e.stopPropagation()} style={{ position:'fixed', right:24, bottom:150, zIndex:80, padding:'14px 16px', borderRadius:16, display:'flex', flexDirection:'column', gap:10, fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', border:'1px solid rgba(255,255,255,0.2)', background:'linear-gradient(180deg, rgba(60,30,70,0.4), rgba(20,12,30,0.5))', backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)', boxShadow:'0 20px 50px rgba(10,5,20,0.45), inset 0 1px 0 rgba(255,255,255,0.18)' }}>
+        <div style={{ fontSize:10, letterSpacing:'0.2em', color:'rgba(255,245,235,0.5)' }}>SOURCE</div>
+      {/* SOURCES dev chip - the door; real home is the sampler station */}
+      <div onClick={async ()=>{ if (inputOn) { microcosmLiveArm(false); microcosmInputOff(); setInputOn(false); } else { const ok = await microcosmInputOn(); if (ok) microcosmLiveArm(true); setInputOn(ok); } }}
+        style={{ padding:'4px 12px', borderRadius:12,
+          border:'1px solid rgba(255,255,255,0.22)', fontSize:10, letterSpacing:'0.12em', cursor:'pointer',
+          color: inputOn ? '#ff9d9d' : 'rgba(255,255,255,0.5)', background:'linear-gradient(180deg, rgba(60,30,70,0.32), rgba(20,12,30,0.38))', backdropFilter:'blur(18px)', WebkitBackdropFilter:'blur(18px)', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.18)', fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif' }}>
+        INPUT: {inputOn ? 'LIVE' : 'OFF'}
+      </div>
+        <div style={{ fontSize:11, color:'rgba(255,245,235,0.4)' }}>wavs from Haar/Wavs · soon</div>
+      </div>}
+      {/* ROLLING, in the sky: one quiet readout while the tape records or plays in Build - nothing else appears */}
+      {!arrangeOpen && (arrRec !== 'idle' || arrPlaying) && <div style={{ position: 'fixed', left: '50%', top: 22, transform: 'translateX(-50%)', zIndex: 60, pointerEvents: 'none', fontFamily: '-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize: 13, letterSpacing: '0.14em', color: arrRec === 'rolling' ? '#ffb3b3' : arrRec === 'armed' ? '#ffd2b0' : 'rgba(255,245,235,0.7)', textShadow: '0 1px 12px rgba(0,0,0,0.6)' }}>{arrRec === 'rolling' ? 'rec · bar ' + arrRecBar + ' · to ' + (arrSelTrack + 1) : arrRec === 'armed' ? 'armed · to ' + (arrSelTrack + 1) : 'playing · bar ' + (Math.floor(arrPlayhead) + 1)}</div>}
       {arrangeOpen && (
         <ArrangeRoom
           tracks={arrTracks} playhead={arrPlayhead} zoom={arrZoom} scroll={arrScroll}
@@ -3123,20 +3141,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           </div>
         );
       })()}
-      {/* DEV A/B chip - temporary scaffolding, remove with the workbench build */}
-      <div onClick={()=>{ const nv = !recipeAB; setRecipeAB(nv); microcosmRecipeAB(nv); }}
-        style={{ position:'absolute', top:14, right:64, zIndex:300, padding:'4px 12px', borderRadius:12,
-          border:'0.5px solid rgba(255,255,255,0.25)', fontSize:10, letterSpacing:'0.12em', cursor:'pointer',
-          color: recipeAB ? '#a6ffd8' : '#ffd8a6', background:'rgba(10,12,20,0.7)', fontFamily:'Space Mono, monospace' }}>
-        TUNNEL: {recipeAB ? 'RECIPE' : 'LEGACY'}
-      </div>
-      {/* SOURCES dev chip - the door; real home is the sampler station */}
-      <div onClick={async ()=>{ if (inputOn) { microcosmLiveArm(false); microcosmInputOff(); setInputOn(false); } else { const ok = await microcosmInputOn(); if (ok) microcosmLiveArm(true); setInputOn(ok); } }}
-        style={{ position:'absolute', top:14, right:196, zIndex:300, padding:'4px 12px', borderRadius:12,
-          border:'0.5px solid rgba(255,255,255,0.25)', fontSize:10, letterSpacing:'0.12em', cursor:'pointer',
-          color: inputOn ? '#ff9d9d' : 'rgba(255,255,255,0.5)', background:'rgba(10,12,20,0.7)', fontFamily:'Space Mono, monospace' }}>
-        INPUT: {inputOn ? 'LIVE' : 'OFF'}
-      </div>
+      {/* DEV A/B chip removed 14 Sept 2026 - the recipe stays on */}
       <div style={{ position:'absolute', inset:0, opacity:0.6, pointerEvents:'none', backgroundImage:'radial-gradient(1px 1px at 20% 14%, rgba(255,255,255,0.5), transparent), radial-gradient(1px 1px at 88% 9%, rgba(255,255,255,0.45), transparent), radial-gradient(1px 1px at 94% 42%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 8% 46%, rgba(255,255,255,0.4), transparent), radial-gradient(1px 1px at 50% 8%, rgba(255,255,255,0.3), transparent)' }} />
       <div style={{ position:'absolute', top:24, left:32, fontSize:21, letterSpacing:'0.6em', fontWeight:500 }}>H A A R</div>
 
@@ -3894,45 +3899,6 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 </div>
                 <div className="haar-lbl" style={{ fontSize:12.5, color:'#e0c4ff', marginTop:4 }}>Life · {Math.round(life*100)}%</div>
               </div>
-            </div>
-          </div>
-
-          {/* INSTRUMENTS — absolutely centred under middle C */}
-          <div className="haar-section" style={{ position:'absolute', left:'50%', bottom:0, transform:'translateX(-50%)', display:'flex', flexDirection:'column', alignItems:'center' }}>
-            <div className="haar-sectionlbl" style={{ ...zlabel, alignSelf:'center' }}>INSTRUMENTS</div>
-            <div style={{ display:'flex', alignItems:'flex-end', gap:30 }}>
-              <div onClick={()=>setSongMenu('save')} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
-                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(122,245,200,0.5)', background:'rgba(122,245,200,0.06)', boxShadow:'0 0 18px 3px rgba(122,245,200,0.4), inset 0 0 14px rgba(122,245,200,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#7af5c8" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M4 4h9l3 3v9H4z"/><path d="M7 4v4h6V4M7 16v-5h6v5" /></g></svg>
-                </div>
-                <div className="haar-lbl" style={{ fontSize:12.5, color:'#a6fff2', marginTop:8 }}>Save</div>
-              </div>
-              <div onClick={()=>(async ()=>{ const txt = await openInstrumentFile(); if (txt) { try { const data = JSON.parse(txt); await loadSongData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } })()} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
-                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(216,166,255,0.5)', background:'rgba(216,166,255,0.06)', boxShadow:'0 0 18px 3px rgba(216,166,255,0.4), inset 0 0 14px rgba(216,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#d8a6ff" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M3 5h5l2 2h7v9H3z"/></g></svg>
-                </div>
-                <div className="haar-lbl" style={{ fontSize:12.5, color:'#e0bfff', marginTop:8 }}>Open</div>
-              </div>
-            </div>
-          </div>
-          {/* SYSTEM */}
-          <div className="haar-section" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end' }}>
-            <div className="haar-sectionlbl" style={{ ...zlabel, alignSelf:'flex-end' }}>SYSTEM</div>
-            <div style={{ display:'flex', alignItems:'flex-end', gap:26 }}>
-              {[
-                { k:'Source', col:'rgba(255,216,107,0.5)', bg:'rgba(255,216,107,0.06)', dot:'#ffd86b' },
-                { k:'Chords', col:'rgba(180,200,230,0.5)', bg:'rgba(180,200,230,0.05)', dot:'#8aa0d0' },
-                { k:'Rec',    col:'rgba(224,80,58,0.5)',   bg:'rgba(224,80,58,0.06)',   dot:'#ff7a5a' },
-                { k:'Arrange', col:'rgba(159,180,200,0.5)', bg:'rgba(159,180,200,0.06)', dot:'#9fb4c8' },
-                { k:'Mix',    col:'rgba(170,196,255,0.5)', bg:'rgba(170,196,255,0.06)', dot:'#aac4ff' },
-              ].map(u => (
-                <div key={u.k} onClick={()=>{ if(u.k==='Rec') openSampler(); if(u.k==='Arrange') setArrangeOpen(true); if(u.k==='Mix') openMix(); if(u.k==='Chords'){ setProgPickOct(octave + 4); setChordsOpen(true); } }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
-                  <div style={{ width:44, height:44, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, boxShadow:`0 0 16px 3px ${u.dot}55, inset 0 0 12px ${u.dot}22`, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                    <div style={{ width:7, height:7, borderRadius:'50%', background:u.dot }} />
-                  </div>
-                  <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.6)', marginTop:8 }}>{u.k}</div>
-                </div>
-              ))}
               <div style={{ width:1, height:44, background:'rgba(255,255,255,0.1)' }} />
               <div className="haar-hover" style={{ textAlign:'center' }}>
                 <div
@@ -3967,6 +3933,46 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 </div>
                 <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.5)', marginTop:8 }}>{metroOn?`Click · ${Math.round(metroLevel*100)}%`:'Click'}</div>
               </div>
+            </div>
+          </div>
+
+          {/* INSTRUMENTS — absolutely centred under middle C */}
+          <div className="haar-section" style={{ position:'absolute', left:'50%', bottom:0, transform:'translateX(-50%)', display:'flex', flexDirection:'column', alignItems:'center' }}>
+            <div className="haar-sectionlbl" style={{ ...zlabel, alignSelf:'center' }}>INSTRUMENTS</div>
+            <div style={{ display:'flex', alignItems:'flex-end', gap:30 }}>
+              <div onClick={()=>setSongMenu('save')} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(122,245,200,0.5)', background:'rgba(122,245,200,0.06)', boxShadow:'0 0 18px 3px rgba(122,245,200,0.4), inset 0 0 14px rgba(122,245,200,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#7af5c8" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M4 4h9l3 3v9H4z"/><path d="M7 4v4h6V4M7 16v-5h6v5" /></g></svg>
+                </div>
+                <div className="haar-lbl" style={{ fontSize:12.5, color:'#a6fff2', marginTop:8 }}>Save</div>
+              </div>
+              <div onClick={()=>(async ()=>{ const txt = await openInstrumentFile(); if (txt) { try { const data = JSON.parse(txt); await loadSongData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } })()} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(216,166,255,0.5)', background:'rgba(216,166,255,0.06)', boxShadow:'0 0 18px 3px rgba(216,166,255,0.4), inset 0 0 14px rgba(216,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#d8a6ff" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M3 5h5l2 2h7v9H3z"/></g></svg>
+                </div>
+                <div className="haar-lbl" style={{ fontSize:12.5, color:'#e0bfff', marginTop:8 }}>Open</div>
+              </div>
+            </div>
+          </div>
+          {/* SYSTEM */}
+          <div className="haar-section" style={{  display:'flex', flexDirection:'column', alignItems:'flex-end' }}>
+            <div className="haar-sectionlbl" style={{ ...zlabel, alignSelf:'flex-end' }}>SYSTEM</div>
+            <div style={{ display:'flex', alignItems:'flex-end', gap:26 }}>
+              {[
+                { k:'Source', col:'rgba(255,216,107,0.5)', bg:'rgba(255,216,107,0.06)', dot:'#ffd86b' },
+                { k:'Chords', col:'rgba(180,200,230,0.5)', bg:'rgba(180,200,230,0.05)', dot:'#8aa0d0' },
+                { k:'Rec',    col:'rgba(224,80,58,0.5)',   bg:'rgba(224,80,58,0.06)',   dot:'#ff7a5a' },
+                { k:'Arrange', col:'rgba(159,180,200,0.5)', bg:'rgba(159,180,200,0.06)', dot:'#9fb4c8' },
+                { k:'Mix',    col:'rgba(170,196,255,0.5)', bg:'rgba(170,196,255,0.06)', dot:'#aac4ff' },
+              ].map(u => (
+                <div key={u.k} onClick={()=>{ if(u.k==='Source') setSourceOpen(v=>!v); if(u.k==='Rec') openSampler(); if(u.k==='Arrange') setArrangeOpen(true); if(u.k==='Mix') openMix(); if(u.k==='Chords'){ setProgPickOct(octave + 4); setChordsOpen(true); } }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+                  <div style={{ width:44, height:44, borderRadius:'50%', border:`1px solid ${u.col}`, background:u.bg, boxShadow:`0 0 16px 3px ${u.dot}55, inset 0 0 12px ${u.dot}22`, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    <div style={{ width:7, height:7, borderRadius:'50%', background:u.dot }} />
+                  </div>
+                  <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.6)', marginTop:8 }}>{u.k}</div>
+                </div>
+              ))}
+              <div style={{ width:1, height:44, background:'rgba(255,255,255,0.1)' }} />
               <div className="haar-hover" style={{ textAlign:'center' }}>
                 <div onClick={()=>{ if(state==='playing') doStop(); else doStart(); }}
                   title="Start / Stop  (spacebar)"
@@ -3980,6 +3986,31 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                   }
                 </div>
                 <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.55)', marginTop:8, letterSpacing:'0.05em' }}>{state==='playing' ? 'Stop' : 'Start'}</div>
+              </div>
+              {/* REC - the tape head, in Haar's own console. Click-sized ring; red; pulses armed, fills rolling. The track lives in its label. */}
+              <div className="haar-hover" style={{ textAlign:'center', position:'relative', width:56 }}>
+                <div onClick={arrRecord}
+                  title="Record a take to the chosen track. Press again to stop on the bar."
+                  style={{ width:44, height:44, margin:'0 auto', borderRadius:'50%', cursor:'pointer',
+                    border:`1.5px solid ${arrRec==='idle' ? 'rgba(255,110,110,0.55)' : '#ff6b6b'}`,
+                    background: arrRec==='rolling' ? 'radial-gradient(circle, rgba(255,90,90,0.8) 0%, rgba(255,90,90,0.25) 70%)' : arrRec==='armed' ? 'radial-gradient(circle, rgba(255,90,90,0.35) 0%, transparent 70%)' : 'transparent',
+                    boxShadow: arrRec==='rolling' ? '0 0 28px rgba(255,90,90,0.55)' : 'none',
+                    animation: arrRec==='armed' ? 'haarPulse 0.7s ease-in-out infinite' : 'none',
+                    display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <div style={{ width:12, height:12, borderRadius:'50%', background: arrRec==='idle' ? '#ff8585' : '#fff' }} />
+                </div>
+                {/* the track it lands on - always visible, on the ring */}
+                <div onClick={(e)=>{ e.stopPropagation(); setTrackPick(v=>!v); }} title="the track the take lands on - tap to choose"
+                  style={{ position:'absolute', top:-6, left:'50%', transform:'translateX(12px)', minWidth:22, height:20, padding:'0 6px', borderRadius:10, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:3,
+                    fontSize:11, fontWeight:600, color:'#fff', background: arrRec==='idle' ? 'rgba(20,12,30,0.7)' : 'rgba(255,90,90,0.8)', border:'1px solid rgba(255,255,255,0.35)', backdropFilter:'blur(8px)' }}>
+                  {arrSelTrack + 1}<span style={{ fontSize:8, opacity:0.7 }}>▾</span>
+                </div>
+                <div onClick={()=>setTrackPick(v=>!v)} className="haar-lbl" title="the track the take lands on - tap to choose" style={{ fontSize:11.5, cursor:'pointer', whiteSpace:'nowrap', color: arrRec==='idle' ? 'rgba(255,255,255,0.55)' : '#ffb3b3', marginTop:8, letterSpacing:'0.05em' }}>{arrRec==='rolling' ? 'bar ' + arrRecBar : arrRec==='armed' ? 'armed' : 'to ' + (arrSelTrack + 1) + ' ▾'}</div>
+                {trackPick && <div style={{ position:'absolute', left:'50%', bottom:'100%', transform:'translateX(-50%)', marginBottom:10, display:'flex', gap:6, padding:'8px 10px', borderRadius:20, background:'rgba(20,12,30,0.5)', backdropFilter:'blur(14px)', border:'1px solid rgba(255,255,255,0.18)', zIndex:80 }}>
+                  {arrTracks.map((t, i) => <div key={t.id} onClick={()=>{ setArrSelTrack(i); setTrackPick(false); }} title={'track ' + (i+1) + (t.blocks.length ? ' · ' + t.blocks.length + ' take' + (t.blocks.length===1?'':'s') : '')}
+                    style={{ width:22, height:22, borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:9, color: i===arrSelTrack ? '#fff' : 'rgba(255,255,255,0.6)',
+                      border:`1px solid ${i===arrSelTrack ? '#ff8585' : t.blocks.length ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.18)'}`, background: i===arrSelTrack ? 'rgba(255,110,110,0.35)' : t.blocks.length ? 'rgba(255,255,255,0.08)' : 'transparent' }}>{i+1}</div>)}
+                </div>}
               </div>
             </div>
           </div>
