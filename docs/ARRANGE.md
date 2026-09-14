@@ -95,3 +95,22 @@ Then: performance editor + re-render · loop-record/takes · punch · markers ·
 ## Built so far (Sept 2026)
 Chassis · song package on disk · a fixed-length bar-true head (sample-exact, wrong
 shape) · tape playback with sweep · song reloads on open · recorder hears clean lanes.
+
+## THE REEL — ratified 14 Sept 2026. The whole instrument is one journey through four skies.
+Arrange is the design centre; every other room is built to sit beside it. One glowing horizon
+line runs through every scene; the work floats below it; the same transport rides every sky.
+Moving between rooms is the reel playing: slow dissolves (~900 ms), the horizon holding still
+while the weather changes. The reel strip (rooms as frames, the current one lit) is navigation.
+  BUILD           the Great Plains, a supercell at dusk. FRONTS, not orbs: a voice is a storm
+                  cell. A settled front is wide and slow (the bed = the dark wall cloud, the
+                  pad = the lit anvil); a called-in front is small, ringed, waiting. Lightning
+                  inside a front is the sound moving. Drag = drift (XY). Size = level.
+  INSIDE A FRONT  Iceland, the aurora. The curtains ARE the sound - density and level move
+                  them. Six controls floating in the sky, no more. Mountains are the horizon.
+  SAMPLER         Catatumbo, the storm that never stops. The wave is the lake it is lit on;
+                  every cut is a strike. Verbs: reverse · fade · to tempo · INTO A FRONT (lit).
+  ARRANGE         Skye, the break (see THE LOOK above).
+Build order: (1) the Sky layer behind every room with the four scenes and the dissolve;
+(2) Arrange re-skinned onto Skye with no tools; (3) fronts replace the orb bodies in Build;
+(4) the aurora face and the Catatumbo bench; (5) the reel strip. Spinning orbs are retired.
+Reference renders: haar-reel.html (outside the repo).
