@@ -116,7 +116,8 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
     <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'transparent', display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, "Helvetica Neue", Inter, sans-serif', color: INK }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 22, padding: '14px 28px', borderBottom: '1px solid rgba(255,255,255,0.5)', background: 'linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0.3))', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }}>
         <span style={{ fontSize: 15, letterSpacing: '0.34em', color: INK2 }}>ARRANGE</span>
-        <span onClick={p.onNew} style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(42,20,51,0.35)', color: INK }}>NEW SONG</span>
+        <span onClick={p.onNew} style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(255,255,255,0.45)', color: INK }}>NEW SONG</span>
+        <span onClick={() => p.onUndo?.()} title="undo the last change  (Cmd+Z)" style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(255,255,255,0.45)', color: INK }}>↶ UNDO</span>
         <div style={{ flex: 1 }} />
         <div onClick={p.onClose} title="back to the instrument" style={{ width: 36, height: 36, borderRadius: '50%', border: '0.5px solid rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 15 }}>×</div>
       </div>
@@ -128,7 +129,7 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
             const on = i === p.selTrack, empty = t.blocks.length === 0;
             return (
               <div key={t.id} onClick={() => p.onSelectTrack(i)} title="record target" style={{ height: ROW_H, boxSizing: 'border-box', padding: '10px 12px', borderBottom: '0.5px solid rgba(255,255,255,0.06)', cursor: 'pointer', background: on ? 'rgba(255,90,90,0.12)' : 'transparent', borderLeft: on ? `2px solid ${RED}` : '2px solid transparent' }}>
-                <div style={{ fontSize: 13, letterSpacing: '0.12em', fontWeight: 500, color: on ? RED : (empty ? INK3 : INK) }}>{i + 1} {t.name.replace(/^TRACK \d+$/, '')}{on ? ' ●' : ''}</div>
+                <div style={{ fontSize: 13, letterSpacing: '0.12em', fontWeight: 500, color: on ? RED : (empty ? INK3 : INK), display: 'flex', alignItems: 'baseline', gap: 8 }}>{i + 1} {t.name.replace(/^TRACK \d+$/, '')}{on ? ' ●' : ''}<span onClick={(e) => { e.stopPropagation(); const n = window.prompt('name this track', t.name && t.name !== String(i + 1) ? t.name : ''); if (n != null) p.onTrackChange?.(i, { name: n.trim() || String(i + 1) }); }} title="tap to name the track" style={{ fontSize: 12, fontWeight: 400, letterSpacing: '0.04em', cursor: 'text', color: t.name && t.name !== String(i + 1) ? INK : INK3, borderBottom: '1px dotted rgba(255,255,255,0.35)' }}>{t.name && t.name !== String(i + 1) ? t.name : 'name'}</span></div>
                 <div style={{ fontSize: 10, color: INK3, marginTop: 6, display: 'flex', justifyContent: 'space-between' }}><span>{t.blocks.length ? t.blocks.length + ' block' + (t.blocks.length === 1 ? '' : 's') : ''}</span>{t.blocks.length > 0 && <span onClick={(e) => { e.stopPropagation(); p.onClearTrack(i); }} title="clear this track" style={{ color: 'rgba(255,90,90,0.6)', cursor: 'pointer', padding: '0 4px' }}>×</span>}</div>
               </div>
             );

@@ -331,6 +331,21 @@ export default function FieldPage() {
   const [arrSelBlock, setArrSelBlock] = useState<string | null>(null);               // the song package on disk - Haar/Songs/untitled/
   const arrTracksRef = useRef(arrTracks); arrTracksRef.current = arrTracks;   // live mirror for the take callback
   const arrRecBusyRef = useRef(false);
+  // PEAKS: the wave inside every slab, computed once per decoded block from the tape's own buffer
+  const arrPeaksRef = useRef<Record<string, Float32Array>>({});
+  const arrPeakMaxRef = useRef<Record<string, number>>({});
+  const arrNormalise = (id: string) => { arrPeaksFor(id); const mx = arrPeakMaxRef.current[id]; if (!mx || mx < 0.001) return; arrBlockChange(id, { gain: Math.min(24, Math.round(20 * Math.log10(0.98 / mx) * 10) / 10) }); };
+  const [arrPeaksTick, setArrPeaksTick] = useState(0);
+  const arrPeaksFor = (id: string): Float32Array | null => {
+    const have = arrPeaksRef.current[id]; if (have) return have;
+    const buf = arrBufRef.current[id]; if (!buf) return null;
+    const N = 512, out = new Float32Array(N), d = buf.getChannelData(0), step = Math.max(1, Math.floor(buf.length / N));
+    for (let i = 0; i < N; i++) { let m = 0; const s0 = i * step, s1 = Math.min(buf.length, s0 + step); for (let k = s0; k < s1; k += 4) { const v = Math.abs(d[k]); if (v > m) m = v; } out[i] = m; }
+    let mx = 0; for (let i = 0; i < N; i++) if (out[i] > mx) mx = out[i];
+    arrPeakMaxRef.current[id] = mx;
+    if (mx > 0.005) for (let i = 0; i < N; i++) out[i] = Math.min(1, out[i] / mx);   // every take fills its slab, however quiet
+    arrPeaksRef.current[id] = out; return out;
+  };
   const [trackPick, setTrackPick] = useState(false);            // the tracks fanned out under TO
   const [sourceOpen, setSourceOpen] = useState(false);          // SOURCE: where sound comes in - the live input, and (next) the wavs
   // NOTES ARE RIPPLES: a pressed key sends a ring out over the sea toward the horizon (THE REEL)
@@ -2249,16 +2264,21 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // press stops and returns the head. Players go straight to destination - the record tap never hears them.
   function arrSchedule(fromBar: number, toBar: number, t0: number, spb: number): number {
     let n = 0;
-    for (const t of arrTracksRef.current) for (const b of t.blocks) {
+    const anySolo = arrTracksRef.current.some((t: any) => t.solo);
+    for (const t of arrTracksRef.current) { if (t.mute || (anySolo && !t.solo)) continue; for (const b of t.blocks) {
       const buf = arrBufRef.current[b.id]; if (!buf) continue;
       const bs = b.startBar, be = b.startBar + b.lenBars;
       const s0 = Math.max(bs, fromBar), e0 = Math.min(be, toBar);
       if (e0 <= s0) continue;
       const src = b.srcBars && b.srcBars < b.lenBars + (b.offset || 0) ? b.srcBars * spb : undefined;   // needs to go round: loop the source
       let off = ((b.offset || 0) + (s0 - bs)) * spb; if (src) off = off % src;
-      microcosmTapePlay(buf, t0 + (s0 - fromBar) * spb, 1, off, (e0 - s0) * spb, src);
+      // the block's own voice: gain in dB, fades in bars - trimmed when the region starts inside the block or ends before its end
+      const gLin = Math.pow(10, (b.gain ?? 0) / 20);
+      const fIn = Math.max(0, (b.fadeIn ?? 0) - (s0 - b.startBar)) * spb;
+      const fOut = (e0 >= b.startBar + b.lenBars - 1e-6) ? Math.min(b.fadeOut ?? 0, e0 - s0) * spb : 0;
+      microcosmTapePlay(buf, t0 + (s0 - fromBar) * spb, gLin, off, (e0 - s0) * spb, src, fIn, fOut);
       n++;
-    }
+    } }
     return n;
   }
   function arrPump(spb: number) {
@@ -2304,7 +2324,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       if (arrBufRef.current[b.id]) continue;
       const bytes = await readBlock(arrSongName, b.file);
       if (!bytes) { console.warn('[arrange] block not on disk', b.file); continue; }
-      try { arrBufRef.current[b.id] = await microcosmTapeDecode(bytes); } catch (e) { console.warn('[arrange] decode failed', b.file, e); }
+      try { arrBufRef.current[b.id] = await microcosmTapeDecode(bytes); setArrPeaksTick(t => t + 1); } catch (e) { console.warn('[arrange] decode failed', b.file, e); }
     }
     const spb = (60 / bpm) * 4;
     const now = microcosmAudioTime();
@@ -2357,7 +2377,13 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     setArrSelBlock(null);
     arrCommit(arrTracksRef.current.map(t => ({ ...t, blocks: t.blocks.filter(b => b.id !== id) })), 'block removed');   // the file stays in blocks/
   }
-  function arrBlockChange(id: string, patch: { startBar?: number; lenBars?: number }, track?: number) {
+  function arrTrackChange(i: number, patch: { mute?: boolean; solo?: boolean; name?: string }) {
+    const next = arrTracksRef.current.map((t: any, k: number) => k === i ? { ...t, ...patch } : t);
+    arrCommit(next, patch.name != null ? 'renamed track ' + (i + 1) : (patch.solo != null ? 'solo ' + (patch.solo ? 'on' : 'off') : 'mute ' + (patch.mute ? 'on' : 'off')) + ' · track ' + (i + 1));
+    arrTracksRef.current = next;                                                     // the tape reads the ref: make it true now
+    if (patch.mute != null || patch.solo != null) arrRecycle(arrLoop, arrLoopA, arrLoopBars);   // and re-cut this instant, not on the bar
+  }
+  function arrBlockChange(id: string, patch: { startBar?: number; lenBars?: number; gain?: number; fadeIn?: number; fadeOut?: number; name?: string }, track?: number) {
     const cur = arrTracksRef.current;
     const from = cur.findIndex(t => t.blocks.some(b => b.id === id)); if (from < 0) return;
     const b = cur[from].blocks.find(bb => bb.id === id)!;
@@ -2721,6 +2747,9 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       {!arrangeOpen && (arrRec !== 'idle' || arrPlaying) && <div style={{ position: 'fixed', left: '50%', top: 22, transform: 'translateX(-50%)', zIndex: 60, pointerEvents: 'none', fontFamily: '-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize: 13, letterSpacing: '0.14em', color: arrRec === 'rolling' ? '#ffb3b3' : arrRec === 'armed' ? '#ffd2b0' : 'rgba(255,245,235,0.7)', textShadow: '0 1px 12px rgba(0,0,0,0.6)' }}>{arrRec === 'rolling' ? 'rec · bar ' + arrRecBar + ' · to ' + (arrSelTrack + 1) : arrRec === 'armed' ? 'armed · to ' + (arrSelTrack + 1) : 'playing · bar ' + (Math.floor(arrPlayhead) + 1)}</div>}
       {arrangeOpen && (
         <ArrangeRoom
+          peaksFor={arrPeaksFor} peaksTick={arrPeaksTick}
+          onNormalise={arrNormalise}
+          onTrackChange={arrTrackChange}
           tracks={arrTracks} playhead={arrPlayhead} zoom={arrZoom} scroll={arrScroll}
           selTrack={arrSelTrack} selBlock={arrSelBlock}
           rec={arrRec} recStartBar={arrRecRef.current?.startBar ?? 0}

@@ -450,12 +450,15 @@ export class Microcosm {
   // destination. They never touch the worklet or the recorder tap - a take can never hear the tape.
   private _tape: { src: AudioBufferSourceNode; g: GainNode }[] = [];
   async tapeDecode(bytes: ArrayBuffer): Promise<AudioBuffer> { return await this.ctx.decodeAudioData(bytes.slice(0)); }
-  tapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0, dur?: number, loopSec?: number): void {
+  tapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0, dur?: number, loopSec?: number, fadeIn: number = 0, fadeOut: number = 0): void {
     const src = this.ctx.createBufferSource(); src.buffer = buf;
     if (loopSec && loopSec > 0) { src.loop = true; src.loopStart = 0; src.loopEnd = loopSec; }   // a repeated block
-    const g = this.ctx.createGain(); g.gain.value = gain;
+    const g = this.ctx.createGain();
     src.connect(g); g.connect(this.ctx.destination);
     const at = Math.max(when, this.ctx.currentTime);
+    // FADES: ramps on the block's own gain node - non-destructive, the wav is never touched
+    if (fadeIn > 0.005) { g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(Math.max(0.0001, gain), at + fadeIn); } else g.gain.setValueAtTime(gain, at);
+    if (dur != null && dur > 0 && fadeOut > 0.005) { const fo = Math.min(fadeOut, dur); g.gain.setValueAtTime(gain, at + dur - fo); g.gain.exponentialRampToValueAtTime(0.0001, at + dur); }
     src.start(at, offset);
     if (dur != null && dur > 0) src.stop(at + dur);                                             // cut at the region edge
     const rec = { src, g }; this._tape.push(rec);

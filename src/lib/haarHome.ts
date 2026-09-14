@@ -143,8 +143,9 @@ export async function openInstrumentFile(): Promise<string | null> {
 // ── SONGS: a song is a PACKAGE on disk - Haar/Songs/<name>/song.json + blocks/*.wav ──
 // Blocks are recorded audio: immutable, never overwritten. The song file owns position.
 // Move a song folder and its audio goes with it. Nothing lives outside the package.
-export type HaarBlock = { id: string; startBar: number; lenBars: number; name: string; file: string; srcBars?: number; offset?: number; perf?: string; instrument?: string };
-export type HaarTrack = { id: string; name: string; blocks: HaarBlock[] };
+/** gain (dB), fadeIn / fadeOut (bars): the take's voice, applied at play time, never written into the wav */
+export type HaarBlock = { gain?: number; fadeIn?: number; fadeOut?: number; id: string; startBar: number; lenBars: number; name: string; file: string; srcBars?: number; offset?: number; perf?: string; instrument?: string };
+export type HaarTrack = { id: string; name: string; blocks: HaarBlock[]; mute?: boolean; solo?: boolean };
 export type HaarSong  = { name: string; bpm: number; tracks: HaarTrack[] };
 
 export async function songDir(name: string, create: boolean = true): Promise<FileSystemDirectoryHandle | null> {
