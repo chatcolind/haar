@@ -30,6 +30,7 @@ import {
 import { perfEmit, perfClock, perfArm, perfDisarm } from '../../perf/bus';
 import Transport from '../../components/transport/Transport';
 import ArrangeRoom from '../../components/arrange/ArrangeRoom';
+import Sky, { HORIZON } from '../../components/sky/Sky';
 import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs, writeBlock, writeSongFile, readBlock, readSongFile, writeInPackage } from '../../lib/haarHome';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
@@ -330,11 +331,36 @@ export default function FieldPage() {
   const [arrSelBlock, setArrSelBlock] = useState<string | null>(null);               // the song package on disk - Haar/Songs/untitled/
   const arrTracksRef = useRef(arrTracks); arrTracksRef.current = arrTracks;   // live mirror for the take callback
   const arrRecBusyRef = useRef(false);
-  const [arrPlaying, setArrPlaying] = useState(false);
+  // NOTES ARE RIPPLES: a pressed key sends a ring out over the sea toward the horizon (THE REEL)
+  const rippleCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const ripplesRef = useRef<{ t0: number; x: number; hue: string }[]>([]);
+  useEffect(() => {
+    let raf = 0;
+    const draw = () => {
+      const c = rippleCanvasRef.current; if (c) {
+        const w = c.width = window.innerWidth, h = c.height = window.innerHeight; const g = c.getContext('2d')!;
+        g.clearRect(0, 0, w, h);
+        const now = performance.now(); const hy = h * HORIZON, ky = h * 0.8;
+        ripplesRef.current = ripplesRef.current.filter(r => now - r.t0 < 2600);
+        for (const r of ripplesRef.current) {
+          const t = (now - r.t0) / 2600; const y = ky + (hy - ky) * Math.pow(t, 0.55); const rx = 40 + t * w * 0.42; const ry = (1 - t) * 14 + 2;
+          g.beginPath(); g.ellipse(r.x, y, rx, ry, 0, 0, Math.PI * 2); g.strokeStyle = r.hue; g.globalAlpha = (1 - t) * 0.55; g.lineWidth = 1.5 + (1 - t) * 2; g.stroke();
+        }
+        g.globalAlpha = 1;
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, []);  const [arrPlaying, setArrPlaying] = useState(false);
   const [arrLoop, setArrLoop] = useState(false);                 // LOOP: a take stops itself after arrLoopBars
   const [arrLoopBars, setArrLoopBars] = useState(4);
   const [arrLoopA, setArrLoopA] = useState<number | null>(null);   // the cycle range, bars [A, B) - set by dragging the ruler
   const arrLoopTimerRef = useRef(0);
+  const arrCycRef = useRef<{ A: number; len: number; t0: number; cycle: number; scheduledTo: number } | null>(null);   // the live cycle - the pump reads it every pass
+  const arrPlayheadRef = useRef(0);
+  const arrUndoRef = useRef<any[][]>([]);
+  const newBlockId = () => 'blk_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);                        // timeline snapshots - every change pushes one
   const [arrClick, setArrClick] = useState(true);                // CLICK: sounds while the tape records or plays, silent otherwise
   const arrTrimRef = useRef(false);                              // STOP NOW pressed: trim the take back to whole bars
   const [arrRec, setArrRec] = useState<'idle'|'armed'|'rolling'>('idle');
@@ -2001,6 +2027,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     microcosmSourceFreq(hz);
     setPlayNote(note); setPlaySemi(snapped);
     perfEmit('note.on', '', [snapped, octave], note);   // the musical event - what you edit
+    ripplesRef.current.push({ t0: performance.now(), x: window.innerWidth / 2, hue: 'rgba(255,214,190,0.9)' });
     // CONDUCTOR: push the note offset to SAMPLE orbs (default/synth already moved via SourceFreq)
     const noteSemis = snapToScale(semis + octave * 12);   // SCALE-LOCK: snap to key when on (else raw)
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
@@ -2151,7 +2178,8 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const spb = (60 / bpm) * 4;
     const now = microcosmAudioTime();
     const anchor = barAudioAnchorRef.current || now;
-    const onBar = anchor + Math.ceil((now - anchor) / spb + 0.02) * spb;      // the next bar
+    const onBar = arrPlaying ? anchor + Math.ceil((now - anchor) / spb + 0.02) * spb : now + 0.08;   // tape rolling: its next bar; else NOW
+    if (!arrPlaying) barAudioAnchorRef.current = onBar;                        // the bar clock re-anchors to the press
     const nextBar = arrClick ? onBar + spb : onBar;                             // click on: one bar of count-in first
     const startBar = (arrLoop && arrLoopA != null) ? arrLoopA : Math.floor(arrPlayhead);
     const trackIdx = arrSelTrack;
@@ -2170,7 +2198,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         L = L.subarray(0, whole); R = R.subarray(0, whole);
       }
       const bars = Math.max(1, Math.round(L.length / barSamp));
-      const id = 'blk_' + Date.now();
+      const id = newBlockId();
       const file = id + '.wav';
       const bytes = samplerExportWavStereo(L, R, id, SR, true) as ArrayBuffer;
       const onDisk = await writeBlock(arrSongName, file, bytes);
@@ -2186,6 +2214,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       await writeInPackage(arrSongName, 'blocks', perfFile, JSON.stringify({ bars, bpm, instrument: instrFile, events }));
       const block = { id, startBar, lenBars: bars, srcBars: bars, name: 'TAKE ' + (cur[trackIdx].blocks.length + 1), file, perf: perfFile, instrument: instrFile };
       const next = cur.map((t, i) => i === trackIdx ? { ...t, blocks: [...t.blocks, block] } : t);
+      arrUndoRef.current.push(cur);
       setArrTracks(next);
       await writeSongFile({ name: arrSongName, bpm, tracks: next });
       setArrRec('idle'); arrRecRef.current = null;
@@ -2211,15 +2240,48 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       const bs = b.startBar, be = b.startBar + b.lenBars;
       const s0 = Math.max(bs, fromBar), e0 = Math.min(be, toBar);
       if (e0 <= s0) continue;
-      const src = b.srcBars && b.srcBars < b.lenBars ? b.srcBars * spb : undefined;   // a repeated block loops its source
-      microcosmTapePlay(buf, t0 + (s0 - fromBar) * spb, 1, (s0 - bs) * spb, (e0 - s0) * spb, src);
+      const src = b.srcBars && b.srcBars < b.lenBars + (b.offset || 0) ? b.srcBars * spb : undefined;   // needs to go round: loop the source
+      let off = ((b.offset || 0) + (s0 - bs)) * spb; if (src) off = off % src;
+      microcosmTapePlay(buf, t0 + (s0 - fromBar) * spb, 1, off, (e0 - s0) * spb, src);
       n++;
     }
     return n;
   }
+  function arrPump(spb: number) {
+    const c = arrCycRef.current; if (!c) return;
+    const nowT = microcosmAudioTime();
+    while (c.scheduledTo < nowT + 1.2) { arrSchedule(c.A, c.A + c.len, c.t0 + c.cycle * c.len * spb, spb); c.cycle++; c.scheduledTo = c.t0 + c.cycle * c.len * spb; }
+  }
+  // the range changed while the tape runs: re-cut NOW from where the head is (inside the new range) or from its start
+  function arrRecycle(loopOn: boolean, A: number | null, len: number) {
+    if (!arrPlaying) return;
+    const spb = (60 / bpm) * 4;
+    const head = arrPlayheadRef.current;
+    microcosmTapeStop(); window.clearInterval(arrLoopTimerRef.current); cancelAnimationFrame(arrRafRef.current);
+    const now = microcosmAudioTime(), t0 = now + 0.06;
+    if (loopOn && A != null && len >= 1) {
+      const from = (head >= A && head < A + len) ? head : A;
+      const t0v = t0 - (from - A) * spb;                              // virtual start of this pass, so phase = elapsed mod len
+      arrSchedule(from, A + len, t0, spb);                             // the rest of this pass
+      arrCycRef.current = { A, len, t0: t0v, cycle: 1, scheduledTo: t0v + len * spb };
+      barAudioAnchorRef.current = t0v;
+      arrLoopTimerRef.current = window.setInterval(() => arrPump(spb), 200);
+      const sweep = () => { const c = arrCycRef.current; if (c) { const el = (microcosmAudioTime() - c.t0) / spb; const h = el < 0 ? c.A : c.A + (el % c.len); arrPlayheadRef.current = h; setArrPlayhead(h); } arrRafRef.current = requestAnimationFrame(sweep); };
+      arrRafRef.current = requestAnimationFrame(sweep);
+      setArrStatus('cycling · bars ' + (A + 1) + '-' + (A + len));
+    } else {
+      arrCycRef.current = null;
+      const from = head;
+      arrSchedule(from, Infinity, t0, spb);
+      barAudioAnchorRef.current = t0 - (from - Math.floor(from)) * spb;
+      const sweep = () => { const h = from + (microcosmAudioTime() - t0) / spb; arrPlayheadRef.current = h; setArrPlayhead(h); arrRafRef.current = requestAnimationFrame(sweep); };
+      arrRafRef.current = requestAnimationFrame(sweep);
+      setArrStatus('tape · straight on from bar ' + (Math.floor(from) + 1));
+    }
+  }
   async function arrPlay() {
     if (arrPlaying) {
-      microcosmTapeStop(); cancelAnimationFrame(arrRafRef.current); window.clearInterval(arrLoopTimerRef.current);
+      microcosmTapeStop(); cancelAnimationFrame(arrRafRef.current); window.clearInterval(arrLoopTimerRef.current); arrCycRef.current = null;
       setArrPlaying(false); setArrPlayhead(arrPlayFromRef.current); setArrStatus('tape stopped · head back to bar ' + (arrPlayFromRef.current + 1)); return;
     }
     if (state !== 'playing') await doStart();
@@ -2232,17 +2294,16 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     }
     const spb = (60 / bpm) * 4;
     const now = microcosmAudioTime();
-    const anchor = barAudioAnchorRef.current || now;
-    const t0 = anchor + Math.ceil((now - anchor) / spb + 0.02) * spb;   // the tape rolls from the next bar
+    const t0 = now + 0.08;                                            // the tape rolls NOW - the transport is the clock
     const cycling = arrLoop && arrLoopA != null && arrLoopBars >= 1;
     if (cycling) {
       const A = arrLoopA as number, len = arrLoopBars;
       arrPlayFromRef.current = A;
-      let cycle = 0; let scheduledTo = t0;
-      const pump = () => { const nowT = microcosmAudioTime(); while (scheduledTo < nowT + 1.2) { arrSchedule(A, A + len, t0 + cycle * len * spb, spb); cycle++; scheduledTo = t0 + cycle * len * spb; } };
-      pump(); arrLoopTimerRef.current = window.setInterval(pump, 200);
+      barAudioAnchorRef.current = t0;                                 // the bar clock re-anchors to the press
+      arrCycRef.current = { A, len, t0, cycle: 0, scheduledTo: t0 };
+      arrPump(spb); arrLoopTimerRef.current = window.setInterval(() => arrPump(spb), 200);
       setArrPlaying(true); setArrStatus('cycling · bars ' + (A + 1) + '-' + (A + len));
-      const sweep = () => { const el = (microcosmAudioTime() - t0) / spb; setArrPlayhead(el < 0 ? A : A + (el % len)); arrRafRef.current = requestAnimationFrame(sweep); };
+      const sweep = () => { const c = arrCycRef.current; if (c) { const el = (microcosmAudioTime() - c.t0) / spb; const h = el < 0 ? c.A : c.A + (el % c.len); arrPlayheadRef.current = h; setArrPlayhead(h); } arrRafRef.current = requestAnimationFrame(sweep); };
       arrRafRef.current = requestAnimationFrame(sweep);
       return;
     }
@@ -2250,10 +2311,11 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const anyAhead = tracks.some(t => t.blocks.some(b => b.startBar + b.lenBars > fromBar));
     if (!anyAhead) fromBar = 0;                                   // nothing ahead of the head: rewind to bar 1
     arrPlayFromRef.current = fromBar;
+    barAudioAnchorRef.current = t0;                                   // the bar clock re-anchors to the press
     const n = arrSchedule(fromBar, Infinity, t0, spb);
     setArrPlaying(true);
     setArrStatus('tape · ' + n + ' block' + (n === 1 ? '' : 's') + ' · from bar ' + (fromBar + 1));
-    const sweep = () => { setArrPlayhead(Math.max(fromBar, fromBar + (microcosmAudioTime() - t0) / spb)); arrRafRef.current = requestAnimationFrame(sweep); };
+    const sweep = () => { const h = Math.max(fromBar, fromBar + (microcosmAudioTime() - t0) / spb); arrPlayheadRef.current = h; setArrPlayhead(h); arrRafRef.current = requestAnimationFrame(sweep); };
     arrRafRef.current = requestAnimationFrame(sweep);
   }
   async function arrNewSong() {
@@ -2265,11 +2327,55 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     await writeSongFile({ name, bpm, tracks: fresh });
     setArrStatus('new song · ' + name);
   }
-  async function arrDeleteBlock(id: string) {
-    const next = arrTracksRef.current.map(t => ({ ...t, blocks: t.blocks.filter(b => b.id !== id) }));
-    setArrTracks(next); setArrSelBlock(null);
-    await writeSongFile({ name: arrSongName, bpm, tracks: next });   // the file stays in blocks/ - only the timeline entry goes
-    setArrStatus('block removed');
+  async function arrCommit(next: any[], status: string) {          // one door for every timeline change: undoable, saved
+    arrUndoRef.current.push(arrTracksRef.current); if (arrUndoRef.current.length > 50) arrUndoRef.current.shift();
+    setArrTracks(next);
+    await writeSongFile({ name: arrSongName, bpm, tracks: next });
+    setArrStatus(status);
+  }
+  async function arrUndo() {
+    const prev = arrUndoRef.current.pop(); if (!prev) { setArrStatus('nothing to undo'); return; }
+    setArrTracks(prev); setArrSelBlock(null);
+    await writeSongFile({ name: arrSongName, bpm, tracks: prev });
+    setArrStatus('undone');
+  }
+  function arrDeleteBlock(id: string) {
+    setArrSelBlock(null);
+    arrCommit(arrTracksRef.current.map(t => ({ ...t, blocks: t.blocks.filter(b => b.id !== id) })), 'block removed');   // the file stays in blocks/
+  }
+  function arrBlockChange(id: string, patch: { startBar?: number; lenBars?: number }, track?: number) {
+    const cur = arrTracksRef.current;
+    const from = cur.findIndex(t => t.blocks.some(b => b.id === id)); if (from < 0) return;
+    const b = cur[from].blocks.find(bb => bb.id === id)!;
+    const to = track ?? from;
+    const nb = { ...b, ...patch };
+    const next = cur.map((t, i) => {
+      let blocks = t.blocks.filter(bb => bb.id !== id);
+      if (i === to) blocks = [...blocks, nb];
+      return { ...t, blocks };
+    });
+    const what = patch.lenBars != null ? (nb.lenBars > (nb.srcBars || nb.lenBars) ? 'extended · ×' + Math.round(nb.lenBars / (nb.srcBars || 1)) : 'trimmed · ' + nb.lenBars + ' bars') : 'moved · bar ' + (nb.startBar + 1) + (to !== from ? ' · track ' + (to + 1) : '');
+    arrCommit(next, what);
+  }
+  function arrSplitBlock(id: string, atBar: number) {               // scissors: one block becomes two, same wav
+    const cur = arrTracksRef.current;
+    const ti = cur.findIndex(t => t.blocks.some(b => b.id === id)); if (ti < 0) return;
+    const b = cur[ti].blocks.find(bb => bb.id === id)!;
+    if (atBar <= b.startBar || atBar >= b.startBar + b.lenBars) return;
+    const left = { ...b, lenBars: atBar - b.startBar };
+    const right = { ...b, id: newBlockId(), startBar: atBar, lenBars: b.startBar + b.lenBars - atBar, offset: (b.offset || 0) + (atBar - b.startBar) };
+    arrCommit(cur.map((t, i) => i === ti ? { ...t, blocks: [...t.blocks.filter(bb => bb.id !== id), left, right] } : t), 'split · bar ' + (atBar + 1));
+  }
+  function arrClearTrack(i: number) {
+    setArrSelBlock(null);
+    arrCommit(arrTracksRef.current.map((t, k) => k === i ? { ...t, blocks: [] } : t), 'track ' + (i + 1) + ' cleared');
+  }
+  function arrCopyBlock(id: string, startBar: number, track: number) {
+    const cur = arrTracksRef.current;
+    const b = cur.flatMap(t => t.blocks).find(bb => bb.id === id); if (!b) return;
+    const nb = { ...b, id: newBlockId(), startBar };                   // same wav, new entry - blocks are immutable, the song owns position
+    arrCommit(cur.map((t, i) => i === track ? { ...t, blocks: [...t.blocks, nb] } : t), 'copied · bar ' + (startBar + 1));
+    setArrSelBlock(nb.id);
   }
   async function doStart() {
     if (!started.current) { await ensureStarted(); return; }
@@ -2336,19 +2442,19 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         const el = orbWrapRefs.current[o.orbId];
         if (!el) continue;
         // (no selection exemption: in the cosmos every orb orbits)
-        const p = orbitPos(o, bars);
-        el.style.transformOrigin = `${o.cx}px ${o.cy}px`;      // scale pivots on the ORB, not the screen corner
-        const near = (p.z + 1) / 2;                            // 0 far .. 1 near
-        const scale = 0.55 + near * 1.05;                      // CINEMA range: far 0.55x .. near 1.6x — parallax you feel
-        el.style.transform = `translate(${(p.x - o.cx).toFixed(1)}px, ${(p.y - o.cy).toFixed(1)}px) scale(${scale.toFixed(3)})`;
-        el.style.opacity = (0.55 + near * 0.45).toFixed(3);    // far dims (depth)
-        orbScreenPosRef.current[o.orbId] = { x: p.x, y: p.y, d: near } as any;
-        // one filter: amplitude brightness + DEPTH BLUR (far = atmospheric diffuse, near = crisp)
+        // THE HORIZON (docs/ARRANGE.md, THE REEL): a layer is a stretch of the line; its fronts stand side by side on it. No orbits, no depth, no motion.
+        const sys = fieldRef2.current.orbits.filter(q => q.cx === o.cx && q.cy === o.cy);
+        const idx = Math.max(0, sys.findIndex(q => q.orbId === o.orbId)), n = sys.length;
+        const gap = Math.min(300, (window.innerWidth * 0.82) / Math.max(1, n));
+        const hx = o.cx + (idx - (n - 1) / 2) * gap, hyv = window.innerHeight * HORIZON;
+        el.style.transformOrigin = `${o.cx}px ${o.cy}px`;
+        el.style.transform = `translate(${(hx - o.cx).toFixed(1)}px, ${(hyv - o.cy).toFixed(1)}px)`;
+        el.style.opacity = '1';
+        orbScreenPosRef.current[o.orbId] = { x: hx, y: hyv, d: 1 } as any;
         const clv = Math.sqrt(Math.max(0, Math.min(1, orbLevelRef.current(o.orbId))));
-        const blur = DEPTH_BLUR ? (1 - near) * 2.6 : 0;
-        el.style.filter = `brightness(${(0.18 + clv * 1.17).toFixed(3)})` + (blur > 0.05 ? ` blur(${blur.toFixed(2)}px)` : '');
+        el.style.filter = `brightness(${(0.18 + clv * 1.17).toFixed(3)})`;
         if (!el.style.transition) el.style.transition = 'filter 0.6s ease';
-        el.style.zIndex = p.z < 0 ? '4' : '12';                // far side passes BEHIND the source star (star svg z=1? star sits behind; use orb layering)
+        el.style.zIndex = '12';
       }
       // FIELD MODE idle drift: micro-orbits around each slot (a few px, tempo-locked) + centre orb breath
       // (drift diagnostic removed)
@@ -2366,9 +2472,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         if (isCentre) {
           el.style.transform = '';                            // the workbench holds still
         } else {
-          const a = (bars / 4) * Math.PI * 2 + phase;        // one wander per 4 bars — visible, unhurried
-          const dx = Math.cos(a) * 26, dy = Math.sin(a * 1.3 + phase) * 16;
-          el.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+          el.style.transform = '';         // FRONTS hold still on the horizon (the idle wander is retired - docs/ARRANGE.md, THE REEL)
         }
         // publish interior position for comets: wrapper origin is the slot; Orb centres itself at slot x/y
         const r = el.getBoundingClientRect();
@@ -2447,22 +2551,30 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   const zlabel: React.CSSProperties = { fontSize:11.5, fontWeight:500, letterSpacing:'0.25em', color:'rgba(255,255,255,0.3)', marginBottom:14 };
 
   return (
-    <main onPointerMove={fieldHover} onClick={fieldClickConst} style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'radial-gradient(ellipse at 50% 28%, #10131f 0%, #070810 66%, #04050a 100%)', fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
+    <main onPointerMove={fieldHover} onClick={fieldClickConst} style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'transparent', zIndex:0, fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
       {/* SPHERES: source stars + orbit paths (behind everything) */}
       {cosmosActive && <svg style={{ position:'absolute', left:0, top:0, width:'100%', height:fh, pointerEvents:'none', zIndex:1 }}>
         {field.systems.map(sys => {
           const name = constellations.find(c => c.id === sys.constId)?.name ?? '';
           const hov = hoverConst === sys.constId;
+          const vh = typeof window !== 'undefined' ? window.innerHeight : fh;
+          const moonY = vh * HORIZON - 170;                  // THE MOON: the layer's source, in the sky over its stretch of the line
+          const hy = vh * HORIZON;
+          const nIn = field.orbits.filter(o => o.cx === sys.cx && o.cy === sys.cy).length;
+          const stretch = Math.min(300, (typeof window !== 'undefined' ? window.innerWidth : dim.w) * 0.82 / Math.max(1, nIn)) * nIn;
           return (
           <g key={sys.constId}>
             {/* AMBIENT BLEED: the system's light staining surrounding space */}
-            <circle cx={sys.cx} cy={sys.cy} r={Math.min(dim.w / Math.max(field.systems.length,1) * 0.52, 420)} fill={sys.tint} opacity={0.012} />
+            <circle cx={sys.cx} cy={moonY} r={Math.min(dim.w / Math.max(field.systems.length,1) * 0.52, 420)} fill={sys.tint} opacity={0.012} />
             {/* SOURCE STAR: a true luminary — layered corona, hot core, faint spill into the void */}
-            <circle cx={sys.cx} cy={sys.cy} r={90} fill={sys.tint} opacity={hov ? 0.10 : 0.06} />
-            <circle cx={sys.cx} cy={sys.cy} r={44} fill={sys.tint} opacity={0.14} />
-            <circle cx={sys.cx} cy={sys.cy} r={16} fill={sys.tint} opacity={0.5} />
-            <circle cx={sys.cx} cy={sys.cy} r={6.5} fill="#fff" opacity={0.95} />
-            <text x={sys.cx} y={sys.cy - 40} textAnchor="middle"
+            <circle cx={sys.cx} cy={moonY} r={90} fill={sys.tint} opacity={hov ? 0.10 : 0.06} />
+            <circle cx={sys.cx} cy={moonY} r={44} fill={sys.tint} opacity={0.14} />
+            <circle cx={sys.cx} cy={moonY} r={16} fill={sys.tint} opacity={0.5} />
+            <circle cx={sys.cx} cy={moonY} r={6.5} fill="#fff" opacity={0.95} />
+            {/* THE STRETCH: this layer's length of horizon, in its colour, under its moon */}
+            <ellipse cx={sys.cx} cy={hy} rx={stretch / 2} ry={14} fill={sys.tint} opacity={0.10} />
+            <line x1={sys.cx} y1={moonY + 14} x2={sys.cx} y2={hy - 8} stroke={sys.tint} strokeWidth={1} strokeOpacity={0.12} />
+            <text x={sys.cx} y={moonY - 40} textAnchor="middle"
               fontFamily='"Space Mono", monospace' fontSize={13} letterSpacing="0.3em"
               fill={sys.tint} opacity={(hov || survey) ? 0.9 : 0} style={{ transition:'opacity 0.5s' }}>
               {name.toUpperCase()}
@@ -2470,11 +2582,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           </g>
           );
         })}
-        {field.orbits.map(o => (
-          <ellipse key={o.orbId} cx={o.cx} cy={o.cy} rx={o.rx} ry={o.ry}
-            transform={`rotate(${(o.tilt*180/Math.PI).toFixed(1)} ${o.cx} ${o.cy})`}
-            fill="none" stroke={o.tint} strokeOpacity={0.055} strokeWidth={0.7} />
-        ))}
+        {/* orbit paths retired - fronts stand on the horizon (THE REEL) */}
       </svg>}
       {forwardConst && liveConstCount >= 2 && (
         <>
@@ -2566,6 +2674,8 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         );
       })()}
       {/* SAMPLER - FINAL SCREEN. One centre axis, one label voice, framed wave, contrast floor. */}
+      <canvas ref={rippleCanvasRef} style={{ position: 'fixed', inset: 0, zIndex: 2, pointerEvents: 'none' }} />
+      <Sky scene={arrangeOpen ? 'skye' : samplerOpen ? 'catatumbo' : focusShown ? 'aurora' : 'plains'} zIndex={arrangeOpen ? 899 : -1} />
       <Transport
         songName={arrSongName} posBar={arrPlayhead} bpm={bpm} playing={arrPlaying} rec={arrRec} recBar={arrRecBar}
         target={(arrSelTrack + 1) + ' ' + (arrTracks[arrSelTrack]?.name || '').replace(/^TRACK \d+$/, '')}
@@ -2573,7 +2683,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         onToStart={() => { if (!arrPlaying && arrRec === 'idle') setArrPlayhead(0); }}
         onStop={() => { if (arrRec !== 'idle') arrStopNow(); else if (arrPlaying) arrPlay(); }}
         click={arrClick} onToggleClick={() => setArrClick(v => !v)}
-        loop={arrLoop} loopBars={arrLoopBars} onToggleLoop={() => setArrLoop(v => !v)} onCycleLoopBars={() => setArrLoopBars(n => n >= 16 ? 1 : n * 2)}
+        loop={arrLoop} loopBars={arrLoopBars} onToggleLoop={() => { const v = !arrLoop; setArrLoop(v); arrRecycle(v, arrLoopA, arrLoopBars); }} onCycleLoopBars={() => { const n = arrLoopBars >= 16 ? 1 : arrLoopBars * 2; setArrLoopBars(n); arrRecycle(arrLoop, arrLoopA, n); }}
         onPlay={() => { if (!arrPlaying) arrPlay(); }}
         onRec={arrRecord}
         onCycleTarget={() => setArrSelTrack(i => (i + 1) % arrTracks.length)}
@@ -2588,7 +2698,9 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           onDeleteBlock={arrDeleteBlock}
           onSetHead={(bar) => { if (!arrPlaying && arrRec === 'idle') setArrPlayhead(bar); }}
           loopA={arrLoopA} loopBars={arrLoopBars} loopOn={arrLoop}
-          onSetLoop={(a, b) => { setArrLoopA(a); setArrLoopBars(Math.max(1, b - a)); setArrLoop(true); }}
+          onSetLoop={(a, b) => { const len = Math.max(1, b - a); setArrLoopA(a); setArrLoopBars(len); setArrLoop(true); arrRecycle(true, a, len); }}
+          onBlockChange={arrBlockChange} onCopyBlock={arrCopyBlock} onUndo={arrUndo}
+          onSplitBlock={arrSplitBlock} onClearTrack={arrClearTrack}
           onZoom={(d) => setArrZoom(z => Math.max(8, Math.min(80, z + d)))}
           onScroll={(d) => setArrScroll(sc => Math.max(0, sc + d))}
           onNew={arrNewSong}
