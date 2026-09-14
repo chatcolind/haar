@@ -182,6 +182,12 @@ export async function readBlock(song: string, file: string): Promise<ArrayBuffer
     return await (await fh.getFile()).arrayBuffer();
   } catch { return null; }
 }
+/** read a text file out of a song package - e.g. the instrument snapshot a take carries: readInPackage(song, 'instruments', file) */
+export async function readInPackage(song: string, sub: string, file: string): Promise<string | null> {
+  const dir = await songDir(song, false);
+  if (!dir) return null;
+  try { const d = await dir.getDirectoryHandle(sub); const fh = await d.getFileHandle(file); return await (await fh.getFile()).text(); } catch { return null; }
+}
 export async function writeSongFile(song: HaarSong): Promise<boolean> {
   const dir = await songDir(song.name);
   if (!dir) return false;

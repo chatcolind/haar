@@ -31,7 +31,7 @@ import { perfEmit, perfClock, perfArm, perfDisarm } from '../../perf/bus';
 import Transport from '../../components/transport/Transport';
 import ArrangeRoom from '../../components/arrange/ArrangeRoom';
 import Sky, { HORIZON } from '../../components/sky/Sky';
-import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs, writeBlock, writeSongFile, readBlock, readSongFile, writeInPackage } from '../../lib/haarHome';
+import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs, writeBlock, writeSongFile, readBlock, readSongFile, writeInPackage, readInPackage } from '../../lib/haarHome';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
 // id is the orb INSTANCE id (unique); engineType is which scattering recipe it runs.
@@ -214,7 +214,7 @@ export default function FieldPage() {
     return CONST_TINTS[((idx % CONST_TINTS.length) + CONST_TINTS.length) % CONST_TINTS.length];
   }
   const [constellations, setConstellations] = useState<Constellation[]>([
-    { id: DEFAULT_CONST_ID, name: 'Synth', sourceId: 'default', orbIds: [], register: 0, pitchMode: 'varispeed' },
+    { id: DEFAULT_CONST_ID, name: 'Instrument 1', sourceId: 'default', orbIds: [], register: 0, pitchMode: 'varispeed' },
   ]);
   // which constellation new orbs join / is currently "forward". Defaults to the synth one.
   const [activeConstId, setActiveConstId] = useState<string>(DEFAULT_CONST_ID);
@@ -348,6 +348,44 @@ export default function FieldPage() {
   };
   const [trackPick, setTrackPick] = useState(false);            // the tracks fanned out under TO
   const [sourceOpen, setSourceOpen] = useState(false);          // SOURCE: where sound comes in - the live input, and (next) the wavs
+  // THE RACK: the instruments loaded now (an instrument = one source through its engines = a constellation in the code).
+  const [selectedInst, setSelectedInst] = useState<string | null>(null);
+  const [rackOpen, setRackOpen] = useState(false);              // the rack is a circle; tap to open, tap to close
+  const [soloInst, setSoloInst] = useState<string | null>(null);
+  const soloInstrument = (id: string) => {           // solo = every other instrument muted; press again to lift
+    const next = soloInst === id ? null : id;
+    for (const c of constellations) constMuteRef.current[c.id] = next ? c.id !== next : false;
+    reapplyLevels(); setConstMuteTick(t => t + 1); setSoloInst(next);
+  };
+  // THE WHOLE INSTRUMENT AT ONCE. touch = armed and silent, so 'all touch' is the hush.
+  const liveOrbIds = () => Array.from(new Set([...Object.keys(orbWrapRefs.current), ...Object.keys(fieldWrapRefs.current)])).filter(id => !!(orbWrapRefs.current[id] || fieldWrapRefs.current[id]));
+  const [allMode, setAllMode] = useState<'drone' | 'touch' | 'mixed'>('mixed');
+  const setEveryFront = (mode: 'drone' | 'touch') => { for (const id of liveOrbIds()) microcosmSetEngineMode(id, mode); setAllMode(mode); };
+  const hushRef = useRef<Record<string, string> | null>(null);
+  const hushInstrument = () => { if (hushRef.current) return; const saved: Record<string, string> = {}; for (const id of liveOrbIds()) { saved[id] = microcosmGetEngineMode(id); microcosmSetEngineMode(id, 'touch'); } hushRef.current = saved; };
+  const unhushInstrument = () => { const saved = hushRef.current; if (!saved) return; hushRef.current = null; for (const id in saved) microcosmSetEngineMode(id, saved[id]); };
+  useEffect(() => { if (arrangeOpen) hushInstrument(); else unhushInstrument(); }, [arrangeOpen]);   // Arrange is quiet; Build gets its voice back
+  // THE INSTRUMENT IS THE UNIT YOU SWITCH. The tape never stops for any of this.
+  const saveCurrentInstrument = async (): Promise<string | null> => {
+    if (!fieldOrbs.length) return songName || null;
+    let name = songName;
+    if (!name) { name = (window.prompt('name this instrument before it leaves', '') || '').trim(); if (!name) return null; setSongName(name); }
+    await writeInstrument(name, buildInstrumentJson(name));
+    return name;
+  };
+  const newInstrument = async () => {
+    if (fieldOrbs.length) { const ok = await saveCurrentInstrument(); if (ok === null && fieldOrbs.length) return; }
+    await loadSongData({ orbs: [], constellations: [] }); setSongName('');
+    if (arrangeOpen) { hushRef.current = null; hushInstrument(); }
+  };
+  const openInstrumentSnapshot = async (file: string) => {
+    if (fieldOrbs.length) { const ok = await saveCurrentInstrument(); if (ok === null && fieldOrbs.length) return; }
+    const txt = await readInPackage(arrSongName, 'instruments', file); if (!txt) { setArrStatus('no snapshot: ' + file); return; }
+    try { const data = JSON.parse(txt); await loadSongData(data); setSongName((data.name || file.replace(/_[0-9a-f]{8}\.json$/, '').replace(/\.json$/, ''))); } catch (e) { console.warn('[instrument] snapshot', e); return; }
+    if (arrangeOpen) { hushRef.current = null; hushInstrument(); }
+  };
+  // THE RACK: every instrument this song has used, one pill each - the first take that carries it is the door
+  const songRack = (() => { const seen: Record<string, string> = {}; for (const t of arrTracks) for (const b of t.blocks) { if (b.instrument) { const label = b.instrument.replace(/_[0-9a-f]{8}\.json$/, '').replace(/\.json$/, ''); if (!seen[label]) seen[label] = b.instrument; } } return Object.entries(seen); })();
   // NOTES ARE RIPPLES: a pressed key sends a ring out over the sea toward the horizon (THE REEL)
   const rippleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const ripplesRef = useRef<{ t0: number; x: number; hue: string }[]>([]);
@@ -1550,7 +1588,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     let sourceId = 'default';
     let tune = 0;
     if (targetId === '__new__') {
-      const name = (createConstName.trim() || `Constellation ${constellations.length}`);
+      const name = (createConstName.trim() || `Instrument ${constellations.length}`);
       if (createSrc === 'livein') {
         sourceId = 'live';   // the worklet's live ring - input's own 12s memory, no loading needed
       } else if (createSrc === 'sample' && pendingWav) {
@@ -2596,7 +2634,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       {cosmosActive && <svg style={{ position:'absolute', left:0, top:0, width:'100%', height:fh, pointerEvents:'none', zIndex:1 }}>
         {field.systems.map(sys => {
           const name = constellations.find(c => c.id === sys.constId)?.name ?? '';
-          const hov = hoverConst === sys.constId;
+          const hov = hoverConst === sys.constId || selectedInst === sys.constId;
           const vh = typeof window !== 'undefined' ? window.innerHeight : fh;
           const moonY = vh * HORIZON - 170;                  // THE MOON: the layer's source, in the sky over its stretch of the line
           const hy = vh * HORIZON;
@@ -2708,7 +2746,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
               {row('TICK - DENSITY ms', 'tickDensity', 0, 400, 5)}
               {row('GRAIN GAIN', 'gain', 0.05, 0.7, 0.01)}
               {row('PAN WIDTH', 'panWidth', 0, 1, 0.05)}
-              <div style={{ fontSize:9.5, color:'rgba(255,255,255,0.3)', marginTop:6, fontFamily:'Space Mono, monospace' }}>dev skin · edits are live on all tunnel orbs · RESET = shipped tunnel</div>
+              <div style={{ fontSize:9.5, color:'rgba(255,255,255,0.3)', marginTop:6, fontFamily:'Space Mono, monospace' }}>dev skin · edits are live on all tunnel engines · RESET = shipped tunnel</div>
             </div>
           </div>
         );
@@ -2731,8 +2769,26 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       />}
       {/* SKY - Build's weather, yours to change. Glass, top-right. */}
       {!arrangeOpen && <div onClick={cycleSky} title="the sky over Build - tap to change the weather" style={{ position:'fixed', top:22, right:24, zIndex:60, padding:'7px 14px', borderRadius:16, cursor:'pointer', fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize:11, letterSpacing:'0.14em', color:'#ffd2b0', border:'1px solid rgba(255,210,176,0.35)', background:'linear-gradient(180deg, rgba(60,30,70,0.32), rgba(20,12,30,0.38))', backdropFilter:'blur(18px)', WebkitBackdropFilter:'blur(18px)', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.18)' }}>sky · {SKY_NAMES[buildSky]}</div>}
+      {/* the song's instrument snapshots reach Build through OPEN INSTRUMENT on a take's card */}
+      {/* THE RACK - a circle bottom-right; tap to open. One row per instrument: its moon's colour, name (tap to select), M, S. Drone / touch for the whole instrument beneath. */}
+      {!arrangeOpen && <div onClick={() => setRackOpen(v => !v)} title="the rack - the instruments loaded now" style={{ position:'fixed', right:24, bottom:150, zIndex:71, width:44, height:44, borderRadius:22, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', border:'1px solid rgba(255,255,255,0.3)', background: rackOpen ? 'rgba(255,255,255,0.2)' : 'linear-gradient(180deg, rgba(60,30,70,0.32), rgba(20,12,30,0.38))', backdropFilter:'blur(18px)', WebkitBackdropFilter:'blur(18px)', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.18)' }}>
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#fff" strokeWidth="1.3" opacity="0.9"><rect x="2" y="2" width="14" height="4" rx="1.5"/><rect x="2" y="7" width="14" height="4" rx="1.5"/><rect x="2" y="12" width="14" height="4" rx="1.5"/></svg>
+      </div>}
+      {!arrangeOpen && rackOpen && <div style={{ position:'fixed', right:24, bottom:204, zIndex:70, display:'flex', flexDirection:'column', gap:6, padding:'10px 10px', borderRadius:16, fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', border:'1px solid rgba(255,255,255,0.2)', background:'linear-gradient(180deg, rgba(60,30,70,0.36), rgba(20,12,30,0.46))', backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)', boxShadow:'0 20px 50px rgba(10,5,20,0.4), inset 0 1px 0 rgba(255,255,255,0.18)', minWidth:230 }}>
+        <div style={{ fontSize:10, letterSpacing:'0.2em', color:'rgba(255,245,235,0.5)', padding:'0 4px 2px' }}>RACK</div>
+        {constellations.filter(c => c.orbIds.length > 0 || c.id !== DEFAULT_CONST_ID).map((c, k) => { const sel = selectedInst === c.id; const muted = !!constMuteRef.current[c.id]; const solo = soloInst === c.id; const tint = CONST_TINTS[k % CONST_TINTS.length];
+          return <div key={c.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 8px', borderRadius:10, background: sel ? 'rgba(255,255,255,0.16)' : 'transparent', border:'1px solid ' + (sel ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.08)') }}>
+            <span style={{ width:8, height:8, borderRadius:4, background:tint, boxShadow:'0 0 8px ' + tint, flex:'0 0 auto' }} />
+            <span onClick={() => setSelectedInst(c.id)} title="select this instrument" style={{ flex:1, fontSize:12, letterSpacing:'0.04em', color: muted ? 'rgba(255,255,255,0.4)' : '#fff', cursor:'pointer', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{c.name}</span>
+            <span onClick={() => { toggleConstMute(c.id); if (soloInst) setSoloInst(null); }} title="mute" style={{ width:22, height:22, borderRadius:11, fontSize:10, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', border:'1px solid ' + (muted ? '#ffd27a' : 'rgba(255,255,255,0.3)'), background: muted ? 'rgba(255,210,122,0.35)' : 'transparent', color: muted ? '#ffd27a' : 'rgba(255,255,255,0.8)' }}>M</span>
+            <span onClick={() => soloInstrument(c.id)} title="solo - every other instrument muted" style={{ width:22, height:22, borderRadius:11, fontSize:10, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', border:'1px solid ' + (solo ? '#a6ffd8' : 'rgba(255,255,255,0.3)'), background: solo ? 'rgba(166,255,216,0.3)' : 'transparent', color: solo ? '#a6ffd8' : 'rgba(255,255,255,0.8)' }}>S</span>
+          </div>; })}
+        <div style={{ display:'flex', gap:6, marginTop:4 }}>
+          {(['drone', 'touch'] as const).map(m => <div key={m} onClick={() => setEveryFront(m)} title={m === 'drone' ? 'every engine hums by itself' : 'every engine is silent until you play it'} style={{ flex:1, textAlign:'center', padding:'6px 8px', borderRadius:10, cursor:'pointer', fontSize:11, letterSpacing:'0.1em', color: allMode === m ? '#fff' : 'rgba(255,245,235,0.7)', border:'1px solid ' + (allMode === m ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.18)'), background: allMode === m ? 'rgba(255,255,255,0.18)' : 'transparent' }}>all {m}</div>)}
+        </div>
+      </div>}
       {/* SOURCE - where sound comes in. Opens from the Source door. */}
-      {!arrangeOpen && sourceOpen && <div onClick={(e)=>e.stopPropagation()} style={{ position:'fixed', right:24, bottom:150, zIndex:80, padding:'14px 16px', borderRadius:16, display:'flex', flexDirection:'column', gap:10, fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', border:'1px solid rgba(255,255,255,0.2)', background:'linear-gradient(180deg, rgba(60,30,70,0.4), rgba(20,12,30,0.5))', backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)', boxShadow:'0 20px 50px rgba(10,5,20,0.45), inset 0 1px 0 rgba(255,255,255,0.18)' }}>
+      {!arrangeOpen && sourceOpen && <div onClick={(e)=>e.stopPropagation()} style={{ position:'fixed', right:250, bottom:150, zIndex:80, padding:'14px 16px', borderRadius:16, display:'flex', flexDirection:'column', gap:10, fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', border:'1px solid rgba(255,255,255,0.2)', background:'linear-gradient(180deg, rgba(60,30,70,0.4), rgba(20,12,30,0.5))', backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)', boxShadow:'0 20px 50px rgba(10,5,20,0.45), inset 0 1px 0 rgba(255,255,255,0.18)' }}>
         <div style={{ fontSize:10, letterSpacing:'0.2em', color:'rgba(255,245,235,0.5)' }}>SOURCE</div>
       {/* SOURCES dev chip - the door; real home is the sampler station */}
       <div onClick={async ()=>{ if (inputOn) { microcosmLiveArm(false); microcosmInputOff(); setInputOn(false); } else { const ok = await microcosmInputOn(); if (ok) microcosmLiveArm(true); setInputOn(ok); } }}
@@ -2750,6 +2806,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           peaksFor={arrPeaksFor} peaksTick={arrPeaksTick}
           onNormalise={arrNormalise}
           onTrackChange={arrTrackChange}
+          onOpenInstrument={(id) => { const b = arrTracks.flatMap(t => t.blocks).find(x => x.id === id); if (b?.instrument) openInstrumentSnapshot(b.instrument); }}
           tracks={arrTracks} playhead={arrPlayhead} zoom={arrZoom} scroll={arrScroll}
           selTrack={arrSelTrack} selBlock={arrSelBlock}
           rec={arrRec} recStartBar={arrRecRef.current?.startBar ?? 0}
@@ -3291,7 +3348,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
               <div>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:9 }}>
                   <span style={{ fontSize:11, letterSpacing:'0.2em', color:'rgba(255,255,255,0.4)' }}>LEVEL</span>
-                  {fieldOrbs.length>1 && <span onClick={()=>{ const id=focused; exitFocus(); setTimeout(()=>removeFieldOrb(id), 60); }} style={{ fontSize:10, letterSpacing:'0.08em', color:'rgba(255,120,90,0.7)', cursor:'pointer' }}>remove orb</span>}
+                  {fieldOrbs.length>1 && <span onClick={()=>{ const id=focused; exitFocus(); setTimeout(()=>removeFieldOrb(id), 60); }} style={{ fontSize:10, letterSpacing:'0.08em', color:'rgba(255,120,90,0.7)', cursor:'pointer' }}>remove engine</span>}
                 </div>
                 <div style={{ display:'flex', justifyContent:'space-between', marginBottom:7 }}>
                   <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>VOLUME</span>
@@ -3304,7 +3361,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                   <div onClick={()=>{ soloSetRef.current[focused]=!soloSetRef.current[focused]; reapplyLevels(); forceOrb(x=>x+1); }}
                     style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11,
                       background: soloSetRef.current[focused]?'rgba(122,245,200,0.3)':'transparent', border:`1px solid ${soloSetRef.current[focused]?'rgba(122,245,200,0.8)':'rgba(122,245,200,0.45)'}`, color: soloSetRef.current[focused]?'#a6fff2':'rgba(122,245,200,0.85)' }}>S</div>
-                  <div onClick={()=>{ const m = microcosmGetEngineMode(focused)==='touch' ? 'drone' : 'touch'; microcosmSetEngineMode(focused, m); forceOrb(x=>x+1); }}
+                  <div onClick={()=>{ const m = microcosmGetEngineMode(focused)==='touch' ? 'drone' : 'touch'; microcosmSetEngineMode(focused, m); setAllMode('mixed'); forceOrb(x=>x+1); }}
                     title="DRONE / TOUCH - armed orbs are silent until played"
                     style={{ width:24, height:24, borderRadius:'50%', cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11,
                       background: microcosmGetEngineMode(focused)==='touch'?'rgba(159,180,200,0.3)':'transparent', border:`1px solid ${microcosmGetEngineMode(focused)==='touch'?'rgba(159,180,200,0.9)':'rgba(159,180,200,0.45)'}`, color: microcosmGetEngineMode(focused)==='touch'?'#cfe0ee':'rgba(159,180,200,0.85)' }}>T</div>
@@ -3490,7 +3547,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                     );
                   })}
                 </div>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,0.25)', marginBottom:14 }}>palette is global today · per-orb later</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,0.25)', marginBottom:14 }}>palette is global today · per-engine later</div>
                 <div>
                   <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
                     <span style={{ fontSize:12.5, letterSpacing:'0.1em', color:'rgba(255,255,255,0.6)' }}>FLAVOUR AMOUNT</span>
@@ -4019,6 +4076,14 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 </div>
                 <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.55)', marginTop:8, letterSpacing:'0.05em' }}>{state==='playing' ? 'Stop' : 'Start'}</div>
               </div>
+              {/* SONG - play the tape under whatever you are building */}
+              <div className="haar-hover" style={{ textAlign:'center', width:56 }}>
+                <div onClick={() => { if (arrPlaying) arrStopNow(); else arrPlay(); }} title="play the song under the instrument"
+                  style={{ width:44, height:44, margin:'0 auto', borderRadius:'50%', cursor:'pointer', border:`1.5px solid ${arrPlaying ? '#fff' : 'rgba(255,255,255,0.4)'}`, background: arrPlaying ? 'rgba(255,255,255,0.22)' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  {arrPlaying ? <div style={{ width:11, height:11, background:'#fff', borderRadius:2 }} /> : <div style={{ width:0, height:0, borderLeft:'11px solid #fff', borderTop:'7px solid transparent', borderBottom:'7px solid transparent', marginLeft:3 }} />}
+                </div>
+                <div className="haar-lbl" style={{ fontSize:11.5, color:'rgba(255,255,255,0.55)', marginTop:8, letterSpacing:'0.05em' }}>Song</div>
+              </div>
               {/* REC - the tape head, in Haar's own console. Click-sized ring; red; pulses armed, fills rolling. The track lives in its label. */}
               <div className="haar-hover" style={{ textAlign:'center', position:'relative', width:56 }}>
                 <div onClick={arrRecord}
@@ -4096,7 +4161,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
               );})}
             </div>
             {/* CONSTELLATION — target an existing one, or create a new one */}
-            <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:18, fontFamily:'monospace', textAlign:'center' }}>{currentSongName ? `CONSTELLATIONS · ${currentSongName.toUpperCase()}` : 'CONSTELLATION'}</div>
+            <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:18, fontFamily:'monospace', textAlign:'center' }}>{currentSongName ? `INSTRUMENTS · ${currentSongName.toUpperCase()}` : 'INSTRUMENT'}</div>
             <div style={{ display:'flex', gap:14, marginBottom:20, justifyContent:'center', flexWrap:'wrap' }}>
               {constellations.filter(c => !(c.id===DEFAULT_CONST_ID && c.orbIds.length===0)).map(c => {
                 const sel = createConstTarget===c.id;
@@ -4132,7 +4197,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
               <input value={createConstName}
                 onChange={e=>{ setCreateConstName(e.target.value); if(e.target.value && createConstTarget!=='__new__') setCreateConstTarget('__new__'); }}
                 onFocus={()=>setCreateConstTarget('__new__')}
-                placeholder="create constellation"
+                placeholder="name this instrument"
                 style={{ padding:'13px 22px', borderRadius:12, border:`0.5px solid ${createConstTarget==='__new__'?'rgba(122,245,200,0.55)':'rgba(255,255,255,0.14)'}`, background: createConstTarget==='__new__'?'rgba(122,245,200,0.05)':'rgba(255,255,255,0.02)', color:'#e0f5ec', fontSize:16, textAlign:'center', outline:'none', fontFamily:'Rajdhani, sans-serif', width:340, transition:'all 0.25s ease', boxShadow: createConstTarget==='__new__'?'0 0 18px 1px rgba(122,245,200,0.2)':'none' }} />
             </div>
             <div style={{ fontSize:13, letterSpacing:'0.34em', color:'rgba(255,255,255,0.4)', marginBottom:24, fontFamily:'monospace', textAlign:'center' }}>{(() => { if (createConstTarget==='__new__') return 'SOURCE'; const c = constellations.find(x=>x.id===createConstTarget); const wav = c && sourceBytesRef.current[c.sourceId]?.name; return `SOURCE · ${c?.name || ''}${wav ? ' · '+wav : ''}`; })()}</div>
@@ -4179,9 +4244,9 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           </div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 56px 44px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
             <div onClick={cancelCreate} style={{ padding:'15px 40px', borderRadius:28, cursor:'pointer', border:'1px solid rgba(255,255,255,0.2)', background:'transparent', color:'rgba(255,255,255,0.55)', fontSize:15, letterSpacing:'0.12em' }}>← BACK</div>
-            <span style={{ fontSize:12, letterSpacing:'0.06em', color:'rgba(255,255,255,0.25)', fontFamily:'monospace' }}>source stays selected · add as many fronts as you like</span>
+            <span style={{ fontSize:12, letterSpacing:'0.06em', color:'rgba(255,255,255,0.25)', fontFamily:'monospace' }}>source stays selected · add as many engines as you like</span>
             {(() => { const n = createList.length || (createEngine?1:0); const on = n>0; return (
-            <div onClick={()=>doCreateOrb()} style={{ padding:'15px 52px', borderRadius:28, cursor: on?'pointer':'default', border:`1px solid ${on?'#7af5c8':'rgba(255,255,255,0.15)'}`, background: on?'rgba(122,245,200,0.14)':'transparent', color: on?'#a6fff2':'rgba(255,255,255,0.3)', fontSize:16, letterSpacing:'0.16em' }}>{n>1?`ADD ${n} ORBS`:'ADD ORB'}</div>
+            <div onClick={()=>doCreateOrb()} style={{ padding:'15px 52px', borderRadius:28, cursor: on?'pointer':'default', border:`1px solid ${on?'#7af5c8':'rgba(255,255,255,0.15)'}`, background: on?'rgba(122,245,200,0.14)':'transparent', color: on?'#a6fff2':'rgba(255,255,255,0.3)', fontSize:16, letterSpacing:'0.16em' }}>{n>1?`ADD ${n} ENGINES`:'ADD ENGINE'}</div>
             ); })()}
           </div>
         </div>
@@ -4396,7 +4461,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
               <div style={{ fontSize:12, letterSpacing:'0.25em', fontFamily:'"Space Mono", monospace', marginTop:6,
                 color: midiDevices && midiDevices.inputs.length ? '#7af5c8' : 'rgba(232,226,214,0.35)' }}>
                 {midiDevices && midiDevices.inputs.length
-                  ? ('● CONNECTED' + (midiDevices.outputs.length ? ' · IN / OUT' : ' · IN ONLY') + ' · LAYER ' + hwLayer.toUpperCase())
+                  ? ('● CONNECTED' + (midiDevices.outputs.length ? ' · IN / OUT' : ' · IN ONLY') + ' · INSTRUMENT ' + hwLayer.toUpperCase())
                   : '○ CONNECT A CONTROLLER'}
               </div>
             </div>
@@ -4428,7 +4493,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 );
               };
               const boundChips = (aid:string, showCol:boolean) => bindingsFor(aid).map(b =>
-                chip(srcLabel(b) + (showCol && typeof b.param==='number' ? ` → COL ${(b.param as number)+1}` : '') + ((b.layer ?? 'base') === 'orb' ? ' · ORB' : '') + '  ×',
+                chip(srcLabel(b) + (showCol && typeof b.param==='number' ? ` → COL ${(b.param as number)+1}` : '') + ((b.layer ?? 'base') === 'orb' ? ' · ENGINE' : '') + '  ×',
                   (b.layer ?? 'base') === 'orb' ? '#d46090' : '#7af5c8',
                   () => { removeBinding(b.id); setBindTick(t=>t+1); }));
               const zone = (label:string, color:string, rows:{name:string; right:React.ReactNode}[]) => (
@@ -4450,7 +4515,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                   { name:'Octave up', right: <>{boundChips('conductor.octaveUp' as any, false)}{learnChip('conductor.octaveUp' as any,'trigger',false)}</> },
                   { name:'Octave down', right: <>{boundChips('conductor.octaveDown' as any, false)}{learnChip('conductor.octaveDown' as any,'trigger',false)}</> },
                 ])}
-                {zone('CONSTELLATIONS', '#7af5c8', [
+                {zone('INSTRUMENTS', '#7af5c8', [
                   { name:'Columns now', right: <span style={{ display:'flex', gap:10 }}>{liveConsts.map((c,i)=>(
                       <span key={c.id} style={{ fontFamily:mono, fontSize:10.5, color:CONST_TINTS[i % CONST_TINTS.length], letterSpacing:'0.08em' }}>{(i+1)+' · '+c.name.toUpperCase()}</span>))}</span> },
                   { name:'Pad matrix', right: <>{boundChips('grid.matrix' as any, false)}{learnChip('grid.matrix' as any,'gridmatrix' as any,false)}</> },
@@ -4458,8 +4523,8 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                   { name:'Level', right: <>{boundChips('const.level', true)}{learnChip('const.level','continuous',true)}</> },
                   { name:'Master level', right: <>{boundChips('master.level', false)}{learnChip('master.level','continuous',false)}</> },
                 ])}
-                {zone('ORB · FOCUSED', '#d46090', [
-                  { name:'Following', right: <span style={{ fontFamily:mono, fontSize:11, color:'#d46090', letterSpacing:'0.08em' }}>{(focused ?? selected) ? (focused ?? selected).toUpperCase() : 'NO ORB SELECTED'}</span> },
+                {zone('ENGINE · FOCUSED', '#d46090', [
+                  { name:'Following', right: <span style={{ fontFamily:mono, fontSize:11, color:'#d46090', letterSpacing:'0.08em' }}>{(focused ?? selected) ? (focused ?? selected).toUpperCase() : 'NO ENGINE SELECTED'}</span> },
                   { name:'Spread X', right: <>{boundChips('orb.x', false)}{learnChip('orb.x','continuous',false)}</> },
                   { name:'Pitch spread Y', right: <>{boundChips('orb.y', false)}{learnChip('orb.y','continuous',false)}</> },
                   { name:'Density', right: <>{boundChips('orb.density', false)}{learnChip('orb.density','continuous',false)}</> },

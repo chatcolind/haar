@@ -13,7 +13,10 @@ export type ArrangeRoomProps = {
   onSetHead: (bar: number) => void; onZoom: (d: number) => void; onScroll: (d: number) => void;
   onNew: () => void; onClose: () => void;
   loopA: number | null; loopBars: number; loopOn: boolean; onSetLoop: (a: number, b: number) => void;
-  onBlockChange: (id: string, patch: { startBar?: number; lenBars?: number }, track?: number) => void;
+  onBlockChange: (id: string, patch: { startBar?: number; lenBars?: number; gain?: number; fadeIn?: number; fadeOut?: number; name?: string }, track?: number) => void;
+  onNormalise?: (id: string) => void;
+  onTrackChange?: (i: number, patch: { mute?: boolean; solo?: boolean; name?: string }) => void;
+  onOpenInstrument?: (id: string) => void;
   onCopyBlock: (id: string, startBar: number, track: number) => void;
   onUndo: () => void;
   onSplitBlock: (id: string, atBar: number) => void;
@@ -130,7 +133,11 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
             return (
               <div key={t.id} onClick={() => p.onSelectTrack(i)} title="record target" style={{ height: ROW_H, boxSizing: 'border-box', padding: '10px 12px', borderBottom: '0.5px solid rgba(255,255,255,0.06)', cursor: 'pointer', background: on ? 'rgba(255,90,90,0.12)' : 'transparent', borderLeft: on ? `2px solid ${RED}` : '2px solid transparent' }}>
                 <div style={{ fontSize: 13, letterSpacing: '0.12em', fontWeight: 500, color: on ? RED : (empty ? INK3 : INK), display: 'flex', alignItems: 'baseline', gap: 8 }}>{i + 1} {t.name.replace(/^TRACK \d+$/, '')}{on ? ' ●' : ''}<span onClick={(e) => { e.stopPropagation(); const n = window.prompt('name this track', t.name && t.name !== String(i + 1) ? t.name : ''); if (n != null) p.onTrackChange?.(i, { name: n.trim() || String(i + 1) }); }} title="tap to name the track" style={{ fontSize: 12, fontWeight: 400, letterSpacing: '0.04em', cursor: 'text', color: t.name && t.name !== String(i + 1) ? INK : INK3, borderBottom: '1px dotted rgba(255,255,255,0.35)' }}>{t.name && t.name !== String(i + 1) ? t.name : 'name'}</span></div>
-                <div style={{ fontSize: 10, color: INK3, marginTop: 6, display: 'flex', justifyContent: 'space-between' }}><span>{t.blocks.length ? t.blocks.length + ' block' + (t.blocks.length === 1 ? '' : 's') : ''}</span>{t.blocks.length > 0 && <span onClick={(e) => { e.stopPropagation(); p.onClearTrack(i); }} title="clear this track" style={{ color: 'rgba(255,90,90,0.6)', cursor: 'pointer', padding: '0 4px' }}>×</span>}</div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
+                <span onClick={() => p.onTrackChange?.(i, { mute: !t.mute })} title="mute" style={{ width: 20, height: 20, borderRadius: 10, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid ' + (t.mute ? '#ffd27a' : 'rgba(255,255,255,0.35)'), background: t.mute ? 'rgba(255,210,122,0.35)' : 'transparent', color: t.mute ? '#ffd27a' : INK2 }}>M</span>
+                <span onClick={() => p.onTrackChange?.(i, { solo: !t.solo })} title="solo" style={{ width: 20, height: 20, borderRadius: 10, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid ' + (t.solo ? '#a6ffd8' : 'rgba(255,255,255,0.35)'), background: t.solo ? 'rgba(166,255,216,0.3)' : 'transparent', color: t.solo ? '#a6ffd8' : INK2 }}>S</span>
+              </div>
+              <div style={{ fontSize: 10, color: INK3, marginTop: 6, display: 'flex', justifyContent: 'space-between' }}><span>{t.blocks.length ? t.blocks.length + ' block' + (t.blocks.length === 1 ? '' : 's') : ''}</span>{t.blocks.length > 0 && <span onClick={(e) => { e.stopPropagation(); p.onClearTrack(i); }} title="clear this track" style={{ color: 'rgba(255,90,90,0.6)', cursor: 'pointer', padding: '0 4px' }}>×</span>}</div>
               </div>
             );
           })}
@@ -171,14 +178,12 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
         <div style={{ borderLeft: '1px solid rgba(255,255,255,0.5)', padding: 16, fontSize: 11, background: 'linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0.3))', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }}>
           {sel ? (
             <>
-              <div style={{ fontSize: 13, letterSpacing: '0.12em', marginBottom: 12 }}>{sel.name}</div>
+              <div title="tap to rename" onClick={() => { const n = window.prompt('name this take', sel.name); if (n && n.trim()) p.onBlockChange(sel.id, { name: n.trim() }); }} style={{ fontSize: 13, letterSpacing: '0.12em', marginBottom: 12, cursor: 'text', borderBottom: '1px dotted rgba(255,255,255,0.4)', display: 'inline-block' }}>{sel.name}</div>
               <div style={lbl}>START</div><div style={{ marginBottom: 8 }}>bar {sel.startBar + 1}</div>
               <div style={lbl}>LENGTH</div><div style={{ marginBottom: 8 }}>{sel.lenBars} bars{sel.srcBars && sel.srcBars !== sel.lenBars ? ' · source ' + sel.srcBars : ''}</div>
               <div style={lbl}>BODY</div><div style={{ marginBottom: 8 }}>{sel.perf ? 'render + performance' : 'audio only'}</div>
               {sel.instrument && <><div style={lbl}>INSTRUMENT</div><div style={{ marginBottom: 14, wordBreak: 'break-all', color: 'rgba(255,255,255,0.7)' }}>{sel.instrument.replace(/\.json$/, '')}</div></>}
-              <div style={verb(false)}>OPEN IN BENCH</div>
-              <div style={verb(false)}>PERFORMANCE</div>
-              <div style={verb(false)}>RE-RENDER</div>
+              {sel.instrument && <div onClick={() => p.onOpenInstrument?.(sel.id)} style={verb(false)} title="reload the instrument that made this take into Build - the current one saves first">OPEN INSTRUMENT</div>}
               <div onClick={() => p.onDeleteBlock(sel.id)} style={verb(true, true)}>DELETE</div>
             </>
           ) : (
