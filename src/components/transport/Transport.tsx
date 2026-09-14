@@ -14,6 +14,7 @@ export type TransportProps = {
   target: string;                  // record-target track label, e.g. "2 bass"
   status: string;
   click?: boolean; loop?: boolean; loopBars?: number;
+  sky?: string; onCycleSky?: () => void;               // Build's weather - tap to change it, however inspired you are
   onToStart: () => void; onStop: () => void; onPlay: () => void; onRec: () => void;
   onCycleTarget: () => void;
   onToggleClick?: () => void; onToggleLoop?: () => void; onCycleLoopBars?: () => void;
@@ -27,8 +28,8 @@ const btn: React.CSSProperties = { width: 30, height: 30, borderRadius: '50%', b
 
 export default function Transport(p: TransportProps) {
   const [pos, setPos] = useState<{ x: number; y: number; docked: boolean }>(() => {
-    try { const j = localStorage.getItem('haar_transport_pos'); if (j) return JSON.parse(j); } catch {}
-    return { x: 24, y: 24, docked: false };
+    try { const j = localStorage.getItem('haar_transport_pos'); if (j) { const q = JSON.parse(j); if (q.docked || (q.x < window.innerWidth - 120 && q.y < window.innerHeight - 60 && q.x >= 0 && q.y >= 0)) return q; } } catch {}
+    return { x: 24, y: 24, docked: false };   // off-screen or unknown: come home
   });
   const [hidden, setHidden] = useState(false);
   const [folded, setFolded] = useState(false);
@@ -74,6 +75,7 @@ export default function Transport(p: TransportProps) {
     <span onClick={p.onToggleClick} style={pill(!!p.click, !p.onToggleClick)}>CLICK</span>
     <span onClick={p.onToggleLoop} style={pill(!!p.loop, !p.onToggleLoop)}>LOOP</span>
     <span onClick={p.onCycleLoopBars} title="loop length in bars - tap to cycle" style={{ ...pill(!!p.loop, !p.onCycleLoopBars), minWidth: 18, textAlign: 'center' }}>{p.loopBars ?? 4}</span>
+    {p.onCycleSky && <span onClick={p.onCycleSky} title="the sky over Build - tap to change the weather" style={{ ...pill(false), color: '#ffd2b0', borderColor: 'rgba(255,210,176,0.45)' }}>SKY · {p.sky}</span>}
   </div>;
   const buttons = <div style={{ ...cell, gap: 10 }}>
     <div onClick={p.onToStart} title="to start" style={btn}>⏮</div>

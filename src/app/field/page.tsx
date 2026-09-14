@@ -361,7 +361,13 @@ export default function FieldPage() {
   const arrPlayheadRef = useRef(0);
   const arrUndoRef = useRef<any[][]>([]);
   const newBlockId = () => 'blk_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);                        // timeline snapshots - every change pushes one
-  const [arrClick, setArrClick] = useState(true);                // CLICK: sounds while the tape records or plays, silent otherwise
+  const [arrClick, setArrClick] = useState(true);
+  // BUILD'S WEATHER: yours to change, any time. Remembered; the instrument will carry it once instrument save learns it.
+  const SKIES = ['plains', 'aurora', 'catatumbo', 'skye'] as const;
+  const SKY_NAMES: Record<string, string> = { plains: 'plains', aurora: 'aurora', catatumbo: 'storm', skye: 'skye' };
+  const [buildSky, setBuildSky] = useState<typeof SKIES[number]>('plains');
+  useEffect(() => { try { const v = localStorage.getItem('haar_build_sky'); if (v && (SKIES as readonly string[]).includes(v)) setBuildSky(v as any); } catch {} }, []);   // after mount, so server and client agree
+  const cycleSky = () => setBuildSky(k => { const n = SKIES[(SKIES.indexOf(k) + 1) % SKIES.length]; try { localStorage.setItem('haar_build_sky', n); } catch {} return n; });                // CLICK: sounds while the tape records or plays, silent otherwise
   const arrTrimRef = useRef(false);                              // STOP NOW pressed: trim the take back to whole bars
   const [arrRec, setArrRec] = useState<'idle'|'armed'|'rolling'>('idle');
   const arrRecRef = useRef<{ startTime: number; startBar: number; trackIdx: number; spb: number } | null>(null);
@@ -1324,7 +1330,10 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     if (py > fh) return;                               // below the field (keyboard/panels)
     for (const sys of fieldRef2.current.systems) {
       const d = Math.hypot(px - sys.cx, py - sys.cy);
-      if (d < dim.w / Math.max(fieldRef2.current.systems.length, 1) * 0.45) { setForwardConst(sys.constId); return; }
+      // THE REEL: the moon is the layer. Only a tap on the moon brings a layer forward; the line belongs to the fronts.
+      const vhTap = typeof window !== 'undefined' ? window.innerHeight : fh;
+      const dMoon = Math.hypot(px - sys.cx, py - (vhTap * HORIZON - 170));
+      if (dMoon < 90) { setForwardConst(sys.constId); return; }
     }
   };
   const fieldHover = (e: React.PointerEvent) => {
@@ -2416,7 +2425,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // ──────────────────────────────────────────────────────────────
   // SPHERES layout: systems + orbits replace the scatter. Static (bars=0) in A1; A2 animates.
   const liveConstCount = constellations.filter(c => c.orbIds.length > 0).length;
-  const cosmosActive = liveConstCount >= 2 && !forwardConst;   // cosmos ONLY with 2+ constellations; one constellation = the original field
+  const cosmosActive = liveConstCount >= 1 && !forwardConst;   // THE REEL: the horizon is the only view - one layer gets its moon too   // cosmos ONLY with 2+ constellations; one constellation = the original field
   useEffect(() => { setActiveContext(cosmosActive ? 'cosmos' : 'interior'); }, [cosmosActive]);
   const field = cosmosActive ? orbitalField(constellations, CONST_TINTS, dim.w, fh) : { systems: [], orbits: [] };
   // A2: ORBIT DRIVER — one rAF loop moves positioning wrappers imperatively (React stays out of the 60fps path).
@@ -2675,7 +2684,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       })()}
       {/* SAMPLER - FINAL SCREEN. One centre axis, one label voice, framed wave, contrast floor. */}
       <canvas ref={rippleCanvasRef} style={{ position: 'fixed', inset: 0, zIndex: 2, pointerEvents: 'none' }} />
-      <Sky scene={arrangeOpen ? 'skye' : samplerOpen ? 'catatumbo' : focusShown ? 'aurora' : 'plains'} zIndex={arrangeOpen ? 899 : -1} />
+      <Sky scene={arrangeOpen ? 'skye' : samplerOpen ? 'catatumbo' : focused ? 'aurora' : buildSky} zIndex={arrangeOpen ? 899 : -1} />
       <Transport
         songName={arrSongName} posBar={arrPlayhead} bpm={bpm} playing={arrPlaying} rec={arrRec} recBar={arrRecBar}
         target={(arrSelTrack + 1) + ' ' + (arrTracks[arrSelTrack]?.name || '').replace(/^TRACK \d+$/, '')}
@@ -2683,6 +2692,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         onToStart={() => { if (!arrPlaying && arrRec === 'idle') setArrPlayhead(0); }}
         onStop={() => { if (arrRec !== 'idle') arrStopNow(); else if (arrPlaying) arrPlay(); }}
         click={arrClick} onToggleClick={() => setArrClick(v => !v)}
+        sky={SKY_NAMES[buildSky]} onCycleSky={cycleSky}
         loop={arrLoop} loopBars={arrLoopBars} onToggleLoop={() => { const v = !arrLoop; setArrLoop(v); arrRecycle(v, arrLoopA, arrLoopBars); }} onCycleLoopBars={() => { const n = arrLoopBars >= 16 ? 1 : arrLoopBars * 2; setArrLoopBars(n); arrRecycle(arrLoop, arrLoopA, n); }}
         onPlay={() => { if (!arrPlaying) arrPlay(); }}
         onRec={arrRecord}
