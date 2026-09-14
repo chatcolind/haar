@@ -369,7 +369,10 @@ export default function FieldPage() {
   const SKY_NAMES: Record<string, string> = { plains: 'plains', aurora: 'aurora', catatumbo: 'storm', skye: 'skye' };
   const [buildSky, setBuildSky] = useState<typeof SKIES[number]>('plains');
   useEffect(() => { try { const v = localStorage.getItem('haar_build_sky'); if (v && (SKIES as readonly string[]).includes(v)) setBuildSky(v as any); } catch {} }, []);   // after mount, so server and client agree
-  const cycleSky = () => setBuildSky(k => { const n = SKIES[(SKIES.indexOf(k) + 1) % SKIES.length]; try { localStorage.setItem('haar_build_sky', n); } catch {} return n; });                // CLICK: sounds while the tape records or plays, silent otherwise
+  const cycleSky = () => setBuildSky(k => { const n = SKIES[(SKIES.indexOf(k) + 1) % SKIES.length]; try { localStorage.setItem('haar_build_sky', n); } catch {} return n; });
+  const [arrSky, setArrSky] = useState<typeof SKIES[number]>('skye');   // Arrange's own weather - Skye by the reel, yours to change
+  useEffect(() => { try { const v = localStorage.getItem('haar_arr_sky'); if (v && (SKIES as readonly string[]).includes(v)) setArrSky(v as any); } catch {} }, []);
+  const cycleArrSky = () => setArrSky(k => { const n = SKIES[(SKIES.indexOf(k) + 1) % SKIES.length]; try { localStorage.setItem('haar_arr_sky', n); } catch {} return n; });                // CLICK: sounds while the tape records or plays, silent otherwise
   const arrTrimRef = useRef(false);                              // STOP NOW pressed: trim the take back to whole bars
   const [arrRec, setArrRec] = useState<'idle'|'armed'|'rolling'>('idle');
   const arrRecRef = useRef<{ startTime: number; startBar: number; trackIdx: number; spb: number } | null>(null);
@@ -2686,7 +2689,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       })()}
       {/* SAMPLER - FINAL SCREEN. One centre axis, one label voice, framed wave, contrast floor. */}
       <canvas ref={rippleCanvasRef} style={{ position: 'fixed', inset: 0, zIndex: 2, pointerEvents: 'none' }} />
-      <Sky scene={arrangeOpen ? 'skye' : samplerOpen ? 'catatumbo' : focused ? 'aurora' : buildSky} zIndex={arrangeOpen ? 899 : -1} />
+      <Sky scene={arrangeOpen ? arrSky : samplerOpen ? 'catatumbo' : focused ? 'aurora' : buildSky} zIndex={arrangeOpen ? 899 : samplerOpen ? 499 : -1} />
       {arrangeOpen && <Transport
         songName={arrSongName} posBar={arrPlayhead} bpm={bpm} playing={arrPlaying} rec={arrRec} recBar={arrRecBar}
         target={(arrSelTrack + 1) + ' ' + (arrTracks[arrSelTrack]?.name || '').replace(/^TRACK \d+$/, '')}
@@ -2694,7 +2697,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         onToStart={() => { if (!arrPlaying && arrRec === 'idle') setArrPlayhead(0); }}
         onStop={() => { if (arrRec !== 'idle') arrStopNow(); else if (arrPlaying) arrPlay(); }}
         click={arrClick} onToggleClick={() => setArrClick(v => !v)}
-        sky={SKY_NAMES[buildSky]} onCycleSky={cycleSky}
+        sky={SKY_NAMES[arrSky]} onCycleSky={cycleArrSky}
         loop={arrLoop} loopBars={arrLoopBars} onToggleLoop={() => { const v = !arrLoop; setArrLoop(v); arrRecycle(v, arrLoopA, arrLoopBars); }} onCycleLoopBars={() => { const n = arrLoopBars >= 16 ? 1 : arrLoopBars * 2; setArrLoopBars(n); arrRecycle(arrLoop, arrLoopA, n); }}
         onPlay={() => { if (!arrPlaying) arrPlay(); }}
         onRec={arrRecord}
@@ -2746,7 +2749,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         const W = (t: string, col?: string) => <div style={{ fontSize:10, letterSpacing:'0.3em', color: col || 'rgba(255,255,255,0.5)', marginTop:7, textAlign:'center', fontFamily:'Rajdhani, sans-serif' }}>{t}</div>;
         const meterAlive = recState !== 'idle';
         return (
-          <div style={{ position:'absolute', inset:0, zIndex:500, background:'#04050a', display:'flex', flexDirection:'column', alignItems:'center', fontFamily:'Rajdhani, sans-serif', color:'rgba(255,255,255,0.85)', boxSizing:'border-box', padding:'18px 0 12px' }}>
+          <div style={{ position:'absolute', inset:0, zIndex:500, background:'linear-gradient(180deg, rgba(10,8,22,0.42), rgba(6,5,14,0.62))', backdropFilter:'blur(14px)', WebkitBackdropFilter:'blur(14px)', display:'flex', flexDirection:'column', alignItems:'center', fontFamily:'Rajdhani, sans-serif', color:'rgba(255,255,255,0.85)', boxSizing:'border-box', padding:'18px 0 12px' }}>
             <div style={{ width:'min(1400px, 90%)', display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
               {/* HEADER */}
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', height:34, flexShrink:0 }}>
@@ -4019,7 +4022,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       </div>
       {/* ORB CREATION — full-screen source x engine */}
       {createOpen && (
-        <div style={{ position:'fixed', inset:0, zIndex:300, background:'radial-gradient(ellipse at 50% 32%, #0c1018 0%, #06070d 60%, #030409 100%)', display:'flex', flexDirection:'column', fontFamily:'Rajdhani, sans-serif' }}>
+        <div style={{ position:'fixed', inset:0, zIndex:300, background:'linear-gradient(180deg, rgba(14,8,22,0.55), rgba(8,5,14,0.72))', backdropFilter:'blur(18px)', WebkitBackdropFilter:'blur(18px)', display:'flex', flexDirection:'column', fontFamily:'Rajdhani, sans-serif' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'34px 56px 0' }}>
             <span style={{ fontSize:15, letterSpacing:'0.4em', color:'#d8a6ff', fontFamily:'monospace', fontWeight:600 }}>H A A R</span>
             <div style={{ display:'flex', alignItems:'center', gap:16 }}>
@@ -4147,7 +4150,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           </div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 56px 44px', maxWidth:1100, width:'100%', margin:'0 auto', boxSizing:'border-box' }}>
             <div onClick={cancelCreate} style={{ padding:'15px 40px', borderRadius:28, cursor:'pointer', border:'1px solid rgba(255,255,255,0.2)', background:'transparent', color:'rgba(255,255,255,0.55)', fontSize:15, letterSpacing:'0.12em' }}>← BACK</div>
-            <span style={{ fontSize:12, letterSpacing:'0.06em', color:'rgba(255,255,255,0.25)', fontFamily:'monospace' }}>source stays selected · add as many as you like</span>
+            <span style={{ fontSize:12, letterSpacing:'0.06em', color:'rgba(255,255,255,0.25)', fontFamily:'monospace' }}>source stays selected · add as many fronts as you like</span>
             {(() => { const n = createList.length || (createEngine?1:0); const on = n>0; return (
             <div onClick={()=>doCreateOrb()} style={{ padding:'15px 52px', borderRadius:28, cursor: on?'pointer':'default', border:`1px solid ${on?'#7af5c8':'rgba(255,255,255,0.15)'}`, background: on?'rgba(122,245,200,0.14)':'transparent', color: on?'#a6fff2':'rgba(255,255,255,0.3)', fontSize:16, letterSpacing:'0.16em' }}>{n>1?`ADD ${n} ORBS`:'ADD ORB'}</div>
             ); })()}
@@ -4349,7 +4352,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
 
       {/* CONTROL — full-screen hardware mapping page (instrument-grade) */}
       {controlOpen && (
-        <div style={{ position:'fixed', inset:0, zIndex:310, background:'radial-gradient(ellipse at 50% 32%, #0c1018 0%, #06070d 60%, #030409 100%)', display:'flex', flexDirection:'column', fontFamily:'Rajdhani, sans-serif' }}>
+        <div style={{ position:'fixed', inset:0, zIndex:310, background:'linear-gradient(180deg, rgba(14,8,22,0.55), rgba(8,5,14,0.72))', backdropFilter:'blur(18px)', WebkitBackdropFilter:'blur(18px)', display:'flex', flexDirection:'column', fontFamily:'Rajdhani, sans-serif' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'34px 56px 0' }}>
             <span style={{ fontSize:15, letterSpacing:'0.4em', color:'#d8a6ff', fontFamily:'monospace', fontWeight:600 }}>H A A R</span>
             <div onClick={()=>{ cancelLearn(); setLearning(null); setControlOpen(false); }} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.25)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)', fontSize:18 }}>×</div>

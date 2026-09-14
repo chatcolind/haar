@@ -21,7 +21,8 @@ export type ArrangeRoomProps = {
 };
 
 const FOG = '#9fb4c8', RED = '#ff5a5a', HEAD_W = 120, ROW_H = 68, BARS = 64;
-const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: '0.2em', color: 'rgba(255,255,255,0.4)' };
+const INK = '#2a1433', INK2 = 'rgba(42,20,51,0.72)', INK3 = 'rgba(42,20,51,0.42)';   // dark ink on the Skye sky
+const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: '0.2em', color: INK3 };
 const verb = (on = true, danger = false): React.CSSProperties => ({ border: `0.5px solid ${danger ? 'rgba(255,90,90,0.6)' : 'rgba(255,255,255,0.3)'}`, borderRadius: 6, padding: '5px 9px', fontSize: 11, letterSpacing: '0.08em', color: danger ? RED : (on ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.25)'), cursor: on ? 'pointer' : 'default', marginBottom: 6 });
 
 export default function ArrangeRoom(p: ArrangeRoomProps) {
@@ -112,45 +113,45 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
   const band = (top: number, bottom: number) => loopBand ? <div style={{ position: 'absolute', left: x(loopBand.a), width: (loopBand.b - loopBand.a) * p.zoom, top, bottom, background: loopBand.live ? 'rgba(122,245,200,0.09)' : 'rgba(122,245,200,0.035)', borderLeft: '2px solid rgba(122,245,200,0.7)', borderRight: '2px solid rgba(122,245,200,0.7)', pointerEvents: 'none' }} /> : null;
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'transparent', display: 'flex', flexDirection: 'column', fontFamily: 'Space Mono, monospace', color: '#fff' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 22, padding: '14px 28px', borderBottom: '0.5px solid rgba(255,255,255,0.1)' }}>
-        <span style={{ fontSize: 15, letterSpacing: '0.34em', color: FOG }}>ARRANGE</span>
-        <span onClick={p.onNew} style={{ ...verb(), marginBottom: 0 }}>NEW SONG</span>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'transparent', display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, "Helvetica Neue", Inter, sans-serif', color: INK }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 22, padding: '14px 28px', borderBottom: '1px solid rgba(255,255,255,0.5)', background: 'linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0.3))', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }}>
+        <span style={{ fontSize: 15, letterSpacing: '0.34em', color: INK2 }}>ARRANGE</span>
+        <span onClick={p.onNew} style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(42,20,51,0.35)', color: INK }}>NEW SONG</span>
         <div style={{ flex: 1 }} />
         <div onClick={p.onClose} title="back to the instrument" style={{ width: 36, height: 36, borderRadius: '50%', border: '0.5px solid rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 15 }}>×</div>
       </div>
 
       <div style={{ flex: 1, display: 'grid', gridTemplateColumns: `${HEAD_W}px minmax(0,1fr) 220px`, minHeight: 0 }}>
-        <div style={{ borderRight: '0.5px solid rgba(255,255,255,0.1)', overflowY: 'auto' }}>
+        <div style={{ borderRight: '1px solid rgba(255,255,255,0.5)', overflowY: 'auto', background: 'linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0.3))', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }}>
           <div style={{ height: 26, borderBottom: '0.5px solid rgba(255,255,255,0.08)' }} />
           {p.tracks.map((t, i) => {
             const on = i === p.selTrack, empty = t.blocks.length === 0;
             return (
               <div key={t.id} onClick={() => p.onSelectTrack(i)} title="record target" style={{ height: ROW_H, boxSizing: 'border-box', padding: '10px 12px', borderBottom: '0.5px solid rgba(255,255,255,0.06)', cursor: 'pointer', background: on ? 'rgba(255,90,90,0.12)' : 'transparent', borderLeft: on ? `2px solid ${RED}` : '2px solid transparent' }}>
-                <div style={{ fontSize: 12, letterSpacing: '0.12em', color: on ? RED : (empty ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.8)') }}>{i + 1} {t.name.replace(/^TRACK \d+$/, '')}{on ? ' ●' : ''}</div>
-                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 6, display: 'flex', justifyContent: 'space-between' }}><span>{t.blocks.length ? t.blocks.length + ' block' + (t.blocks.length === 1 ? '' : 's') : ''}</span>{t.blocks.length > 0 && <span onClick={(e) => { e.stopPropagation(); p.onClearTrack(i); }} title="clear this track" style={{ color: 'rgba(255,90,90,0.6)', cursor: 'pointer', padding: '0 4px' }}>×</span>}</div>
+                <div style={{ fontSize: 13, letterSpacing: '0.12em', fontWeight: 500, color: on ? RED : (empty ? INK3 : INK) }}>{i + 1} {t.name.replace(/^TRACK \d+$/, '')}{on ? ' ●' : ''}</div>
+                <div style={{ fontSize: 10, color: INK3, marginTop: 6, display: 'flex', justifyContent: 'space-between' }}><span>{t.blocks.length ? t.blocks.length + ' block' + (t.blocks.length === 1 ? '' : 's') : ''}</span>{t.blocks.length > 0 && <span onClick={(e) => { e.stopPropagation(); p.onClearTrack(i); }} title="clear this track" style={{ color: 'rgba(255,90,90,0.6)', cursor: 'pointer', padding: '0 4px' }}>×</span>}</div>
               </div>
             );
           })}
         </div>
 
-        <div style={{ position: 'relative', overflow: 'hidden' }} onClick={() => p.onSelectBlock(null)}>
+        <div style={{ position: 'relative', overflow: 'hidden', background: 'rgba(255,255,255,0.16)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }} onClick={() => p.onSelectBlock(null)}>
           <div ref={rulerRef} onPointerDown={onRulerDown} onPointerMove={onRulerMove} onPointerUp={onRulerUp} onClick={(e) => e.stopPropagation()} title="click: place the head · drag: set the loop range" style={{ height: 26, borderBottom: '0.5px solid rgba(255,255,255,0.08)', position: 'relative', cursor: 'col-resize', userSelect: 'none' }}>
             {band(0, 0)}
             {Array.from({ length: BARS }, (_, i) => i).map(bn => (
-              <span key={bn} style={{ position: 'absolute', left: x(bn), top: 6, fontSize: 9, padding: '0 4px', pointerEvents: 'none', color: bn % 4 === 0 ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.18)' }}>{bn % 4 === 0 ? bn + 1 : '·'}</span>
+              <span key={bn} style={{ position: 'absolute', left: x(bn), top: 6, fontSize: 9, padding: '0 4px', pointerEvents: 'none', color: bn % 4 === 0 ? INK2 : INK3 }}>{bn % 4 === 0 ? bn + 1 : '·'}</span>
             ))}
           </div>
           {p.tracks.map((t, ti) => (
-            <div key={t.id} style={{ height: ROW_H, boxSizing: 'border-box', borderBottom: '0.5px solid rgba(255,255,255,0.06)', position: 'relative', backgroundColor: ti === p.selTrack ? 'rgba(255,90,90,0.03)' : 'transparent', backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.09) 0 1px, transparent 1px ${p.zoom * 4}px), repeating-linear-gradient(to right, rgba(255,255,255,0.035) 0 1px, transparent 1px ${p.zoom}px)`, backgroundPositionX: `${-p.scroll * p.zoom}px` }}>
+            <div key={t.id} style={{ height: ROW_H, boxSizing: 'border-box', borderBottom: '0.5px solid rgba(255,255,255,0.06)', position: 'relative', backgroundColor: ti === p.selTrack ? 'rgba(255,90,90,0.03)' : 'transparent', backgroundImage: `repeating-linear-gradient(to right, rgba(42,20,51,0.22) 0 1px, transparent 1px ${p.zoom * 4}px), repeating-linear-gradient(to right, rgba(42,20,51,0.08) 0 1px, transparent 1px ${p.zoom}px)`, backgroundPositionX: `${-p.scroll * p.zoom}px` }}>
               {t.blocks.map(b => {
                 const on = b.id === p.selBlock, performed = !!b.perf, rep = b.srcBars && b.lenBars > b.srcBars ? Math.round(b.lenBars / b.srcBars) : 0;
                 return (
                   <div key={b.id} onPointerDown={(e) => onTileDown(e, b, ti)} onPointerMove={onTileMove} onPointerUp={onTileUp} title={b.name + ' · drag to move · right edge to extend · alt-drag to copy'}
                     style={{ position: 'absolute', left: x(b.startBar), width: b.lenBars * p.zoom - 2, top: 8, height: ROW_H - 16, boxSizing: 'border-box', borderRadius: 6, cursor: tool === 'cut' ? 'col-resize' : tool === 'erase' ? 'not-allowed' : 'grab', overflow: 'hidden', padding: '6px 8px', fontSize: 10, letterSpacing: '0.08em', userSelect: 'none', touchAction: 'none',
                       opacity: gest && gest.id === b.id && gest.moved && gest.mode === 'move' && !gest.copy ? 0.35 : 1,
-                      background: performed ? (on ? 'rgba(159,180,200,0.42)' : 'rgba(159,180,200,0.18)') : (on ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.1)'),
-                      border: on ? `1.5px solid ${FOG}` : `0.5px solid ${performed ? 'rgba(159,180,200,0.6)' : 'rgba(255,255,255,0.3)'}`, color: '#fff' }}>
+                      background: performed ? (on ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.32)') : (on ? 'rgba(42,20,51,0.35)' : 'rgba(42,20,51,0.18)'),
+                      border: on ? `1.5px solid ${INK}` : `1px solid ${performed ? 'rgba(255,255,255,0.7)' : 'rgba(42,20,51,0.35)'}`, color: INK, boxShadow: '0 10px 24px -10px rgba(42,20,51,0.5)' }}>
                     {b.name}{rep ? <span style={{ color: 'rgba(255,255,255,0.5)' }}> ×{rep}</span> : null}
                     <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 10, cursor: 'col-resize', borderRight: '2px solid rgba(255,255,255,0.18)' }} />
                   </div>
@@ -166,7 +167,7 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
           <div style={{ position: 'absolute', left: x(p.playhead), top: 0, bottom: 0, width: 1.5, background: p.rec === 'rolling' ? RED : FOG, pointerEvents: 'none' }} />
         </div>
 
-        <div style={{ borderLeft: '0.5px solid rgba(255,255,255,0.1)', padding: 16, fontSize: 11 }}>
+        <div style={{ borderLeft: '1px solid rgba(255,255,255,0.5)', padding: 16, fontSize: 11, background: 'linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0.3))', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }}>
           {sel ? (
             <>
               <div style={{ fontSize: 13, letterSpacing: '0.12em', marginBottom: 12 }}>{sel.name}</div>
@@ -180,12 +181,12 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
               <div onClick={() => p.onDeleteBlock(sel.id)} style={verb(true, true)}>DELETE</div>
             </>
           ) : (
-            <div style={{ color: 'rgba(255,255,255,0.3)', lineHeight: 1.8 }}>tap a track to make it the record target<br />tap a block to see it here<br />tap the ruler to place the head</div>
+            <div style={{ color: INK3, lineHeight: 1.8 }}>tap a track to make it the record target<br />tap a block to see it here<br />tap the ruler to place the head</div>
           )}
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 22, padding: '10px 28px', borderTop: '0.5px solid rgba(255,255,255,0.1)', fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 22, padding: '10px 28px', borderTop: '1px solid rgba(255,255,255,0.5)', fontSize: 11, color: INK2, background: 'linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0.3))', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }}>
         <span><span onClick={() => p.onZoom(-4)} style={{ cursor: 'pointer', padding: '0 8px' }}>−</span>zoom<span onClick={() => p.onZoom(4)} style={{ cursor: 'pointer', padding: '0 8px' }}>+</span></span>
         <span><span onClick={() => p.onScroll(-4)} style={{ cursor: 'pointer', padding: '0 8px' }}>◀</span>scroll<span onClick={() => p.onScroll(4)} style={{ cursor: 'pointer', padding: '0 8px' }}>▶</span></span>
         <span>snap: bar</span>

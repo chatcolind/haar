@@ -23,9 +23,9 @@ export type TransportProps = {
 };
 
 const FOG = '#9fb4c8', GREEN = '#7af5c8', RED = '#ff5a5a';
-const cell: React.CSSProperties = { padding: '7px 12px', borderRight: '0.5px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' };
-const pill = (on: boolean, dim = false): React.CSSProperties => ({ border: `0.5px solid ${on ? GREEN : 'rgba(255,255,255,0.3)'}`, color: on ? GREEN : (dim ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.6)'), borderRadius: 6, padding: '2px 8px', fontSize: 11, letterSpacing: '0.08em', cursor: dim ? 'default' : 'pointer' });
-const btn: React.CSSProperties = { width: 30, height: 30, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, color: 'rgba(255,255,255,0.8)', userSelect: 'none' };
+const cell: React.CSSProperties = { padding: '8px 14px', borderRight: '1px solid rgba(42,20,51,0.12)', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' };
+const pill = (on: boolean, dim = false): React.CSSProperties => ({ border: `1px solid ${on ? '#2a1433' : 'rgba(42,20,51,0.28)'}`, background: on ? '#2a1433' : 'transparent', color: on ? '#fff' : (dim ? 'rgba(42,20,51,0.35)' : 'rgba(42,20,51,0.75)'), borderRadius: 14, padding: '4px 11px', fontSize: 11, letterSpacing: '0.1em', cursor: dim ? 'default' : 'pointer' });
+const btn: React.CSSProperties = { width: 34, height: 34, borderRadius: '50%', border: '1px solid rgba(42,20,51,0.3)', background: 'rgba(255,255,255,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, color: '#2a1433', userSelect: 'none' };
 
 export default function Transport(p: TransportProps) {
   const [pos, setPos] = useState<{ x: number; y: number; docked: boolean }>(() => {
@@ -68,35 +68,35 @@ export default function Transport(p: TransportProps) {
 
   const grip = <div onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp} title="drag - drop at the bottom edge to dock" style={{ ...cell, padding: '7px 8px', cursor: 'grab', color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>⋮⋮</div>;
   const song = <div style={cell} onDoubleClick={() => { setNameDraft(p.songName); setEditing(true); }} title="double-click to rename">
-    <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, letterSpacing: '0.2em' }}>SONG</span>
+    <span style={{ color: 'rgba(42,20,51,0.5)', fontSize: 10, letterSpacing: '0.2em' }}>SONG</span>
     {editing ? <input autoFocus value={nameDraft} onChange={e => setNameDraft(e.target.value)} onBlur={() => { setEditing(false); if (nameDraft.trim() && p.onRename) p.onRename(nameDraft.trim()); }} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditing(false); }} style={{ background: 'transparent', border: 'none', borderBottom: `1px solid ${FOG}`, color: '#fff', fontFamily: 'inherit', fontSize: 12, width: 110, outline: 'none' }} />
-      : <span style={{ color: '#fff' }}>{p.songName}</span>}
+      : <span style={{ color: '#2a1433', fontWeight: 500 }}>{p.songName}</span>}
   </div>;
-  const position = <div style={{ ...cell, fontSize: 19, color: p.rec === 'rolling' ? RED : '#fff', minWidth: 74, justifyContent: 'center' }}>{posText}</div>;
-  const tempo = <div style={cell}><span style={{ color: GREEN }}>{p.bpm}</span><span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, letterSpacing: '0.2em' }}>BPM</span></div>;
+  const position = <div style={{ ...cell, fontSize: 19, color: p.rec === 'rolling' ? RED : '#2a1433', minWidth: 84, justifyContent: 'center' }}>{posText}</div>;
+  const tempo = <div style={cell}><span style={{ color: '#2a1433', fontSize: 14 }}>{p.bpm}</span><span style={{ color: 'rgba(42,20,51,0.5)', fontSize: 10, letterSpacing: '0.2em' }}>BPM</span></div>;
   const toggles = <div style={cell}>
     <span onClick={p.onToggleClick} style={pill(!!p.click, !p.onToggleClick)}>CLICK</span>
     <span onClick={p.onToggleLoop} style={pill(!!p.loop, !p.onToggleLoop)}>LOOP</span>
     <span onClick={p.onCycleLoopBars} title="loop length in bars - tap to cycle" style={{ ...pill(!!p.loop, !p.onCycleLoopBars), minWidth: 18, textAlign: 'center' }}>{p.loopBars ?? 4}</span>
-    {p.onCycleSky && <span onClick={p.onCycleSky} title="the sky over Build - tap to change the weather" style={{ ...pill(false), color: '#ffd2b0', borderColor: 'rgba(255,210,176,0.45)' }}>SKY · {p.sky}</span>}
+    {p.onCycleSky && <span onClick={p.onCycleSky} title="the sky over Build - tap to change the weather" style={{ ...pill(false), }}>sky · {p.sky}</span>}
   </div>;
   const buttons = <div style={{ ...cell, gap: 10 }}>
     <div onClick={p.onToStart} title="to start" style={btn}>⏮</div>
     <div onClick={p.onStop} title="stop" style={btn}>■</div>
-    <div onClick={p.onPlay} title="play" style={{ ...btn, borderColor: p.playing ? GREEN : 'rgba(122,245,200,0.6)', color: GREEN, background: p.playing ? 'rgba(122,245,200,0.18)' : 'transparent' }}>▶</div>
+    <div onClick={p.onPlay} title="play" style={{ ...btn, background: p.playing ? '#2a1433' : 'rgba(255,255,255,0.35)', color: p.playing ? '#fff' : '#2a1433', borderColor: '#2a1433' }}>▶</div>
     <div onClick={p.onRec} title="REC: arms on the next bar. REC again: stops on the next bar." style={{ ...btn, border: `2px solid ${p.rec === 'idle' ? 'rgba(255,90,90,0.7)' : RED}`, background: recBg, color: RED, animation: p.rec === 'armed' ? 'haarPulse 0.7s ease-in-out infinite' : 'none', fontSize: 11, fontWeight: 700 }}>{p.rec === 'rolling' ? p.recBar : '●'}</div>
   </div>;
-  const target = <div onClick={p.onCycleTarget} title="record target - click to cycle tracks" style={{ ...cell, cursor: 'pointer' }}><span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, letterSpacing: '0.2em' }}>TO</span><span style={{ color: p.rec === 'idle' ? '#fff' : RED }}>{p.target}</span></div>;
-  const status = <div style={{ ...cell, borderRight: 'none', color: p.rec === 'idle' ? 'rgba(255,255,255,0.45)' : RED, fontSize: 11, minWidth: 150 }}>{p.status}</div>;
+  const target = <div onClick={p.onCycleTarget} title="record target - click to cycle tracks" style={{ ...cell, cursor: 'pointer' }}><span style={{ color: 'rgba(42,20,51,0.5)', fontSize: 10, letterSpacing: '0.2em' }}>TO</span><span style={{ color: p.rec === 'idle' ? '#2a1433' : RED, fontWeight: 500 }}>{p.target}</span></div>;
+  const status = <div style={{ ...cell, borderRight: 'none', color: p.rec === 'idle' ? 'rgba(42,20,51,0.55)' : RED, fontSize: 11, minWidth: 150 }}>{p.status}</div>;
 
   const frame: React.CSSProperties = pos.docked
-    ? { position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1000, justifyContent: 'center', borderRadius: 0, borderTop: '0.5px solid rgba(159,180,200,0.35)' }
-    : { position: 'fixed', left: pos.x, top: pos.y, zIndex: 1000, borderRadius: 10, border: '0.5px solid rgba(159,180,200,0.35)' };
+    ? { position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1000, justifyContent: 'center', borderRadius: 0, borderTop: '1px solid rgba(255,255,255,0.6)' }
+    : { position: 'fixed', left: pos.x, top: pos.y, zIndex: 1000, borderRadius: 30, border: '1px solid rgba(255,255,255,0.6)' };
 
   const capsule = p.compact && !open;
   return (
     <div onPointerEnter={() => { window.clearTimeout(closeT.current); setOpen(true); }} onPointerLeave={() => { closeT.current = window.setTimeout(() => setOpen(false), 900); }}
-      style={{ ...frame, display: 'flex', flexDirection: 'column', background: 'rgba(7,8,12,0.94)', backdropFilter: 'blur(10px)', fontFamily: 'Space Mono, monospace', fontSize: 12, color: '#fff', boxShadow: '0 8px 28px rgba(0,0,0,0.5)' }}>
+      style={{ ...frame, display: 'flex', flexDirection: 'column', background: 'linear-gradient(180deg, rgba(255,255,255,0.46), rgba(255,255,255,0.26))', backdropFilter: 'blur(22px) saturate(1.2)', WebkitBackdropFilter: 'blur(22px) saturate(1.2)', fontFamily: '-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize: 12, color: '#2a1433', boxShadow: '0 20px 50px rgba(42,20,51,0.25), inset 0 1px 0 rgba(255,255,255,0.6)' }}>
       {capsule ? (
         <div style={{ display: 'flex', alignItems: 'center' }}>{grip}{position}{buttons}{target}</div>
       ) : folded ? (
