@@ -450,11 +450,14 @@ export class Microcosm {
   // destination. They never touch the worklet or the recorder tap - a take can never hear the tape.
   private _tape: { src: AudioBufferSourceNode; g: GainNode }[] = [];
   async tapeDecode(bytes: ArrayBuffer): Promise<AudioBuffer> { return await this.ctx.decodeAudioData(bytes.slice(0)); }
-  tapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0): void {
+  tapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0, dur?: number, loopSec?: number): void {
     const src = this.ctx.createBufferSource(); src.buffer = buf;
+    if (loopSec && loopSec > 0) { src.loop = true; src.loopStart = 0; src.loopEnd = loopSec; }   // a repeated block
     const g = this.ctx.createGain(); g.gain.value = gain;
     src.connect(g); g.connect(this.ctx.destination);
-    src.start(Math.max(when, this.ctx.currentTime), offset);
+    const at = Math.max(when, this.ctx.currentTime);
+    src.start(at, offset);
+    if (dur != null && dur > 0) src.stop(at + dur);                                             // cut at the region edge
     const rec = { src, g }; this._tape.push(rec);
     src.onended = () => { const i = this._tape.indexOf(rec); if (i >= 0) this._tape.splice(i, 1); try { g.disconnect(); } catch {} };
   }

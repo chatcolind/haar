@@ -28,6 +28,8 @@ import {
   samplerExportWav, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
 } from '../../audio/engine';
 import { perfEmit, perfClock, perfArm, perfDisarm } from '../../perf/bus';
+import Transport from '../../components/transport/Transport';
+import ArrangeRoom from '../../components/arrange/ArrangeRoom';
 import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs, writeBlock, writeSongFile, readBlock, readSongFile, writeInPackage } from '../../lib/haarHome';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
@@ -324,9 +326,17 @@ export default function FieldPage() {
   const [arrSelTrack, setArrSelTrack] = useState(0);        // which track the take lands on
   const [arrRecBars, setArrRecBars] = useState(4);          // take length - bar-true is the default, free is the override (later)
   const [arrStatus, setArrStatus] = useState('');           // transport readout
-  const [arrSongName] = useState('untitled');               // the song package on disk - Haar/Songs/untitled/
+  const [arrSongName, setArrSongName] = useState('untitled');
+  const [arrSelBlock, setArrSelBlock] = useState<string | null>(null);               // the song package on disk - Haar/Songs/untitled/
   const arrTracksRef = useRef(arrTracks); arrTracksRef.current = arrTracks;   // live mirror for the take callback
   const arrRecBusyRef = useRef(false);
+  const [arrPlaying, setArrPlaying] = useState(false);
+  const [arrLoop, setArrLoop] = useState(false);                 // LOOP: a take stops itself after arrLoopBars
+  const [arrLoopBars, setArrLoopBars] = useState(4);
+  const [arrLoopA, setArrLoopA] = useState<number | null>(null);   // the cycle range, bars [A, B) - set by dragging the ruler
+  const arrLoopTimerRef = useRef(0);
+  const [arrClick, setArrClick] = useState(true);                // CLICK: sounds while the tape records or plays, silent otherwise
+  const arrTrimRef = useRef(false);                              // STOP NOW pressed: trim the take back to whole bars
   const [arrRec, setArrRec] = useState<'idle'|'armed'|'rolling'>('idle');
   const arrRecRef = useRef<{ startTime: number; startBar: number; trackIdx: number; spb: number } | null>(null);
   const [arrRecBar, setArrRecBar] = useState(0);                         // bar count while rolling
@@ -336,13 +346,12 @@ export default function FieldPage() {
   }, []);
   useEffect(() => {
     if (arrRec !== 'rolling') { setArrRecBar(0); return; }
-    const t = window.setInterval(() => { const r = arrRecRef.current; if (r) setArrRecBar(Math.floor((microcosmAudioTime() - r.startTime) / r.spb) + 1); }, 120);
+    const t = window.setInterval(() => { const r = arrRecRef.current; if (!r) return; const el = (microcosmAudioTime() - r.startTime) / r.spb; setArrRecBar(Math.floor(el) + 1); if (!arrPlaying) setArrPlayhead(r.startBar + Math.max(0, el)); }, 120);
     return () => window.clearInterval(t);
-  }, [arrRec]);
+  }, [arrRec, arrPlaying]);
   const hash8 = (t: string) => { let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(16).padStart(8, '0'); };
   const b64ToBytes = (b64: string) => { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; };
   useEffect(() => { perfClock(() => microcosmAudioTime()); }, []);   // the bus stamps on the audio clock
-  const [arrPlaying, setArrPlaying] = useState(false);
   const arrBufRef = useRef<Record<string, AudioBuffer>>({});   // decoded blocks, by id
   const arrRafRef = useRef(0);
   const arrPlayFromRef = useRef(0);                              // where play began - stop returns the head here
@@ -352,7 +361,7 @@ export default function FieldPage() {
       const sg = await readSongFile(arrSongName);
       if (sg && sg.tracks && sg.tracks.length) { setArrTracks(sg.tracks as any); setArrStatus('song loaded · ' + sg.tracks.reduce((n, t) => n + t.blocks.length, 0) + ' blocks'); }
     })();
-  }, [arrangeOpen]); // bar position while the tape runs
+  }, [arrangeOpen, arrSongName]); // bar position while the tape runs
   const [samplerDevs, setSamplerDevs] = useState<{id:string;label:string}[]>([]);
   const [samplerDev, setSamplerDev] = useState<string>('');
   const [devListOpen, setDevListOpen] = useState(false);
@@ -1076,7 +1085,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // METRONOME look-ahead scheduler — beats derived from the SHARED audio bar anchor,
   // so beat 1 (accent) always coincides with the progression's bar boundary.
   useEffect(() => {
-    if (!metroOn) return;
+    if (!(metroOn || (arrClick && (arrPlaying || arrRec !== 'idle')))) return;
     let scheduledUntil = microcosmAudioTime();   // audio-time up to which we've already scheduled
     const anchor0 = scheduledUntil;              // FIX: stable anchor when no progression is running.
     // (The old fallback re-read audioTime every tick, so the anchor rode alongside 'now' and the
@@ -1100,7 +1109,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     tick();
     const id = setInterval(tick, 25);
     return () => clearInterval(id);
-  }, [metroOn, bpm]);
+  }, [metroOn, bpm, arrClick, arrPlaying, arrRec]);
   const [progRunning, setProgRunning] = useState(false);
   const [progStepIdx, setProgStepIdx] = useState(0);    // which step is active (for UI highlight)
   const progTransposeRef = useRef(0);                   // current progression transpose (semitones), read by freq calc
@@ -2142,16 +2151,25 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const spb = (60 / bpm) * 4;
     const now = microcosmAudioTime();
     const anchor = barAudioAnchorRef.current || now;
-    const nextBar = anchor + Math.ceil((now - anchor) / spb + 0.02) * spb;   // never THIS bar - the next one
-    const startBar = Math.floor(arrPlayhead);
+    const onBar = anchor + Math.ceil((now - anchor) / spb + 0.02) * spb;      // the next bar
+    const nextBar = arrClick ? onBar + spb : onBar;                             // click on: one bar of count-in first
+    const startBar = (arrLoop && arrLoopA != null) ? arrLoopA : Math.floor(arrPlayhead);
     const trackIdx = arrSelTrack;
     arrRecRef.current = { startTime: nextBar, startBar, trackIdx, spb };
     setArrRec('armed');
     perfArm(nextBar);                                        // body two starts listening, stamped from the bar
-    setArrStatus('ARMED · rolls on the next bar');
+    arrTrimRef.current = false;
+    setArrStatus(arrClick ? 'COUNT-IN · 1 bar' : 'ARMED · next bar');
     window.setTimeout(() => { setArrRec(r => r === 'armed' ? 'rolling' : r); setArrStatus('REC · press again to stop on the bar'); }, Math.max(0, (nextBar - now) * 1000));
-    microcosmRecordOpen(Math.round(nextBar * SR), async (L, R) => {
-      const bars = Math.max(1, Math.round(L.length / (spb * SR)));
+    microcosmRecordOpen(Math.round(nextBar * SR), async (Lraw, Rraw) => {
+      const barSamp = Math.round(spb * SR);
+      let L = Lraw, R = Rraw;
+      if (arrTrimRef.current) {                                   // STOP NOW: back to the last whole bar
+        const whole = Math.floor(L.length / barSamp) * barSamp;
+        if (whole < barSamp) { setArrRec('idle'); arrRecRef.current = null; perfDisarm(); setArrStatus('take under a bar · discarded'); return; }
+        L = L.subarray(0, whole); R = R.subarray(0, whole);
+      }
+      const bars = Math.max(1, Math.round(L.length / barSamp));
       const id = 'blk_' + Date.now();
       const file = id + '.wav';
       const bytes = samplerExportWavStereo(L, R, id, SR, true) as ArrayBuffer;
@@ -2171,14 +2189,39 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       setArrTracks(next);
       await writeSongFile({ name: arrSongName, bpm, tracks: next });
       setArrRec('idle'); arrRecRef.current = null;
+      if (!arrPlaying) setArrPlayhead(startBar + bars);                  // the head moves on: the next take follows, it does not pile
       setArrStatus((onDisk ? 'landed · ' : 'landed but NOT on disk (no home) · ') + block.name + ' · ' + bars + ' bars · ' + (L.length / SR).toFixed(2) + ' s');
       console.log('[arrange] block landed', block, onDisk ? 'on disk' : 'NOT on disk');
     });
+    if (arrLoop) microcosmRecordStopAt(Math.round((nextBar + arrLoopBars * spb) * SR));   // LOOP: stops itself
   }
-  // ── ARRANGE PLAY (block 4): every block a native player scheduled on the audio clock from the next bar,
-  // playhead sweeps. Second press stops and returns the head. Players go straight to destination - the record tap never hears them.
+  function arrStopNow() {                                          // the square: stop now, trim to whole bars
+    if (arrRec === 'idle') return;
+    arrTrimRef.current = true;
+    microcosmRecordStopAt(Math.round(microcosmAudioTime() * 48000) + 256);
+    setArrStatus('STOPPING · now');
+  }
+  // ── ARRANGE PLAY: every block a native player scheduled on the audio clock from the next bar. LOOP on with a
+  // range set: the region cycles - each pass is scheduled a bar ahead, blocks cut at the region edges. Second
+  // press stops and returns the head. Players go straight to destination - the record tap never hears them.
+  function arrSchedule(fromBar: number, toBar: number, t0: number, spb: number): number {
+    let n = 0;
+    for (const t of arrTracksRef.current) for (const b of t.blocks) {
+      const buf = arrBufRef.current[b.id]; if (!buf) continue;
+      const bs = b.startBar, be = b.startBar + b.lenBars;
+      const s0 = Math.max(bs, fromBar), e0 = Math.min(be, toBar);
+      if (e0 <= s0) continue;
+      const src = b.srcBars && b.srcBars < b.lenBars ? b.srcBars * spb : undefined;   // a repeated block loops its source
+      microcosmTapePlay(buf, t0 + (s0 - fromBar) * spb, 1, (s0 - bs) * spb, (e0 - s0) * spb, src);
+      n++;
+    }
+    return n;
+  }
   async function arrPlay() {
-    if (arrPlaying) { microcosmTapeStop(); cancelAnimationFrame(arrRafRef.current); setArrPlaying(false); setArrPlayhead(arrPlayFromRef.current); setArrStatus('tape stopped · head back to bar ' + (arrPlayFromRef.current + 1)); return; }
+    if (arrPlaying) {
+      microcosmTapeStop(); cancelAnimationFrame(arrRafRef.current); window.clearInterval(arrLoopTimerRef.current);
+      setArrPlaying(false); setArrPlayhead(arrPlayFromRef.current); setArrStatus('tape stopped · head back to bar ' + (arrPlayFromRef.current + 1)); return;
+    }
     if (state !== 'playing') await doStart();
     const tracks = arrTracksRef.current;
     for (const t of tracks) for (const b of t.blocks) {
@@ -2191,23 +2234,42 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const now = microcosmAudioTime();
     const anchor = barAudioAnchorRef.current || now;
     const t0 = anchor + Math.ceil((now - anchor) / spb + 0.02) * spb;   // the tape rolls from the next bar
+    const cycling = arrLoop && arrLoopA != null && arrLoopBars >= 1;
+    if (cycling) {
+      const A = arrLoopA as number, len = arrLoopBars;
+      arrPlayFromRef.current = A;
+      let cycle = 0; let scheduledTo = t0;
+      const pump = () => { const nowT = microcosmAudioTime(); while (scheduledTo < nowT + 1.2) { arrSchedule(A, A + len, t0 + cycle * len * spb, spb); cycle++; scheduledTo = t0 + cycle * len * spb; } };
+      pump(); arrLoopTimerRef.current = window.setInterval(pump, 200);
+      setArrPlaying(true); setArrStatus('cycling · bars ' + (A + 1) + '-' + (A + len));
+      const sweep = () => { const el = (microcosmAudioTime() - t0) / spb; setArrPlayhead(el < 0 ? A : A + (el % len)); arrRafRef.current = requestAnimationFrame(sweep); };
+      arrRafRef.current = requestAnimationFrame(sweep);
+      return;
+    }
     let fromBar = Math.floor(arrPlayhead);
     const anyAhead = tracks.some(t => t.blocks.some(b => b.startBar + b.lenBars > fromBar));
     if (!anyAhead) fromBar = 0;                                   // nothing ahead of the head: rewind to bar 1
     arrPlayFromRef.current = fromBar;
-    let n = 0;
-    for (const t of tracks) for (const b of t.blocks) {
-      const buf = arrBufRef.current[b.id]; if (!buf) continue;
-      if (b.startBar + b.lenBars <= fromBar) continue;                  // already behind the head
-      const startAt = t0 + (b.startBar - fromBar) * spb;
-      const offset = startAt < t0 ? (t0 - startAt) : 0;                  // head inside the block: start partway in
-      microcosmTapePlay(buf, Math.max(startAt, t0), 1, offset);
-      n++;
-    }
+    const n = arrSchedule(fromBar, Infinity, t0, spb);
     setArrPlaying(true);
     setArrStatus('tape · ' + n + ' block' + (n === 1 ? '' : 's') + ' · from bar ' + (fromBar + 1));
     const sweep = () => { setArrPlayhead(Math.max(fromBar, fromBar + (microcosmAudioTime() - t0) / spb)); arrRafRef.current = requestAnimationFrame(sweep); };
     arrRafRef.current = requestAnimationFrame(sweep);
+  }
+  async function arrNewSong() {
+    const name = (window.prompt('name the new song', 'song ' + new Date().toISOString().slice(0, 10)) || '').trim().replace(/[^\w\- ]/g, '_');
+    if (!name) return;
+    if (arrPlaying) arrPlay();
+    const fresh = Array.from({ length: 16 }, (_, i) => ({ id: 'track_' + (i + 1), name: 'TRACK ' + (i + 1), blocks: [] as any[] }));
+    setArrSongName(name); setArrTracks(fresh); setArrSelBlock(null); setArrSelTrack(0); setArrPlayhead(0); arrBufRef.current = {};
+    await writeSongFile({ name, bpm, tracks: fresh });
+    setArrStatus('new song · ' + name);
+  }
+  async function arrDeleteBlock(id: string) {
+    const next = arrTracksRef.current.map(t => ({ ...t, blocks: t.blocks.filter(b => b.id !== id) }));
+    setArrTracks(next); setArrSelBlock(null);
+    await writeSongFile({ name: arrSongName, bpm, tracks: next });   // the file stays in blocks/ - only the timeline entry goes
+    setArrStatus('block removed');
   }
   async function doStart() {
     if (!started.current) { await ensureStarted(); return; }
@@ -2504,54 +2566,34 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         );
       })()}
       {/* SAMPLER - FINAL SCREEN. One centre axis, one label voice, framed wave, contrast floor. */}
+      <Transport
+        songName={arrSongName} posBar={arrPlayhead} bpm={bpm} playing={arrPlaying} rec={arrRec} recBar={arrRecBar}
+        target={(arrSelTrack + 1) + ' ' + (arrTracks[arrSelTrack]?.name || '').replace(/^TRACK \d+$/, '')}
+        status={arrStatus}
+        onToStart={() => { if (!arrPlaying && arrRec === 'idle') setArrPlayhead(0); }}
+        onStop={() => { if (arrRec !== 'idle') arrStopNow(); else if (arrPlaying) arrPlay(); }}
+        click={arrClick} onToggleClick={() => setArrClick(v => !v)}
+        loop={arrLoop} loopBars={arrLoopBars} onToggleLoop={() => setArrLoop(v => !v)} onCycleLoopBars={() => setArrLoopBars(n => n >= 16 ? 1 : n * 2)}
+        onPlay={() => { if (!arrPlaying) arrPlay(); }}
+        onRec={arrRecord}
+        onCycleTarget={() => setArrSelTrack(i => (i + 1) % arrTracks.length)}
+      />
       {arrangeOpen && (
-        <div style={{ position:'fixed', inset:0, zIndex:900, background:'#07080c', display:'flex', flexDirection:'column', fontFamily:'Space Mono, monospace' }}>
-          {/* TRANSPORT */}
-          <div style={{ display:'flex', alignItems:'center', gap:26, padding:'18px 28px', borderBottom:'0.5px solid rgba(255,255,255,0.1)' }}>
-            <span style={{ fontSize:15, letterSpacing:'0.34em', color:'#9fb4c8' }}>ARRANGE</span>
-            <div style={{ flex:1 }} />
-            <span style={{ fontSize:13, color:'rgba(255,255,255,0.55)' }}>bar {Math.floor(arrPlayhead)+1}</span>
-            <span style={{ fontSize:13, color:'#7af5c8' }}>{bpm} BPM</span>
-            <span style={{ fontSize: arrRec==='rolling' ? 15 : 12, fontWeight: arrRec==='rolling' ? 700 : 400, letterSpacing:'0.12em', color: arrRec==='idle' ? 'rgba(255,120,120,0.85)' : '#ff5a5a', minWidth:260 }}>{arrRec==='rolling' ? 'REC · bar ' + arrRecBar : arrStatus}</span>
-            <div onClick={arrPlay} title="play the tape from the playhead - press again to stop" style={{ width:46, height:46, borderRadius:'50%', border:'1.5px solid rgba(122,245,200,0.8)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'#7af5c8', fontSize:15 }}>▶</div>
-            <div onClick={arrRecord} title="REC: arms on the next bar and rolls. REC again: stops on the next bar." style={{ width:46, height:46, borderRadius:'50%', border: arrRec==='idle' ? '1.5px solid rgba(255,90,90,0.7)' : '2px solid #ff5a5a', boxShadow: arrRec==='rolling' ? 'inset 0 0 0 46px rgba(255,90,90,0.55)' : 'none', animation: arrRec==='armed' ? 'haarPulse 0.7s ease-in-out infinite' : 'none', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'#ff5a5a', fontSize:17 }}>●</div>
-            <div onClick={()=>setArrangeOpen(false)} style={{ width:40, height:40, borderRadius:'50%', border:'0.5px solid rgba(255,255,255,0.3)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(255,255,255,0.6)' }}>×</div>
-          </div>
-          {/* RULER */}
-          <div style={{ display:'flex', borderBottom:'0.5px solid rgba(255,255,255,0.08)' }}>
-            <div style={{ width:120, flexShrink:0 }} />
-            <div style={{ flex:1, overflow:'hidden', position:'relative', height:26 }}>
-              {Array.from({length:64}, (_,i)=>i).map(bn => (
-                <span key={bn} onClick={()=>{ if(!arrPlaying) setArrPlayhead(bn); }} style={{ cursor:'pointer', position:'absolute', left:(bn-arrScroll)*arrZoom, top:5, fontSize:9, color: bn%4===0?'rgba(255,255,255,0.5)':'rgba(255,255,255,0.18)' }}>{bn%4===0? bn+1 : '·'}</span>
-              ))}
-            </div>
-          </div>
-          {/* TRACKS */}
-          <div style={{ flex:1, overflowY:'auto' }}>
-            {arrTracks.map(tr => (
-              <div key={tr.id} style={{ display:'flex', height:52, borderBottom:'0.5px solid rgba(255,255,255,0.05)' }}>
-                <div style={{ width:120, flexShrink:0, display:'flex', alignItems:'center', paddingLeft:16, fontSize:10, letterSpacing:'0.12em', color:'rgba(255,255,255,0.45)', borderRight:'0.5px solid rgba(255,255,255,0.08)' }}>{tr.name}</div>
-                <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
-                  {Array.from({length:17}, (_,i)=>i*4).map(bn => (
-                    <div key={bn} style={{ position:'absolute', left:(bn-arrScroll)*arrZoom, top:0, bottom:0, width:0.5, background:'rgba(255,255,255,0.05)' }} />
-                  ))}
-                  {tr.blocks.map(blk => (
-                    <div key={blk.id} style={{ position:'absolute', left:(blk.startBar-arrScroll)*arrZoom, width:blk.lenBars*arrZoom-2, top:6, bottom:6, borderRadius:6, background:'rgba(159,180,200,0.18)', border:'0.5px solid rgba(159,180,200,0.5)', fontSize:9, color:'#9fb4c8', padding:'3px 6px', overflow:'hidden', cursor:'pointer' }}>{blk.name}</div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          {/* footer: zoom */}
-          <div style={{ display:'flex', gap:14, padding:'10px 28px', borderTop:'0.5px solid rgba(255,255,255,0.1)', alignItems:'center' }}>
-            <span onClick={()=>setArrZoom(z=>Math.max(8, z-6))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:15 }}>−</span>
-            <span style={{ fontSize:10, color:'rgba(255,255,255,0.35)' }}>zoom</span>
-            <span onClick={()=>setArrZoom(z=>Math.min(80, z+6))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:15 }}>+</span>
-            <span onClick={()=>setArrScroll(sc=>Math.max(0, sc-4))} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:13, marginLeft:18 }}>◂</span>
-            <span style={{ fontSize:10, color:'rgba(255,255,255,0.35)' }}>scroll</span>
-            <span onClick={()=>setArrScroll(sc=>sc+4)} style={{ cursor:'pointer', color:'rgba(255,255,255,0.5)', fontSize:13 }}>▸</span>
-          </div>
-        </div>
+        <ArrangeRoom
+          tracks={arrTracks} playhead={arrPlayhead} zoom={arrZoom} scroll={arrScroll}
+          selTrack={arrSelTrack} selBlock={arrSelBlock}
+          rec={arrRec} recStartBar={arrRecRef.current?.startBar ?? 0}
+          onSelectTrack={(i) => { if (arrRec === 'idle') setArrSelTrack(i); }}
+          onSelectBlock={setArrSelBlock}
+          onDeleteBlock={arrDeleteBlock}
+          onSetHead={(bar) => { if (!arrPlaying && arrRec === 'idle') setArrPlayhead(bar); }}
+          loopA={arrLoopA} loopBars={arrLoopBars} loopOn={arrLoop}
+          onSetLoop={(a, b) => { setArrLoopA(a); setArrLoopBars(Math.max(1, b - a)); setArrLoop(true); }}
+          onZoom={(d) => setArrZoom(z => Math.max(8, Math.min(80, z + d)))}
+          onScroll={(d) => setArrScroll(sc => Math.max(0, sc + d))}
+          onNew={arrNewSong}
+          onClose={() => setArrangeOpen(false)}
+        />
       )}
       {samplerOpen && (() => {
         const H = dim.h || 800;
