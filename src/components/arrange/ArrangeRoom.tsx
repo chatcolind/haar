@@ -17,6 +17,8 @@ export type ArrangeRoomProps = {
   onNormalise?: (id: string) => void;
   onTrackChange?: (i: number, patch: { mute?: boolean; solo?: boolean; name?: string }) => void;
   onOpenInstrument?: (id: string) => void;
+  onSaveSong?: () => void; onOpenSong?: () => void;
+  songName?: string;
   onCopyBlock: (id: string, startBar: number, track: number) => void;
   onUndo: () => void;
   onSplitBlock: (id: string, atBar: number) => void;
@@ -118,9 +120,11 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'transparent', display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, "Helvetica Neue", Inter, sans-serif', color: INK }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 22, padding: '14px 28px', borderBottom: '1px solid rgba(255,255,255,0.5)', background: 'linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0.3))', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }}>
-        <span style={{ fontSize: 15, letterSpacing: '0.34em', color: INK2 }}>ARRANGE</span>
+        <span style={{ fontSize: 15, letterSpacing: '0.34em', color: INK2, marginRight: 26 }}>ARRANGE{p.songName ? <span style={{ letterSpacing: '0.08em', color: INK, marginLeft: 14 }}>· {p.songName}</span> : null}</span>
         <span onClick={p.onNew} style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(255,255,255,0.45)', color: INK }}>NEW SONG</span>
         <span onClick={() => p.onUndo?.()} title="undo the last change  (Cmd+Z)" style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(255,255,255,0.45)', color: INK }}>↶ UNDO</span>
+        <span onClick={() => p.onSaveSong?.()} title="save the song - the arrangement and every instrument in the rack" style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(255,255,255,0.45)', color: INK }}>SAVE SONG</span>
+        <span onClick={() => p.onOpenSong?.()} title="open a song from Haar/Songs - the arrangement and its rack" style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(255,255,255,0.45)', color: INK }}>OPEN SONG</span>
         <div style={{ flex: 1 }} />
         <div onClick={p.onClose} title="back to the instrument" style={{ width: 36, height: 36, borderRadius: '50%', border: '0.5px solid rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 15 }}>×</div>
       </div>

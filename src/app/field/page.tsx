@@ -31,7 +31,7 @@ import { perfEmit, perfClock, perfArm, perfDisarm } from '../../perf/bus';
 import Transport from '../../components/transport/Transport';
 import ArrangeRoom from '../../components/arrange/ArrangeRoom';
 import Sky, { HORIZON } from '../../components/sky/Sky';
-import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs, writeBlock, writeSongFile, readBlock, readSongFile, writeInPackage, readInPackage } from '../../lib/haarHome';
+import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs, writeBlock, writeSongFile, readBlock, readSongFile, writeInPackage, readInPackage, listSongs as listSongsOnDisk } from '../../lib/haarHome';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
 // id is the orb INSTANCE id (unique); engineType is which scattering recipe it runs.
@@ -381,7 +381,7 @@ export default function FieldPage() {
   const openInstrumentSnapshot = async (file: string) => {
     if (fieldOrbs.length) { const ok = await saveCurrentInstrument(); if (ok === null && fieldOrbs.length) return; }
     const txt = await readInPackage(arrSongName, 'instruments', file); if (!txt) { setArrStatus('no snapshot: ' + file); return; }
-    try { const data = JSON.parse(txt); await loadSongData(data); setSongName((data.name || file.replace(/_[0-9a-f]{8}\.json$/, '').replace(/\.json$/, ''))); } catch (e) { console.warn('[instrument] snapshot', e); return; }
+    try { const data = JSON.parse(txt); await addInstrumentData(data); setSongName((data.name || file.replace(/_[0-9a-f]{8}\.json$/, '').replace(/\.json$/, ''))); } catch (e) { console.warn('[instrument] snapshot', e); return; }
     if (arrangeOpen) { hushRef.current = null; hushInstrument(); }
   };
   // THE RACK: every instrument this song has used, one pill each - the first take that carries it is the door
@@ -1776,8 +1776,9 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     try { return JSON.parse(localStorage.getItem('haar_songs_index') || '[]'); } catch { return []; }
   }
   // THE INSTRUMENT, as JSON - what SAVE INSTRUMENT writes, and what a take snapshots into its song package.
-  function buildInstrumentJson(name: string): string {
-    const orbs = fieldOrbs.map(o => ({
+  function buildInstrumentJson(name: string, only?: string, rename?: string): string {   // only = one instrument's id (a constellation); omitted = the whole sky
+    const onlyC = only ? constellations.find(c => c.id === only) : null;
+    const orbs = fieldOrbs.filter(o => !onlyC || onlyC.orbIds.includes(o.id)).map(o => ({
       id:o.id, engineType:o.engineType, label:o.label, colorKey:o.colorKey,
       vol: volRef.current[o.id] ?? 0.7, dens: densRef.current[o.id] ?? 0.5,
       amount: amountRef.current[o.id] ?? 0, flavour: flavourRef.current[o.id] ?? 'open',
@@ -1790,19 +1791,29 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       fauve: !!fauveRef.current[o.id], fauveDis: fauveDisRef.current[o.id] ?? 0, fauveRep: fauveRepRef.current[o.id] ?? 0, fauveRev: fauveRevRef.current[o.id] ?? 0, fauveGap: fauveGapRef.current[o.id] ?? 0,
     }));
     // constellations: full structure (name, source, members, register, pitch, tuning)
-    const consts = constellations.map(c => ({
-      id:c.id, name:c.name, sourceId:c.sourceId, orbIds:c.orbIds,
+    const consts = constellations.filter(c => !only || c.id === only).map(c => ({
+      id:c.id, name: (only && rename && c.id === only) ? rename : c.name, sourceId:c.sourceId, orbIds:c.orbIds,
       register:c.register, pitchMode:c.pitchMode,
       tune: c.tune ?? 0,
     }));
     // source audio (WAV bytes) → IndexedDB (localStorage can't hold audio). Song JSON keeps only
     // the source ids + names; the actual base64 blobs live in IndexedDB keyed by source id.
     const sourceMeta: Record<string, {name:string}> = {};
-    for (const c of constellations) {
+    for (const c of constellations.filter(c => !only || c.id === only)) {
       const sb = sourceBytesRef.current[c.sourceId];
       if (sb) { sourceMeta[c.sourceId] = { name: sb.name }; idbSet('src_'+c.sourceId, sb).catch(err=>console.warn('[idb] save failed', c.sourceId, err)); }
     }
-    return JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, key: { lockKey, scaleLock, scaleMode, octave }, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta });
+    return JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, key: { lockKey, root: playNote, scaleLock, scaleMode, octave }, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta });
+  }
+  const instrumentOnSky = () => constellations.find(c => c.id === (selectedInst || activeConstId)) || null;
+  const hasRealName = (n: string) => !!n && !/^Instrument \d+$/.test(n) && n !== 'Synth';
+  async function saveSelectedInstrument(name: string) {
+    const c = instrumentOnSky(); if (!c) return;
+    const nm = name.trim(); if (!nm) return;
+    if (c.name !== nm) setConstellations(prev => prev.map(x => x.id === c.id ? { ...x, name: nm } : x));
+    const ok = await writeInstrument(nm, buildInstrumentJson(nm, c.id, nm));
+    setSongName(nm); setSongMenu(null);
+    console.log(ok ? '[instrument] saved ' + nm : '[instrument] save failed ' + nm);
   }
   function saveSong(name: string) {
     const songJson = buildInstrumentJson(name);
@@ -1819,6 +1830,61 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   async function loadSong(name: string) {
     let data; try { data = JSON.parse(localStorage.getItem('haar_song_'+name) || ''); } catch { return; }
     return loadSongData(data);
+  }
+  async function addInstrumentData(data: any): Promise<string | null> {
+    if (!data?.orbs || !Array.isArray(data.constellations)) return null;
+    await ensureStarted();
+    // fresh ids: engines are renumbered past the live counters; the instrument gets its own id; sources keep theirs (timestamp ids)
+    const idMap: Record<string, string> = {};
+    for (const o of data.orbs) { const n = (orbCounter.current[o.engineType] || 0) + 1; orbCounter.current[o.engineType] = n; idMap[o.id] = `${o.engineType}_${n}`; }
+    const cMap: Record<string, string> = {};
+    for (const c of data.constellations) cMap[c.id] = 'c_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    const restored: FieldOrb[] = [];
+    for (const o of data.orbs) {
+      const id = idMap[o.id];
+      volRef.current[id]=o.vol; densRef.current[id]=o.dens; amountRef.current[id]=o.amount;
+      flavourRef.current[id]=o.flavour; muteRef.current[id]=o.mute; soloSetRef.current[id]=o.solo;
+      panRef.current[id]=o.pan; eqRef.current[id]=o.eq; xyRef.current[id]=o.xy; offsetRef.current[id]=o.offset ?? 0;
+      lockRef.current[id]=!!o.locked; subdivRef.current[id]=o.subdiv ?? 2; fillRef.current[id]=o.fill ?? 1; seedRef.current[id]=o.seed ?? 1;
+      fauveRef.current[id]=!!o.fauve; fauveDisRef.current[id]=o.fauveDis ?? 0; fauveRepRef.current[id]=o.fauveRep ?? 0; fauveRevRef.current[id]=o.fauveRev ?? 0; fauveGapRef.current[id]=o.fauveGap ?? 0;
+      restored.push({ id, engineType:o.engineType, label:o.label, colorKey:o.colorKey });
+      microcosmAddOrb(id, o.engineType, o.vol);
+      microcosmEngineActive(id, true); microcosmEngineLevel(id, o.vol);
+      microcosmEnginePan(id, o.pan ?? 0); microcosmEngineEQ(id, o.eq?.lo ?? 0, o.eq?.mid ?? 0, o.eq?.hi ?? 0);
+      microcosmGrainDensity(id, o.dens); microcosmEngineAmount(id, o.amount); microcosmOrbPalette(id, o.flavour);
+      microcosmOrbHome(id, o.offset ?? 0);
+      microcosmOrbLock(id, !!o.locked); microcosmOrbSubdiv(id, o.subdiv ?? 2); microcosmOrbFill(id, o.fill ?? 1); microcosmOrbSeed(id, o.seed ?? 1);
+    }
+    const meta = data.sourceMeta || {}; const legacy = data.sources || {};
+    const sids = Object.keys(meta).length ? Object.keys(meta) : Object.keys(legacy);
+    for (const sid of sids) {
+      if (sourceBytesRef.current[sid]) continue;                 // already loaded - two instruments may share a wav
+      try {
+        let sb = null as null | {name:string;b64:string};
+        if (meta[sid]) sb = await idbGet('src_'+sid);
+        if (!sb && legacy[sid]) sb = legacy[sid];
+        if (!sb || !sb.b64) { console.warn('[rack] no audio for source', sid); continue; }
+        const binStr = atob(sb.b64); const bytes = new Uint8Array(binStr.length); for (let i=0;i<binStr.length;i++) bytes[i]=binStr.charCodeAt(i);
+        await microcosmLoadSource(sid, new File([bytes], sb.name || 'source.wav'));
+        sourceBytesRef.current[sid] = sb;
+      } catch (err) { console.warn('[rack] source restore failed', sid, err); }
+    }
+    const newConsts = data.constellations.map((c:any) => ({ id: cMap[c.id], name: c.name, sourceId: c.sourceId, orbIds: (c.orbIds || []).map((x: string) => idMap[x]).filter(Boolean), register: c.register || 0, pitchMode: c.pitchMode || 'varispeed', tune: c.tune || 0 }));
+    for (const c of newConsts) for (const oid of c.orbIds) {
+      microcosmEngineSource(oid, c.sourceId);
+      if (c.tune) microcosmOrbTuning(oid, c.tune);
+      if (c.register) microcosmOrbRegister(oid, c.register);
+      if (fauveRef.current[oid] && c.sourceId !== 'default') { microcosmFauveOn(oid, c.sourceId); microcosmFauveUpdatePitch(oid); microcosmFauveParam(oid, 'disorder', fauveDisRef.current[oid] ?? 0); microcosmFauveParam(oid, 'repeat', fauveRepRef.current[oid] ?? 0); microcosmFauveParam(oid, 'reverse', fauveRevRef.current[oid] ?? 0); microcosmFauveParam(oid, 'gaps', fauveGapRef.current[oid] ?? 0); }
+    }
+    setFieldOrbs(prev => [...prev, ...restored]);
+    setConstellations(prev => [...prev.filter(c => c.orbIds.length > 0 || c.id !== DEFAULT_CONST_ID), ...newConsts]);
+    const first = newConsts[0]?.id ?? null; if (first) { setSelectedInst(first); setActiveConstId(first); }
+    return first;
+  }
+  function clearRack() {                                          // everything off the sky - before a song's rack comes in
+    fieldOrbs.forEach(o => removeFieldOrb(o.id));
+    setFieldOrbs([]); setConstellations([{ id: DEFAULT_CONST_ID, name: 'Instrument 1', sourceId: 'default', orbIds: [], register: 0, pitchMode: 'varispeed' }]);
+    setSelectedInst(null); setActiveConstId(DEFAULT_CONST_ID);
   }
   async function loadSongData(data: any) {
     if (!data?.orbs) return;
@@ -1847,12 +1913,13 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     // restore SONG KEY (root + scale-lock + major/minor + octave). Old songs without a key are left as-is.
     if (data.key) {
       if (data.key.lockKey) { setLockKey(data.key.lockKey); setPlayNote(data.key.lockKey); }
+      if (data.key.root) setPlayNote(data.key.root);                                          // the note it was played at, locked or not
       if (typeof data.key.scaleLock === 'boolean') setScaleLock(data.key.scaleLock);
       if (data.key.scaleMode) setScaleMode(data.key.scaleMode);
       if (typeof data.key.octave === 'number') setOctave(data.key.octave);
       // TUNE THE ENGINE to the restored key now — state alone doesn't move the source,
       // so without this a loaded song hums at the previous/default pitch (C) until a key press.
-      const _rootHz = NOTE_BASE[data.key.lockKey ?? 'C'] ?? 261.63;
+      const _rootHz = NOTE_BASE[data.key.root ?? data.key.lockKey ?? 'C'] ?? 261.63;
       const _oct = typeof data.key.octave === 'number' ? data.key.octave : 0;
       microcosmSourceFreq(_rootHz * Math.pow(2, _oct));
       setPlaySemi(0);
@@ -1891,7 +1958,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
         id:c.id, name:c.name, sourceId:c.sourceId, orbIds:c.orbIds||[],
         register:c.register||0, pitchMode:c.pitchMode||'varispeed', tune:c.tune||0,
       }));
-      setConstellations(restoredConsts.length ? restoredConsts : [{ id: DEFAULT_CONST_ID, name:'Synth', sourceId:'default', orbIds:[], register:0, pitchMode:'varispeed' }]);
+      setConstellations(restoredConsts.length ? restoredConsts : [{ id: DEFAULT_CONST_ID, name:'Instrument 1', sourceId:'default', orbIds:[], register:0, pitchMode:'varispeed' }]);
       // 3. re-route + re-tune + re-register each orb per its constellation
       for (const c of restoredConsts) {
         for (const oid of c.orbIds) {
@@ -1911,6 +1978,8 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       // keep the source-id counter clear of collisions is unnecessary (timestamp ids)
     }
     setFieldOrbs(restored); setCurrentSongName(name); setSongMenu(null);
+    // and press the key it was played at, through the same door a finger uses - so every instrument is tuned exactly as it was saved
+    if (data.key?.root) { const rt = data.key.root; window.setTimeout(() => { try { playAt(rt, 0); } catch (e) { console.warn('[load] retune', e); } }, 60); }
   }
   const [life, setLife] = useState(0.32);
   const [tapeAmt, setTapeAmt] = useState(0);   // Tape character amount 0..1 (drag the button)
@@ -2415,6 +2484,30 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     setArrSelBlock(null);
     arrCommit(arrTracksRef.current.map(t => ({ ...t, blocks: t.blocks.filter(b => b.id !== id) })), 'block removed');   // the file stays in blocks/
   }
+  // THE SONG CARRIES THE RACK. Save writes every instrument into the package; open brings the rack back.
+  async function arrSaveSong() {
+    const rack: { name: string; file: string; selected: boolean }[] = [];
+    for (const c of constellations) {
+      if (!c.orbIds.length) continue;
+      const file = c.name.replace(/[^\w\- ]+/g, '_') + '.json';
+      await writeInPackage(arrSongName, 'instruments', file, buildInstrumentJson(c.name, c.id, c.name), true);
+      rack.push({ name: c.name, file, selected: c.id === (selectedInst || activeConstId) });
+    }
+    await writeSongFile({ name: arrSongName, bpm, tracks: arrTracksRef.current, rack } as any);
+    setArrStatus('saved · ' + arrSongName + ' · ' + rack.length + ' instrument' + (rack.length === 1 ? '' : 's'));
+  }
+  async function arrOpenSong(name: string) {
+    const song: any = await readSongFile(name); if (!song) { setArrStatus('no song: ' + name); return; }
+    setArrSongName(name); setArrTracks(song.tracks || []); arrTracksRef.current = song.tracks || [];
+    if (song.bpm) { setBpm(song.bpm); microcosmBpm(song.bpm); }
+    clearRack();
+    let pick: string | null = null;
+    for (const r of (song.rack || [])) { const txt = await readInPackage(name, 'instruments', r.file); if (!txt) continue; try { const id = await addInstrumentData(JSON.parse(txt)); if (r.selected && id) pick = id; } catch (e) { console.warn('[song] instrument', r.file, e); } }
+    if (pick) { setSelectedInst(pick); setActiveConstId(pick); }
+    setArrStatus('opened · ' + name + ' · ' + (song.rack?.length || 0) + ' instrument' + ((song.rack?.length || 0) === 1 ? '' : 's'));
+  }
+  const [songList, setSongList] = useState<string[] | null>(null);
+  async function arrShowSongs() { setSongList(await listSongsOnDisk()); }
   function arrTrackChange(i: number, patch: { mute?: boolean; solo?: boolean; name?: string }) {
     const next = arrTracksRef.current.map((t: any, k: number) => k === i ? { ...t, ...patch } : t);
     arrCommit(next, patch.name != null ? 'renamed track ' + (i + 1) : (patch.solo != null ? 'solo ' + (patch.solo ? 'on' : 'off') : 'mute ' + (patch.mute ? 'on' : 'off')) + ' · track ' + (i + 1));
@@ -2770,6 +2863,8 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       {/* SKY - Build's weather, yours to change. Glass, top-right. */}
       {!arrangeOpen && <div onClick={cycleSky} title="the sky over Build - tap to change the weather" style={{ position:'fixed', top:22, right:24, zIndex:60, padding:'7px 14px', borderRadius:16, cursor:'pointer', fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize:11, letterSpacing:'0.14em', color:'#ffd2b0', border:'1px solid rgba(255,210,176,0.35)', background:'linear-gradient(180deg, rgba(60,30,70,0.32), rgba(20,12,30,0.38))', backdropFilter:'blur(18px)', WebkitBackdropFilter:'blur(18px)', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.18)' }}>sky · {SKY_NAMES[buildSky]}</div>}
       {/* the song's instrument snapshots reach Build through OPEN INSTRUMENT on a take's card */}
+      {/* the instrument on the sky, under HAAR */}
+      {!arrangeOpen && (() => { const c = instrumentOnSky(); return c ? <div style={{ position:'fixed', top:70, left:46, zIndex:60, fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize:11, letterSpacing:'0.22em', color: hasRealName(c.name) ? 'rgba(255,245,235,0.8)' : 'rgba(255,245,235,0.4)' }}>{c.name.toUpperCase()}</div> : null; })()}
       {/* THE RACK - a circle bottom-right; tap to open. One row per instrument: its moon's colour, name (tap to select), M, S. Drone / touch for the whole instrument beneath. */}
       {!arrangeOpen && <div onClick={() => setRackOpen(v => !v)} title="the rack - the instruments loaded now" style={{ position:'fixed', right:24, bottom:150, zIndex:71, width:44, height:44, borderRadius:22, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', border:'1px solid rgba(255,255,255,0.3)', background: rackOpen ? 'rgba(255,255,255,0.2)' : 'linear-gradient(180deg, rgba(60,30,70,0.32), rgba(20,12,30,0.38))', backdropFilter:'blur(18px)', WebkitBackdropFilter:'blur(18px)', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.18)' }}>
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#fff" strokeWidth="1.3" opacity="0.9"><rect x="2" y="2" width="14" height="4" rx="1.5"/><rect x="2" y="7" width="14" height="4" rx="1.5"/><rect x="2" y="12" width="14" height="4" rx="1.5"/></svg>
@@ -2801,11 +2896,20 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       </div>}
       {/* ROLLING, in the sky: one quiet readout while the tape records or plays in Build - nothing else appears */}
       {!arrangeOpen && (arrRec !== 'idle' || arrPlaying) && <div style={{ position: 'fixed', left: '50%', top: 22, transform: 'translateX(-50%)', zIndex: 60, pointerEvents: 'none', fontFamily: '-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize: 13, letterSpacing: '0.14em', color: arrRec === 'rolling' ? '#ffb3b3' : arrRec === 'armed' ? '#ffd2b0' : 'rgba(255,245,235,0.7)', textShadow: '0 1px 12px rgba(0,0,0,0.6)' }}>{arrRec === 'rolling' ? 'rec · bar ' + arrRecBar + ' · to ' + (arrSelTrack + 1) : arrRec === 'armed' ? 'armed · to ' + (arrSelTrack + 1) : 'playing · bar ' + (Math.floor(arrPlayhead) + 1)}</div>}
+      {arrangeOpen && songList && <div onClick={() => setSongList(null)} style={{ position:'fixed', inset:0, zIndex:950, background:'rgba(20,10,30,0.35)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ minWidth:320, maxHeight:'60vh', overflowY:'auto', padding:'16px 18px', borderRadius:18, fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', color:'#fff', border:'1px solid rgba(255,255,255,0.35)', background:'linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.14))', backdropFilter:'blur(22px)', WebkitBackdropFilter:'blur(22px)', boxShadow:'0 30px 60px rgba(20,10,40,0.4)' }}>
+          <div style={{ fontSize:10, letterSpacing:'0.22em', opacity:0.7, marginBottom:10 }}>OPEN SONG</div>
+          {songList.length === 0 && <div style={{ opacity:0.6, fontSize:12 }}>no songs in Haar/Songs yet</div>}
+          {songList.map(n => <div key={n} onClick={() => { setSongList(null); arrOpenSong(n); }} style={{ padding:'9px 10px', borderRadius:10, cursor:'pointer', fontSize:14, letterSpacing:'0.04em', background: n === arrSongName ? 'rgba(255,255,255,0.18)' : 'transparent' }}>{n}</div>)}
+        </div>
+      </div>}
       {arrangeOpen && (
         <ArrangeRoom
           peaksFor={arrPeaksFor} peaksTick={arrPeaksTick}
           onNormalise={arrNormalise}
           onTrackChange={arrTrackChange}
+          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs}
+          songName={arrSongName}
           onOpenInstrument={(id) => { const b = arrTracks.flatMap(t => t.blocks).find(x => x.id === id); if (b?.instrument) openInstrumentSnapshot(b.instrument); }}
           tracks={arrTracks} playhead={arrPlayhead} zoom={arrZoom} scroll={arrScroll}
           selTrack={arrSelTrack} selBlock={arrSelBlock}
@@ -4029,13 +4133,13 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           <div className="haar-section" style={{ position:'absolute', left:'50%', bottom:0, transform:'translateX(-50%)', display:'flex', flexDirection:'column', alignItems:'center' }}>
             <div className="haar-sectionlbl" style={{ ...zlabel, alignSelf:'center' }}>INSTRUMENTS</div>
             <div style={{ display:'flex', alignItems:'flex-end', gap:30 }}>
-              <div onClick={()=>setSongMenu('save')} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+              <div onClick={()=>{ const c = instrumentOnSky(); if (c && hasRealName(c.name)) saveSelectedInstrument(c.name); else { setSongName(c && hasRealName(c.name) ? c.name : ''); setSongMenu('save'); } }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(122,245,200,0.5)', background:'rgba(122,245,200,0.06)', boxShadow:'0 0 18px 3px rgba(122,245,200,0.4), inset 0 0 14px rgba(122,245,200,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#7af5c8" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M4 4h9l3 3v9H4z"/><path d="M7 4v4h6V4M7 16v-5h6v5" /></g></svg>
                 </div>
                 <div className="haar-lbl" style={{ fontSize:12.5, color:'#a6fff2', marginTop:8 }}>Save</div>
               </div>
-              <div onClick={()=>(async ()=>{ const txt = await openInstrumentFile(); if (txt) { try { const data = JSON.parse(txt); await loadSongData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } })()} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+              <div onClick={()=>(async ()=>{ const txt = await openInstrumentFile(); if (txt) { try { const data = JSON.parse(txt); await addInstrumentData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } })()} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(216,166,255,0.5)', background:'rgba(216,166,255,0.06)', boxShadow:'0 0 18px 3px rgba(216,166,255,0.4), inset 0 0 14px rgba(216,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#d8a6ff" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M3 5h5l2 2h7v9H3z"/></g></svg>
                 </div>
@@ -4259,11 +4363,11 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
               <>
                 <div style={{ fontSize:12, letterSpacing:'0.2em', color:'#7af5c8', fontFamily:'monospace', marginBottom:20 }}>SAVE INSTRUMENT</div>
                 <input autoFocus value={songName} onChange={(e)=>setSongName(e.target.value)} placeholder="name this instrument"
-                  onKeyDown={(e)=>{ if(e.key==='Enter' && songName.trim()) saveSong(songName.trim()); }}
+                  onKeyDown={(e)=>{ if(e.key==='Enter' && songName.trim()) saveSelectedInstrument(songName.trim()); }}
                   style={{ width:'100%', boxSizing:'border-box', padding:'13px 16px', borderRadius:10, background:'rgba(255,255,255,0.05)', border:'0.5px solid rgba(255,255,255,0.2)', color:'#fff', fontSize:16, outline:'none', marginBottom:22 }} />
                 <div style={{ display:'flex', justifyContent:'flex-end', gap:16 }}>
                   <span onClick={()=>setSongMenu(null)} style={{ fontSize:14, color:'rgba(255,255,255,0.4)', cursor:'pointer', padding:'8px 0' }}>cancel</span>
-                  <span onClick={()=>{ if(songName.trim()) saveSong(songName.trim()); }} style={{ fontSize:14, letterSpacing:'0.08em', color: songName.trim()?'#a6fff2':'rgba(255,255,255,0.3)', cursor: songName.trim()?'pointer':'default', border:`1px solid ${songName.trim()?'#7af5c8':'rgba(255,255,255,0.15)'}`, borderRadius:20, padding:'8px 24px' }}>SAVE</span>
+                  <span onClick={()=>{ if(songName.trim()) saveSelectedInstrument(songName.trim()); }} style={{ fontSize:14, letterSpacing:'0.08em', color: songName.trim()?'#a6fff2':'rgba(255,255,255,0.3)', cursor: songName.trim()?'pointer':'default', border:`1px solid ${songName.trim()?'#7af5c8':'rgba(255,255,255,0.15)'}`, borderRadius:20, padding:'8px 24px' }}>SAVE</span>
                 </div>
               </>
             ) : (

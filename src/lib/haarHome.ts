@@ -219,4 +219,10 @@ export async function writeInPackage(song: string, dir: string, file: string, da
   return true;
 }
 
+/** the songs on disk - names of the folders in Haar/Songs */
+export async function listSongs(): Promise<string[]> {
+  const home = await getHome(); if (!home) return [];
+  try { const haar = await home.getDirectoryHandle('Haar', { create: true }); const songs = await haar.getDirectoryHandle('Songs', { create: true });
+    const out: string[] = []; for await (const [name, h] of (songs as any).entries()) { if (h.kind === 'directory') out.push(name); } return out.sort(); } catch { return []; }
+}
 export async function hasHome(): Promise<boolean> { return (await getHome()) !== null; }
