@@ -18,7 +18,7 @@ export type ArrangeRoomProps = {
   onNormalise?: (id: string) => void;
   onTrackChange?: (i: number, patch: { mute?: boolean; solo?: boolean; name?: string; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } }) => void;
   onOpenInstrument?: (id: string) => void;
-  onSaveSong?: () => void; onOpenSong?: () => void; onExport?: () => void;
+  onSaveSong?: () => void; onOpenSong?: () => void; onExport?: () => void; onPrint?: () => void;
   meters?: () => { bands: number[][]; master: number[] } | null;
   master?: number; limiter?: boolean; fx?: any; onMaster?: (db: number) => void; onLimiter?: (on: boolean) => void; onFx?: (fx: any) => void;
   songName?: string;
@@ -130,6 +130,7 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
         <span onClick={() => p.onSaveSong?.()} title="save the song - the arrangement and every instrument in the rack" style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(255,255,255,0.45)', color: INK }}>SAVE SONG</span>
         <span onClick={() => p.onOpenSong?.()} title="open a song from Haar/Songs - the arrangement and its rack" style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(255,255,255,0.45)', color: INK }}>OPEN SONG</span>
         <span onClick={() => p.onExport?.()} title="export the song - the whole arrangement through the desk, offline, to mix/<song>.wav in the package" style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(255,255,255,0.45)', color: INK }}>EXPORT</span>
+        <span onClick={() => p.onPrint?.()} title="print the song - it plays through the desk in real time, you mix, what leaves the master is kept as mix/<song> print.wav" style={{ ...verb(), marginBottom: 0, borderColor: 'rgba(255,255,255,0.45)', color: INK }}>PRINT</span>
         <div style={{ flex: 1 }} />
         <div onClick={p.onClose} title="back to the instrument" style={{ width: 36, height: 36, borderRadius: '50%', border: '0.5px solid rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 15 }}>×</div>
       </div>

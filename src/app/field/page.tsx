@@ -19,7 +19,7 @@ import {
   microcosmInputOn, microcosmInputOff, microcosmLiveArm, microcosmSynthOn, microcosmSynthOff,
   microcosmMonitor,
   microcosmLoadSourceData,
-  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeMixTrack, microcosmTapeMixMaster, microcosmTapeMixFx, microcosmTapeMixFrame, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
+  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeTapStart, microcosmTapeTapStop, microcosmTapeMixTrack, microcosmTapeMixMaster, microcosmTapeMixFx, microcosmTapeMixFrame, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
   microcosmCleanSync, microcosmCleanGain, microcosmCleanStrip,
   microcosmSetEngineMode, microcosmGetEngineMode, microcosmEngineFire,
   samplerAnalyseRoot,
@@ -28,7 +28,7 @@ import {
   samplerExportWav, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
 } from '../../audio/engine';
 import { cutBlocks } from '../../audio/cuts';
-import { renderSong } from '../../audio/render';
+import { renderSong, songEndBar } from '../../audio/render';
 import { perfEmit, perfClock, perfArm, perfDisarm } from '../../perf/bus';
 import Transport from '../../components/transport/Transport';
 import ArrangeRoom from '../../components/arrange/ArrangeRoom';
@@ -2423,6 +2423,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   }
   async function arrPlay() {
     if (arrPlaying) {
+      if (arrPrintRef.current) { arrPrintRef.current = false; window.clearTimeout(arrPrintTimerRef.current); void arrPrintFinish(); }
       microcosmTapeStop(); cancelAnimationFrame(arrRafRef.current); window.clearInterval(arrLoopTimerRef.current); arrCycRef.current = null;
       setArrPlaying(false); setArrPlayhead(arrPlayFromRef.current); setArrStatus('tape stopped · head back to bar ' + (arrPlayFromRef.current + 1)); return;
     }
@@ -2450,11 +2451,13 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     arrPlayFromRef.current = fromBar;
     barAudioAnchorRef.current = t0;                                   // the bar clock re-anchors to the press
     const n = arrSchedule(fromBar, Infinity, t0, spb);
+    if (arrPrintRef.current) { microcosmTapeTapStart(t0); arrPrintTimerRef.current = window.setTimeout(() => arrPlayRef.current(), ((songEndBar(tracks) - fromBar) * spb + 3) * 1000 + 80); }   // the tap opens as the tape rolls; closes 3 s after the last block
     setArrPlaying(true);
     setArrStatus('tape · ' + n + ' block' + (n === 1 ? '' : 's') + ' · from bar ' + (fromBar + 1));
     const sweep = () => { const h = Math.max(fromBar, fromBar + (microcosmAudioTime() - t0) / spb); arrPlayheadRef.current = h; setArrPlayhead(h); arrRafRef.current = requestAnimationFrame(sweep); };
     arrRafRef.current = requestAnimationFrame(sweep);
   }
+  const arrPlayRef = useRef<() => void>(() => {}); arrPlayRef.current = arrPlay;   // the latest toggle, for timers
   async function arrNewSong() {
     const name = (window.prompt('name the new song', 'song ' + new Date().toISOString().slice(0, 10)) || '').trim().replace(/[^\w\- ]/g, '_');
     if (!name) return;
@@ -2465,6 +2468,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     await writeSongFile(songDoc(fresh, { name }));
     setArrStatus('new song · ' + name);
   }
+  const arrPrintRef = useRef(false); const arrPrintTimerRef = useRef(0);    // PRINT: the tape rolls with the tap open
   const arrRackRef = useRef<any[]>([]);                              // the rack as last saved / opened - every song write carries it
   const arrKeyRef = useRef<any>(null);
   function songDoc(tracks: any[], patch: any = {}) { return { name: arrSongName, bpm, tracks, rack: arrRackRef.current, master: arrMasterRef.current, limiter: arrLimiter, fx: arrFx, key: arrKeyRef.current ?? { root: playNote, semi: playSemi, octave, lockKey, scaleLock, scaleMode }, ...patch } as any; }
@@ -2541,10 +2545,29 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     await arrDecodeBlocks();
     const tracks = arrTracksRef.current;
     const r = await renderSong({ tracks, bufs: arrBufRef.current, mixes: tracks.map((t: any) => trackMixOf(t)), master: { level: arrMasterRef.current, limiter: arrLimiter }, fx: arrFx, bpm, spb: (60 / bpm) * 4 });
-    if (!r) { console.log('[export] nothing to render'); return; }
+    if (!r) { setArrStatus('nothing to export - the song has no blocks'); return; }
     const bytes = samplerExportWavStereo(r.L, r.R, arrSongName, r.sampleRate, true) as ArrayBuffer;
     const ok = await writeInPackage(arrSongName, 'mix', arrSongName + '.wav', bytes, true);
-    console.log('[export]', ok ? 'wrote' : 'FAILED', 'mix/' + arrSongName + '.wav', r.seconds.toFixed(1) + 's');
+    setArrStatus(ok ? 'exported · mix/' + arrSongName + '.wav · ' + r.seconds.toFixed(1) + 's' : 'export failed - could not write mix/' + arrSongName + '.wav');
+  }
+  // PRINT: the song through the desk in real time, your hands on the faders - what leaves the master goes to mix/<song> print.wav
+  async function arrPrint() {
+    if (arrPlaying || arrPrintRef.current) return;
+    await arrDecodeBlocks();
+    if (!songEndBar(arrTracksRef.current)) { setArrStatus('nothing to print - the song has no blocks'); return; }
+    arrPrintRef.current = true;
+    setArrPlayhead(0); arrPlayheadRef.current = 0;
+    const spb = (60 / bpm) * 4;
+    setArrStatus(arrClick ? 'print · one bar of count-in' : 'print · rolling');
+    await new Promise(r => setTimeout(r, arrClick ? spb * 1000 : 30));   // the head is at bar 1 by the next render
+    arrPlayRef.current();
+  }
+  async function arrPrintFinish() {
+    const tap = microcosmTapeTapStop(); if (!tap || !tap.L.length) { setArrStatus('print - nothing came off the master'); return; }
+    const bytes = samplerExportWavStereo(tap.L, tap.R, arrSongName, tap.sampleRate, true) as ArrayBuffer;
+    const file = arrSongName + ' print.wav';
+    const ok = await writeInPackage(arrSongName, 'mix', file, bytes, true);
+    setArrStatus(ok ? 'printed · mix/' + file + ' · ' + (tap.L.length / tap.sampleRate).toFixed(1) + 's' : 'print failed - could not write mix/' + file);
   }
   function arrLimiterChange(on: boolean) { setArrLimiter(on); writeSongFile(songDoc(arrTracksRef.current, { limiter: on })); }
   function arrFxChange(fx: typeof arrFx) { setArrFx(fx); writeSongFile(songDoc(arrTracksRef.current, { fx })); }
@@ -2973,7 +2996,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           peaksFor={arrPeaksFor} peaksTick={arrPeaksTick}
           onNormalise={arrNormalise}
           onTrackChange={arrTrackChange}
-          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs} onExport={arrExport}
+          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs} onExport={arrExport} onPrint={arrPrint}
           master={arrMaster} limiter={arrLimiter} fx={arrFx} onMaster={arrMasterChange} onLimiter={arrLimiterChange} onFx={arrFxChange}
           meters={microcosmTapeMixFrame}
           songName={arrSongName}

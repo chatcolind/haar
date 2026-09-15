@@ -924,6 +924,8 @@ export function microcosmRecordBlock(startFrame: number, lenSamp: number, cb: (L
 }
 export function microcosmTapeDecode(bytes: ArrayBuffer): Promise<AudioBuffer> { return (microcosmCore as any)?.tapeDecode(bytes); }
 export function microcosmTapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0, dur?: number, loopSec?: number, fadeIn: number = 0, fadeOut: number = 0, pan: number = 0, track?: number): void { (microcosmCore as any)?.tapePlay(buf, when, gain, offset, dur, loopSec, fadeIn, fadeOut, pan, track); }
+export function microcosmTapeTapStart(from: number): void { (microcosmCore as any)?.tapeTapStart(from); }
+export function microcosmTapeTapStop(): { L: Float32Array; R: Float32Array; sampleRate: number } | null { return (microcosmCore as any)?.tapeTapStop() ?? null; }
 export function microcosmTapeMixTrack(i: number, m: any): void { (microcosmCore as any)?.tapeMixTrack(i, m); }
 export function microcosmTapeMixMaster(m: any): void { (microcosmCore as any)?.tapeMixMaster(m); }
 export function microcosmTapeMixFx(f: any, bpm: number): void { (microcosmCore as any)?.tapeMixFx(f, bpm); }

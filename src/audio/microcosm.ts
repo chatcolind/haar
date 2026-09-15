@@ -472,6 +472,8 @@ export class Microcosm {
   tapeMixMaster(m: MasterMix): void { this.tapeMixer().setMaster(m); }
   tapeMixFx(f: FxMix, bpm: number): void { this.tapeMixer().setFx(f, bpm); }
   tapeMixFrame(): { bands: number[][]; master: number[] } { return this.tapeMixer().frame(); }
+  tapeTapStart(from: number): void { this.tapeMixer().tapStart(from); }
+  tapeTapStop(): { L: Float32Array; R: Float32Array; sampleRate: number } | null { return this.tapeMixer().tapStop(); }
   tapeStopAll(): void {
     for (const t of this._tape) { try { t.src.stop(); } catch {} try { t.g.disconnect(); } catch {} }
     this._tape = [];

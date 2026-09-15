@@ -68,6 +68,29 @@ export class TapeMixer {
     this.setReverbSize(f.rev.size); this.rev.damp.frequency.setTargetAtTime(1500 + (1 - f.rev.damp) * 9000, t, 0.05); this.rev.wet.gain.setTargetAtTime(f.rev.mix, t, 0.02);
     this.dly.delay.delayTime.setTargetAtTime(Math.min(3.9, (60 / bpm) * f.dly.beats), t, 0.05); this.dly.fb.gain.setTargetAtTime(Math.min(0.92, f.dly.feedback), t, 0.02); this.dly.wet.gain.setTargetAtTime(f.dly.mix, t, 0.02);
   }
+  // THE TAP: what leaves the master, kept as samples - PRINT runs the song through the desk and keeps what came out
+  private _tap: { node: ScriptProcessorNode; L: Float32Array[]; R: Float32Array[]; from: number; sr: number } | null = null;
+  tapStart(from: number): void {
+    this.tapStop();
+    const node = (this.ctx as any).createScriptProcessor(4096, 2, 2) as ScriptProcessorNode;
+    const tap = { node, L: [] as Float32Array[], R: [] as Float32Array[], from, sr: this.ctx.sampleRate };
+    node.onaudioprocess = (e: AudioProcessingEvent) => {
+      for (let ch = 0; ch < e.outputBuffer.numberOfChannels; ch++) e.outputBuffer.getChannelData(ch).fill(0);   // a tap, not a voice
+      const t = typeof e.playbackTime === 'number' ? e.playbackTime : this.ctx.currentTime, n = e.inputBuffer.length;
+      const skip = Math.max(0, Math.min(n, Math.round((tap.from - t) * tap.sr)));                          // before the tape rolls: dropped
+      if (skip >= n) return;
+      tap.L.push(e.inputBuffer.getChannelData(0).slice(skip)); tap.R.push(e.inputBuffer.getChannelData(1).slice(skip));
+    };
+    this.master.out.connect(node); node.connect(this.ctx.destination);   // a ScriptProcessor only runs on the way to the destination; it outputs silence
+    this._tap = tap;
+  }
+  tapStop(): { L: Float32Array; R: Float32Array; sampleRate: number } | null {
+    const tap = this._tap; if (!tap) return null; this._tap = null;
+    try { this.master.out.disconnect(tap.node); } catch {} try { tap.node.disconnect(); } catch {} tap.node.onaudioprocess = null;
+    const n = tap.L.reduce((a, b) => a + b.length, 0), L = new Float32Array(n), R = new Float32Array(n); let o = 0;
+    for (let i = 0; i < tap.L.length; i++) { L.set(tap.L[i], o); R.set(tap.R[i], o); o += tap.L[i].length; }
+    return { L, R, sampleRate: tap.sr };
+  }
   private lastSize = -1;
   private setReverbSize(size: number): void {
     const s = Math.max(0.05, Math.min(1, size)); if (Math.abs(s - this.lastSize) < 0.02) return; this.lastSize = s;
