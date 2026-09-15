@@ -114,3 +114,25 @@ Build order: (1) the Sky layer behind every room with the four scenes and the di
 (2) Arrange re-skinned onto Skye with no tools; (3) fronts replace the orb bodies in Build;
 (4) the aurora face and the Catatumbo bench; (5) the reel strip. Spinning orbs are retired.
 Reference renders: haar-reel.html (outside the repo).
+
+## THE WORDS - ratified 14 Sept 2026, evening. These replace "orb / front / constellation / layer".
+  ENGINE       one voice. In the code it is still an orb (Orb.tsx, orbIds). On the horizon it is a skyline of light.
+  INSTRUMENT   one source through its engines: a wav through Tunnel, Mosaic and Shimmer is one instrument.
+               In the code it is a constellation. Its moon is above its stretch of the horizon.
+  THE RACK     the instruments loaded now. A circle bottom-right opens it: one row per instrument, its moon's
+               colour, name (tap to select - its moon lights), M, S. All drone / all touch beneath.
+               Empty until an instrument has an engine. + new is NOT a rack verb - the bright ball is the door.
+  SONG         the package on disk. Saving the arrangement writes every instrument in the rack into it;
+               opening the song brings the rack back with the last selected instrument on the sky. (next)
+  SAVE         saves the SELECTED instrument (source + engines) under its name; the name sits under HAAR;
+               save again = same name, no questions. OPEN loads a saved instrument INTO the rack with fresh
+               engine ids. (next)
+  BUILD        has no floating transport. REC is a red ring in Haar's console beside Start, the target track
+               a badge on the ring; rolling shows as one quiet readout top-centre and red ripples; Song ▶ plays
+               the tape under whatever is loaded. Arrange hushes every engine (touch) and Build restores them.
+  ARRANGE      waves in the slabs (normalised), the playhead a beam of light, white type on Skye. A take's
+               card: gain (dB), NORMALISE, fade in / out (bars, drawn on the slab, ramps on the tape),
+               SPLIT AT HEAD, OPEN INSTRUMENT (its snapshot back into Build), DELETE. M / S per track,
+               instant. UNDO on the header. Rename take and track by tapping.
+  Rejected on the way: literal clouds (soft, bokeh, comedy), a rising sun (cheesy), a black transport bar
+  in Build, a permanently open rack panel, a top-left snapshot rack.
