@@ -923,7 +923,11 @@ export function microcosmRecordBlock(startFrame: number, lenSamp: number, cb: (L
   (microcosmCore as any)?.recordOutput(lenSamp, cb, { startFrame, exact: true });
 }
 export function microcosmTapeDecode(bytes: ArrayBuffer): Promise<AudioBuffer> { return (microcosmCore as any)?.tapeDecode(bytes); }
-export function microcosmTapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0, dur?: number, loopSec?: number, fadeIn: number = 0, fadeOut: number = 0): void { (microcosmCore as any)?.tapePlay(buf, when, gain, offset, dur, loopSec, fadeIn, fadeOut); }
+export function microcosmTapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0, dur?: number, loopSec?: number, fadeIn: number = 0, fadeOut: number = 0, pan: number = 0, track?: number): void { (microcosmCore as any)?.tapePlay(buf, when, gain, offset, dur, loopSec, fadeIn, fadeOut, pan, track); }
+export function microcosmTapeMixTrack(i: number, m: any): void { (microcosmCore as any)?.tapeMixTrack(i, m); }
+export function microcosmTapeMixMaster(m: any): void { (microcosmCore as any)?.tapeMixMaster(m); }
+export function microcosmTapeMixFx(f: any, bpm: number): void { (microcosmCore as any)?.tapeMixFx(f, bpm); }
+export function microcosmTapeMixFrame(): { bands: number[][]; master: number[] } | null { return (microcosmCore as any)?.tapeMixFrame() ?? null; }
 export function microcosmTapeStop(): void { (microcosmCore as any)?.tapeStopAll(); }
 export function microcosmRecordOpen(startFrame: number, cb: (L: Float32Array, R: Float32Array) => void): void { (microcosmCore as any)?.recordOpen(startFrame, cb); }
 export function microcosmRecordStopAt(frame: number): void { (microcosmCore as any)?.recordStopAt(frame); }

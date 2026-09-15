@@ -19,7 +19,7 @@ import {
   microcosmInputOn, microcosmInputOff, microcosmLiveArm, microcosmSynthOn, microcosmSynthOff,
   microcosmMonitor,
   microcosmLoadSourceData,
-  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
+  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeMixTrack, microcosmTapeMixMaster, microcosmTapeMixFx, microcosmTapeMixFrame, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
   microcosmCleanSync, microcosmCleanGain, microcosmCleanStrip,
   microcosmSetEngineMode, microcosmGetEngineMode, microcosmEngineFire,
   samplerAnalyseRoot,
@@ -31,7 +31,7 @@ import { perfEmit, perfClock, perfArm, perfDisarm } from '../../perf/bus';
 import Transport from '../../components/transport/Transport';
 import ArrangeRoom from '../../components/arrange/ArrangeRoom';
 import Sky, { HORIZON } from '../../components/sky/Sky';
-import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs, writeBlock, writeSongFile, readBlock, readSongFile, writeInPackage, readInPackage, listSongs as listSongsOnDisk } from '../../lib/haarHome';
+import { writeWav, writeInstrument, hasHome, pickHome, openInstrumentFile, saveInstrumentAs, saveWavAs, writeBlock, writeSongFile, readBlock, readSongFile, writeInPackage, readInPackage, listSongs as listSongsOnDisk, listInPackage } from '../../lib/haarHome';
 
 type OrbDef = { id: string; label: string; colorKey: any; engineType: string };
 // id is the orb INSTANCE id (unique); engineType is which scattering recipe it runs.
@@ -1879,6 +1879,8 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     setFieldOrbs(prev => [...prev, ...restored]);
     setConstellations(prev => [...prev.filter(c => c.orbIds.length > 0 || c.id !== DEFAULT_CONST_ID), ...newConsts]);
     const first = newConsts[0]?.id ?? null; if (first) { setSelectedInst(first); setActiveConstId(first); }
+    // joining while Arrange is open: arrive silent (touch), and remembered so leaving Arrange gives them their voice back
+    if (arrangeOpen) { const saved = hushRef.current ?? {}; for (const id of Object.values(idMap)) { saved[id] = 'drone'; microcosmSetEngineMode(id, 'touch'); } hushRef.current = saved; }
     return first;
   }
   function clearRack() {                                          // everything off the sky - before a song's rack comes in
@@ -2352,7 +2354,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       const next = cur.map((t, i) => i === trackIdx ? { ...t, blocks: [...t.blocks, block] } : t);
       arrUndoRef.current.push(cur);
       setArrTracks(next);
-      await writeSongFile({ name: arrSongName, bpm, tracks: next });
+      await writeSongFile(songDoc(next));
       setArrRec('idle'); arrRecRef.current = null;
       if (!arrPlaying) setArrPlayhead(startBar + bars);                  // the head moves on: the next take follows, it does not pile
       setArrStatus((onDisk ? 'landed · ' : 'landed but NOT on disk (no home) · ') + block.name + ' · ' + bars + ' bars · ' + (L.length / SR).toFixed(2) + ' s');
@@ -2383,7 +2385,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       const gLin = Math.pow(10, (b.gain ?? 0) / 20);
       const fIn = Math.max(0, (b.fadeIn ?? 0) - (s0 - b.startBar)) * spb;
       const fOut = (e0 >= b.startBar + b.lenBars - 1e-6) ? Math.min(b.fadeOut ?? 0, e0 - s0) * spb : 0;
-      microcosmTapePlay(buf, t0 + (s0 - fromBar) * spb, gLin, off, (e0 - s0) * spb, src, fIn, fOut);
+      microcosmTapePlay(buf, t0 + (s0 - fromBar) * spb, gLin, off, (e0 - s0) * spb, src, fIn, fOut, 0, arrTracksRef.current.indexOf(t));   // into its channel: level, pan, EQ, sends live in the mixer graph
       n++;
     } }
     return n;
@@ -2425,7 +2427,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       microcosmTapeStop(); cancelAnimationFrame(arrRafRef.current); window.clearInterval(arrLoopTimerRef.current); arrCycRef.current = null;
       setArrPlaying(false); setArrPlayhead(arrPlayFromRef.current); setArrStatus('tape stopped · head back to bar ' + (arrPlayFromRef.current + 1)); return;
     }
-    if (state !== 'playing') await doStart();
+    await ensureStarted();                                // the tape needs the audio running, not the instrument playing - Song plays the song, Start plays the instrument
     const tracks = arrTracksRef.current;
     for (const t of tracks) for (const b of t.blocks) {
       if (arrBufRef.current[b.id]) continue;
@@ -2465,19 +2467,23 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     if (arrPlaying) arrPlay();
     const fresh = Array.from({ length: 16 }, (_, i) => ({ id: 'track_' + (i + 1), name: 'TRACK ' + (i + 1), blocks: [] as any[] }));
     setArrSongName(name); setArrTracks(fresh); setArrSelBlock(null); setArrSelTrack(0); setArrPlayhead(0); arrBufRef.current = {};
-    await writeSongFile({ name, bpm, tracks: fresh });
+    arrRackRef.current = []; arrKeyRef.current = null;               // a new package: its rack is written when you SAVE SONG
+    await writeSongFile(songDoc(fresh, { name }));
     setArrStatus('new song · ' + name);
   }
+  const arrRackRef = useRef<any[]>([]);                              // the rack as last saved / opened - every song write carries it
+  const arrKeyRef = useRef<any>(null);
+  function songDoc(tracks: any[], patch: any = {}) { return { name: arrSongName, bpm, tracks, rack: arrRackRef.current, master: arrMasterRef.current, limiter: arrLimiter, fx: arrFx, key: arrKeyRef.current ?? { root: playNote, semi: playSemi, octave, lockKey, scaleLock, scaleMode }, ...patch } as any; }
   async function arrCommit(next: any[], status: string) {          // one door for every timeline change: undoable, saved
     arrUndoRef.current.push(arrTracksRef.current); if (arrUndoRef.current.length > 50) arrUndoRef.current.shift();
     setArrTracks(next);
-    await writeSongFile({ name: arrSongName, bpm, tracks: next });
+    await writeSongFile(songDoc(next));
     setArrStatus(status);
   }
   async function arrUndo() {
     const prev = arrUndoRef.current.pop(); if (!prev) { setArrStatus('nothing to undo'); return; }
     setArrTracks(prev); setArrSelBlock(null);
-    await writeSongFile({ name: arrSongName, bpm, tracks: prev });
+    await writeSongFile(songDoc(prev));
     setArrStatus('undone');
   }
   function arrDeleteBlock(id: string) {
@@ -2497,16 +2503,22 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       await writeInPackage(songNm, 'instruments', file, buildInstrumentJson(c.name, c.id, c.name), true);
       rack.push({ name: c.name, file, selected: c.id === (selectedInst || activeConstId) });
     }
-    await writeSongFile({ name: songNm, bpm, tracks: arrTracksRef.current, rack, key: { root: playNote, semi: playSemi, octave, lockKey, scaleLock, scaleMode } } as any);   // the song carries its key, like its tempo
+    arrRackRef.current = rack; arrKeyRef.current = { root: playNote, semi: playSemi, octave, lockKey, scaleLock, scaleMode };
+    await writeSongFile(songDoc(arrTracksRef.current, { name: songNm }));   // the song carries its key, like its tempo
     setArrStatus('saved · ' + songNm + ' · ' + rack.length + ' instrument' + (rack.length === 1 ? '' : 's'));
   }
   async function arrOpenSong(name: string) {
     const song: any = await readSongFile(name); if (!song) { setArrStatus('no song: ' + name); return; }
+    // the rack: the list in the file, or - if the list is missing - every instrument actually in the package (takes' snapshots excluded)
+    let rackList: any[] = song.rack || [];
+    if (!rackList.length) { const files = (await listInPackage(name, 'instruments')).filter(f => /\.json$/.test(f) && !/_[0-9a-f]{8}\.json$/.test(f)); rackList = files.map((file, k) => ({ name: file.replace(/\.json$/, ''), file, selected: k === 0 })); }
+    arrRackRef.current = rackList; arrKeyRef.current = song.key ?? null;
     setArrSongName(name); setArrTracks(song.tracks || []); arrTracksRef.current = song.tracks || [];
     if (song.bpm) { setBpm(song.bpm); microcosmBpm(song.bpm); }
+    setArrMaster(song.master ?? 0); arrMasterRef.current = song.master ?? 0; setArrLimiter(song.limiter ?? true); if (song.fx) setArrFx(song.fx);
     clearRack();
     let pick: string | null = null;
-    for (const r of (song.rack || [])) { const txt = await readInPackage(name, 'instruments', r.file); if (!txt) continue; try { const id = await addInstrumentData(JSON.parse(txt)); if (r.selected && id) pick = id; } catch (e) { console.warn('[song] instrument', r.file, e); } }
+    for (const r of rackList) { const txt = await readInPackage(name, 'instruments', r.file); if (!txt) continue; try { const id = await addInstrumentData(JSON.parse(txt)); if (r.selected && id) pick = id; } catch (e) { console.warn('[song] instrument', r.file, e); } }
     if (pick) { setSelectedInst(pick); setActiveConstId(pick); }
     if (song.key) {                                                   // and comes back in its key, pressed through the same door a finger uses
       const k = song.key;
@@ -2514,7 +2526,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       if (typeof k.octave === 'number') setOctave(k.octave);
       if (k.root) { setPlayNote(k.root); pendingRetuneRef.current = { note: k.root, semi: k.semi ?? 0 }; setRetuneTick(t => t + 1); }
     }
-    setArrStatus('opened · ' + name + ' · ' + (song.rack?.length || 0) + ' instrument' + ((song.rack?.length || 0) === 1 ? '' : 's'));
+    setArrStatus('opened · ' + name + ' · ' + rackList.length + ' instrument' + (rackList.length === 1 ? '' : 's'));
   }
   const [songList, setSongList] = useState<string[] | null>(null);
   const [buildSheet, setBuildSheet] = useState<'save' | 'open' | null>(null);
@@ -2523,11 +2535,20 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   const [retuneTick, setRetuneTick] = useState(0);
   useEffect(() => { const q = pendingRetuneRef.current; if (q && fieldOrbs.length) { pendingRetuneRef.current = null; try { playAt(q.note, q.semi); } catch (e) { console.warn('[retune]', e); } } }, [retuneTick, lockKey, octave, fieldOrbs, constellations]);   // Build's Save and Open doors: song or instrument
   async function arrShowSongs() { setSongList(await listSongsOnDisk()); }
-  function arrTrackChange(i: number, patch: { mute?: boolean; solo?: boolean; name?: string }) {
+  // THE DESK: state, apply, save, open. Faders move the graph at once; only solo re-cuts.
+  const [arrMaster, setArrMaster] = useState(0); const arrMasterRef = useRef(0); arrMasterRef.current = arrMaster;
+  const [arrLimiter, setArrLimiter] = useState(true);
+  const [arrFx, setArrFx] = useState<{ rev: { size: number; damp: number; mix: number }; dly: { beats: number; feedback: number; mix: number } }>({ rev: { size: 0.5, damp: 0.4, mix: 1 }, dly: { beats: 0.75, feedback: 0.35, mix: 1 } });
+  const trackMixOf = (t: any) => ({ level: t.level ?? 0, pan: t.pan ?? 0, eq: t.eq ?? { lo: 0, mid: 0, hi: 0 }, sends: t.sends ?? { rev: 0, dly: 0 }, mute: !!t.mute });
+  useEffect(() => { arrTracks.forEach((t: any, i: number) => microcosmTapeMixTrack(i, trackMixOf(t))); microcosmTapeMixMaster({ level: arrMasterRef.current, limiter: arrLimiter }); microcosmTapeMixFx(arrFx, bpm); }, [arrTracks, bpm, arrLimiter, arrFx]);
+  function arrMasterChange(db: number) { setArrMaster(db); arrMasterRef.current = db; microcosmTapeMixMaster({ level: db, limiter: arrLimiter }); writeSongFile(songDoc(arrTracksRef.current, { master: db })); }
+  function arrLimiterChange(on: boolean) { setArrLimiter(on); writeSongFile(songDoc(arrTracksRef.current, { limiter: on })); }
+  function arrFxChange(fx: typeof arrFx) { setArrFx(fx); writeSongFile(songDoc(arrTracksRef.current, { fx })); }
+  function arrTrackChange(i: number, patch: { mute?: boolean; solo?: boolean; name?: string; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } }) {
     const next = arrTracksRef.current.map((t: any, k: number) => k === i ? { ...t, ...patch } : t);
     arrCommit(next, patch.name != null ? 'renamed track ' + (i + 1) : (patch.solo != null ? 'solo ' + (patch.solo ? 'on' : 'off') : 'mute ' + (patch.mute ? 'on' : 'off')) + ' · track ' + (i + 1));
     arrTracksRef.current = next;                                                     // the tape reads the ref: make it true now
-    if (patch.mute != null || patch.solo != null) arrRecycle(arrLoop, arrLoopA, arrLoopBars);   // and re-cut this instant, not on the bar
+    if (patch.solo != null) arrRecycle(arrLoop, arrLoopA, arrLoopBars);   // solo re-cuts; mute, level, pan, EQ and sends move in the graph at once (the effect on arrTracks applies them)
   }
   function arrBlockChange(id: string, patch: { startBar?: number; lenBars?: number; gain?: number; fadeIn?: number; fadeOut?: number; name?: string }, track?: number) {
     const cur = arrTracksRef.current;
@@ -2949,6 +2970,8 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           onNormalise={arrNormalise}
           onTrackChange={arrTrackChange}
           onSaveSong={arrSaveSong} onOpenSong={arrShowSongs}
+          master={arrMaster} limiter={arrLimiter} fx={arrFx} onMaster={arrMasterChange} onLimiter={arrLimiterChange} onFx={arrFxChange}
+          meters={microcosmTapeMixFrame}
           songName={arrSongName}
           onOpenInstrument={(id) => { const b = arrTracks.flatMap(t => t.blocks).find(x => x.id === id); if (b?.instrument) openInstrumentSnapshot(b.instrument); }}
           tracks={arrTracks} playhead={arrPlayhead} zoom={arrZoom} scroll={arrScroll}
@@ -4222,7 +4245,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
               </div>
               {/* SONG - play the tape under whatever you are building */}
               <div className="haar-hover" style={{ textAlign:'center', width:56 }}>
-                <div onClick={() => { if (arrPlaying) arrStopNow(); else arrPlay(); }} title="play the song under the instrument"
+                <div onClick={() => { if (arrRec !== 'idle') arrStopNow(); else arrPlay(); }} title="play the song under the instrument"
                   style={{ width:44, height:44, margin:'0 auto', borderRadius:'50%', cursor:'pointer', border:`1.5px solid ${arrPlaying ? '#fff' : 'rgba(255,255,255,0.4)'}`, background: arrPlaying ? 'rgba(255,255,255,0.22)' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   {arrPlaying ? <div style={{ width:11, height:11, background:'#fff', borderRadius:2 }} /> : <div style={{ width:0, height:0, borderLeft:'11px solid #fff', borderTop:'7px solid transparent', borderBottom:'7px solid transparent', marginLeft:3 }} />}
                 </div>

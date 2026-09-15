@@ -145,8 +145,8 @@ export async function openInstrumentFile(): Promise<string | null> {
 // Move a song folder and its audio goes with it. Nothing lives outside the package.
 /** gain (dB), fadeIn / fadeOut (bars): the take's voice, applied at play time, never written into the wav */
 export type HaarBlock = { gain?: number; fadeIn?: number; fadeOut?: number; id: string; startBar: number; lenBars: number; name: string; file: string; srcBars?: number; offset?: number; perf?: string; instrument?: string };
-export type HaarTrack = { id: string; name: string; blocks: HaarBlock[]; mute?: boolean; solo?: boolean };
-export type HaarSong  = { name: string; bpm: number; tracks: HaarTrack[] };
+export type HaarTrack = { id: string; name: string; blocks: HaarBlock[]; mute?: boolean; solo?: boolean; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } };   // level dB, pan -1..1, eq dB, sends 0..1
+export type HaarSong  = { name: string; bpm: number; tracks: HaarTrack[]; master?: number; limiter?: boolean; fx?: { rev: { size: number; damp: number; mix: number }; dly: { beats: number; feedback: number; mix: number } } };
 
 export async function songDir(name: string, create: boolean = true): Promise<FileSystemDirectoryHandle | null> {
   const home = await getHome();
@@ -224,5 +224,10 @@ export async function listSongs(): Promise<string[]> {
   const home = await getHome(); if (!home) return [];
   try { const haar = await home.getDirectoryHandle('Haar', { create: true }); const songs = await haar.getDirectoryHandle('Songs', { create: true });
     const out: string[] = []; for await (const [name, h] of (songs as any).entries()) { if (h.kind === 'directory') out.push(name); } return out.sort(); } catch { return []; }
+}
+/** the files in a folder of a song package - e.g. listInPackage(song, 'instruments') */
+export async function listInPackage(song: string, sub: string): Promise<string[]> {
+  const dir = await songDir(song, false); if (!dir) return [];
+  try { const d = await dir.getDirectoryHandle(sub); const out: string[] = []; for await (const [name, h] of (d as any).entries()) { if (h.kind === 'file') out.push(name); } return out.sort(); } catch { return []; }
 }
 export async function hasHome(): Promise<boolean> { return (await getHome()) !== null; }

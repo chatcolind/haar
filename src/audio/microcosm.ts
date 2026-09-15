@@ -1,3 +1,4 @@
+import { TapeMixer, type TrackMix, type MasterMix, type FxMix } from './tapeMixer';
 import * as Tone from 'tone';
 
 // MICROCOSM — pure live processor, built 100% from native Web Audio nodes
@@ -450,11 +451,12 @@ export class Microcosm {
   // destination. They never touch the worklet or the recorder tap - a take can never hear the tape.
   private _tape: { src: AudioBufferSourceNode; g: GainNode }[] = [];
   async tapeDecode(bytes: ArrayBuffer): Promise<AudioBuffer> { return await this.ctx.decodeAudioData(bytes.slice(0)); }
-  tapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0, dur?: number, loopSec?: number, fadeIn: number = 0, fadeOut: number = 0): void {
+  tapePlay(buf: AudioBuffer, when: number, gain: number = 1, offset: number = 0, dur?: number, loopSec?: number, fadeIn: number = 0, fadeOut: number = 0, pan: number = 0, track?: number): void {
     const src = this.ctx.createBufferSource(); src.buffer = buf;
     if (loopSec && loopSec > 0) { src.loop = true; src.loopStart = 0; src.loopEnd = loopSec; }   // a repeated block
     const g = this.ctx.createGain();
-    src.connect(g); g.connect(this.ctx.destination);
+    // into the mixer's channel when a track is named; straight out otherwise (auditions)
+    src.connect(g); if (track != null) g.connect(this.tapeMixer().channel(track).input); else { const pn = this.ctx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, pan)); g.connect(pn); pn.connect(this.ctx.destination); }
     const at = Math.max(when, this.ctx.currentTime);
     // FADES: ramps on the block's own gain node - non-destructive, the wav is never touched
     if (fadeIn > 0.005) { g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(Math.max(0.0001, gain), at + fadeIn); } else g.gain.setValueAtTime(gain, at);
@@ -464,6 +466,12 @@ export class Microcosm {
     const rec = { src, g }; this._tape.push(rec);
     src.onended = () => { const i = this._tape.indexOf(rec); if (i >= 0) this._tape.splice(i, 1); try { g.disconnect(); } catch {} };
   }
+  private _mixer: TapeMixer | null = null;
+  tapeMixer(): TapeMixer { if (!this._mixer) this._mixer = new TapeMixer(this.ctx, 16); return this._mixer; }
+  tapeMixTrack(i: number, m: TrackMix): void { this.tapeMixer().setTrack(i, m); }
+  tapeMixMaster(m: MasterMix): void { this.tapeMixer().setMaster(m); }
+  tapeMixFx(f: FxMix, bpm: number): void { this.tapeMixer().setFx(f, bpm); }
+  tapeMixFrame(): { bands: number[][]; master: number[] } { return this.tapeMixer().frame(); }
   tapeStopAll(): void {
     for (const t of this._tape) { try { t.src.stop(); } catch {} try { t.g.disconnect(); } catch {} }
     this._tape = [];
