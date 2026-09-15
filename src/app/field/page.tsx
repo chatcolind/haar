@@ -1803,7 +1803,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       const sb = sourceBytesRef.current[c.sourceId];
       if (sb) { sourceMeta[c.sourceId] = { name: sb.name }; idbSet('src_'+c.sourceId, sb).catch(err=>console.warn('[idb] save failed', c.sourceId, err)); }
     }
-    return JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, key: { lockKey, root: playNote, scaleLock, scaleMode, octave }, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta });
+    return JSON.stringify({ name, ts:Date.now(), orbs, prog, bpm, key: { lockKey, root: playNote, semi: playSemi, scaleLock, scaleMode, octave }, tape: { master: tapeMaster, bal: tapeBal, muted: tapeMuted }, constellations: consts, sourceMeta });
   }
   const instrumentOnSky = () => constellations.find(c => c.id === (selectedInst || activeConstId)) || null;
   const hasRealName = (n: string) => !!n && !/^Instrument \d+$/.test(n) && n !== 'Synth';
@@ -1979,7 +1979,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     }
     setFieldOrbs(restored); setCurrentSongName(name); setSongMenu(null);
     // and press the key it was played at, through the same door a finger uses - so every instrument is tuned exactly as it was saved
-    if (data.key?.root) { const rt = data.key.root; window.setTimeout(() => { try { playAt(rt, 0); } catch (e) { console.warn('[load] retune', e); } }, 60); }
+    if (data.key?.root) { pendingRetuneRef.current = { note: data.key.root, semi: data.key.semi ?? 0 }; setRetuneTick(t => t + 1); }
   }
   const [life, setLife] = useState(0.32);
   const [tapeAmt, setTapeAmt] = useState(0);   // Tape character amount 0..1 (drag the button)
@@ -2486,15 +2486,19 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   }
   // THE SONG CARRIES THE RACK. Save writes every instrument into the package; open brings the rack back.
   async function arrSaveSong() {
+    if (!arrSongName || arrSongName === 'untitled') { const n = (window.prompt('name this song', '') || '').trim(); if (!n) return; setArrSongName(n); await new Promise(r => setTimeout(r, 0)); return arrSaveSongAs(n); }
+    return arrSaveSongAs(arrSongName);
+  }
+  async function arrSaveSongAs(songNm: string) {
     const rack: { name: string; file: string; selected: boolean }[] = [];
     for (const c of constellations) {
       if (!c.orbIds.length) continue;
       const file = c.name.replace(/[^\w\- ]+/g, '_') + '.json';
-      await writeInPackage(arrSongName, 'instruments', file, buildInstrumentJson(c.name, c.id, c.name), true);
+      await writeInPackage(songNm, 'instruments', file, buildInstrumentJson(c.name, c.id, c.name), true);
       rack.push({ name: c.name, file, selected: c.id === (selectedInst || activeConstId) });
     }
-    await writeSongFile({ name: arrSongName, bpm, tracks: arrTracksRef.current, rack } as any);
-    setArrStatus('saved · ' + arrSongName + ' · ' + rack.length + ' instrument' + (rack.length === 1 ? '' : 's'));
+    await writeSongFile({ name: songNm, bpm, tracks: arrTracksRef.current, rack, key: { root: playNote, semi: playSemi, octave, lockKey, scaleLock, scaleMode } } as any);   // the song carries its key, like its tempo
+    setArrStatus('saved · ' + songNm + ' · ' + rack.length + ' instrument' + (rack.length === 1 ? '' : 's'));
   }
   async function arrOpenSong(name: string) {
     const song: any = await readSongFile(name); if (!song) { setArrStatus('no song: ' + name); return; }
@@ -2504,9 +2508,20 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     let pick: string | null = null;
     for (const r of (song.rack || [])) { const txt = await readInPackage(name, 'instruments', r.file); if (!txt) continue; try { const id = await addInstrumentData(JSON.parse(txt)); if (r.selected && id) pick = id; } catch (e) { console.warn('[song] instrument', r.file, e); } }
     if (pick) { setSelectedInst(pick); setActiveConstId(pick); }
+    if (song.key) {                                                   // and comes back in its key, pressed through the same door a finger uses
+      const k = song.key;
+      if (k.lockKey) setLockKey(k.lockKey); if (typeof k.scaleLock === 'boolean') setScaleLock(k.scaleLock); if (k.scaleMode) setScaleMode(k.scaleMode);
+      if (typeof k.octave === 'number') setOctave(k.octave);
+      if (k.root) { setPlayNote(k.root); pendingRetuneRef.current = { note: k.root, semi: k.semi ?? 0 }; setRetuneTick(t => t + 1); }
+    }
     setArrStatus('opened · ' + name + ' · ' + (song.rack?.length || 0) + ' instrument' + ((song.rack?.length || 0) === 1 ? '' : 's'));
   }
   const [songList, setSongList] = useState<string[] | null>(null);
+  const [buildSheet, setBuildSheet] = useState<'save' | 'open' | null>(null);
+  // RETUNE ON OPEN: the key press a loader asks for, made from a fresh render so lockKey / octave / the engines are all current
+  const pendingRetuneRef = useRef<{ note: string; semi: number } | null>(null);
+  const [retuneTick, setRetuneTick] = useState(0);
+  useEffect(() => { const q = pendingRetuneRef.current; if (q && fieldOrbs.length) { pendingRetuneRef.current = null; try { playAt(q.note, q.semi); } catch (e) { console.warn('[retune]', e); } } }, [retuneTick, lockKey, octave, fieldOrbs, constellations]);   // Build's Save and Open doors: song or instrument
   async function arrShowSongs() { setSongList(await listSongsOnDisk()); }
   function arrTrackChange(i: number, patch: { mute?: boolean; solo?: boolean; name?: string }) {
     const next = arrTracksRef.current.map((t: any, k: number) => k === i ? { ...t, ...patch } : t);
@@ -2863,6 +2878,31 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       {/* SKY - Build's weather, yours to change. Glass, top-right. */}
       {!arrangeOpen && <div onClick={cycleSky} title="the sky over Build - tap to change the weather" style={{ position:'fixed', top:22, right:24, zIndex:60, padding:'7px 14px', borderRadius:16, cursor:'pointer', fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize:11, letterSpacing:'0.14em', color:'#ffd2b0', border:'1px solid rgba(255,210,176,0.35)', background:'linear-gradient(180deg, rgba(60,30,70,0.32), rgba(20,12,30,0.38))', backdropFilter:'blur(18px)', WebkitBackdropFilter:'blur(18px)', boxShadow:'inset 0 1px 0 rgba(255,255,255,0.18)' }}>sky · {SKY_NAMES[buildSky]}</div>}
       {/* the song's instrument snapshots reach Build through OPEN INSTRUMENT on a take's card */}
+      {/* SAVE / OPEN in Build: the song (rack + timeline) or the instrument on the sky */}
+      {!arrangeOpen && buildSheet && <div onClick={() => setBuildSheet(null)} style={{ position:'fixed', inset:0, zIndex:950, background:'rgba(20,10,30,0.3)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ minWidth:340, padding:'16px 18px', borderRadius:18, fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', color:'#fff', border:'1px solid rgba(255,255,255,0.3)', background:'linear-gradient(180deg, rgba(60,30,70,0.5), rgba(20,12,30,0.6))', backdropFilter:'blur(22px)', WebkitBackdropFilter:'blur(22px)', boxShadow:'0 30px 60px rgba(20,10,40,0.5), inset 0 1px 0 rgba(255,255,255,0.18)' }}>
+          <div style={{ fontSize:10, letterSpacing:'0.22em', opacity:0.6, marginBottom:10 }}>{buildSheet === 'save' ? 'SAVE' : 'OPEN'}</div>
+          {buildSheet === 'save' ? (<>
+            <div onClick={() => { setBuildSheet(null); arrSaveSong(); }} style={{ padding:'11px 12px', borderRadius:12, cursor:'pointer', border:'1px solid rgba(255,255,255,0.2)', marginBottom:8 }}>
+              <div style={{ fontSize:13 }}>save song <span style={{ opacity:0.7 }}>· {arrSongName && arrSongName !== 'untitled' ? arrSongName : 'untitled'}</span></div>
+              <div style={{ fontSize:11, opacity:0.55, marginTop:3 }}>the rack and the arrangement, together</div>
+            </div>
+            {(() => { const c = instrumentOnSky(); return c && c.orbIds.length ? <div onClick={() => { setBuildSheet(null); if (hasRealName(c.name)) saveSelectedInstrument(c.name); else { setSongName(''); setSongMenu('save'); } }} style={{ padding:'11px 12px', borderRadius:12, cursor:'pointer', border:'1px solid rgba(255,255,255,0.2)' }}>
+              <div style={{ fontSize:13 }}>save instrument <span style={{ opacity:0.7 }}>· {c.name}</span></div>
+              <div style={{ fontSize:11, opacity:0.55, marginTop:3 }}>this sound on its own, for other songs</div>
+            </div> : null; })()}
+          </>) : (<>
+            <div onClick={() => { setBuildSheet(null); arrShowSongs(); }} style={{ padding:'11px 12px', borderRadius:12, cursor:'pointer', border:'1px solid rgba(255,255,255,0.2)', marginBottom:8 }}>
+              <div style={{ fontSize:13 }}>open song…</div>
+              <div style={{ fontSize:11, opacity:0.55, marginTop:3 }}>its rack and its arrangement come back</div>
+            </div>
+            <div onClick={() => { setBuildSheet(null); (async () => { const txt = await openInstrumentFile(); if (txt) { try { await addInstrumentData(JSON.parse(txt)); } catch (e) { console.warn('[open] instrument', e); } } })(); }} style={{ padding:'11px 12px', borderRadius:12, cursor:'pointer', border:'1px solid rgba(255,255,255,0.2)' }}>
+              <div style={{ fontSize:13 }}>open instrument…</div>
+              <div style={{ fontSize:11, opacity:0.55, marginTop:3 }}>joins the rack</div>
+            </div>
+          </>)}
+        </div>
+      </div>}
       {/* the instrument on the sky, under HAAR */}
       {!arrangeOpen && (() => { const c = instrumentOnSky(); return c ? <div style={{ position:'fixed', top:70, left:46, zIndex:60, fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize:11, letterSpacing:'0.22em', color: hasRealName(c.name) ? 'rgba(255,245,235,0.8)' : 'rgba(255,245,235,0.4)' }}>{c.name.toUpperCase()}</div> : null; })()}
       {/* THE RACK - a circle bottom-right; tap to open. One row per instrument: its moon's colour, name (tap to select), M, S. Drone / touch for the whole instrument beneath. */}
@@ -2896,7 +2936,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       </div>}
       {/* ROLLING, in the sky: one quiet readout while the tape records or plays in Build - nothing else appears */}
       {!arrangeOpen && (arrRec !== 'idle' || arrPlaying) && <div style={{ position: 'fixed', left: '50%', top: 22, transform: 'translateX(-50%)', zIndex: 60, pointerEvents: 'none', fontFamily: '-apple-system, "Helvetica Neue", Inter, sans-serif', fontSize: 13, letterSpacing: '0.14em', color: arrRec === 'rolling' ? '#ffb3b3' : arrRec === 'armed' ? '#ffd2b0' : 'rgba(255,245,235,0.7)', textShadow: '0 1px 12px rgba(0,0,0,0.6)' }}>{arrRec === 'rolling' ? 'rec · bar ' + arrRecBar + ' · to ' + (arrSelTrack + 1) : arrRec === 'armed' ? 'armed · to ' + (arrSelTrack + 1) : 'playing · bar ' + (Math.floor(arrPlayhead) + 1)}</div>}
-      {arrangeOpen && songList && <div onClick={() => setSongList(null)} style={{ position:'fixed', inset:0, zIndex:950, background:'rgba(20,10,30,0.35)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+      {songList && <div onClick={() => setSongList(null)} style={{ position:'fixed', inset:0, zIndex:950, background:'rgba(20,10,30,0.35)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center' }}>
         <div onClick={(e) => e.stopPropagation()} style={{ minWidth:320, maxHeight:'60vh', overflowY:'auto', padding:'16px 18px', borderRadius:18, fontFamily:'-apple-system, "Helvetica Neue", Inter, sans-serif', color:'#fff', border:'1px solid rgba(255,255,255,0.35)', background:'linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.14))', backdropFilter:'blur(22px)', WebkitBackdropFilter:'blur(22px)', boxShadow:'0 30px 60px rgba(20,10,40,0.4)' }}>
           <div style={{ fontSize:10, letterSpacing:'0.22em', opacity:0.7, marginBottom:10 }}>OPEN SONG</div>
           {songList.length === 0 && <div style={{ opacity:0.6, fontSize:12 }}>no songs in Haar/Songs yet</div>}
@@ -4133,13 +4173,13 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           <div className="haar-section" style={{ position:'absolute', left:'50%', bottom:0, transform:'translateX(-50%)', display:'flex', flexDirection:'column', alignItems:'center' }}>
             <div className="haar-sectionlbl" style={{ ...zlabel, alignSelf:'center' }}>INSTRUMENTS</div>
             <div style={{ display:'flex', alignItems:'flex-end', gap:30 }}>
-              <div onClick={()=>{ const c = instrumentOnSky(); if (c && hasRealName(c.name)) saveSelectedInstrument(c.name); else { setSongName(c && hasRealName(c.name) ? c.name : ''); setSongMenu('save'); } }} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+              <div onClick={()=>setBuildSheet('save')} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(122,245,200,0.5)', background:'rgba(122,245,200,0.06)', boxShadow:'0 0 18px 3px rgba(122,245,200,0.4), inset 0 0 14px rgba(122,245,200,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#7af5c8" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M4 4h9l3 3v9H4z"/><path d="M7 4v4h6V4M7 16v-5h6v5" /></g></svg>
                 </div>
                 <div className="haar-lbl" style={{ fontSize:12.5, color:'#a6fff2', marginTop:8 }}>Save</div>
               </div>
-              <div onClick={()=>(async ()=>{ const txt = await openInstrumentFile(); if (txt) { try { const data = JSON.parse(txt); await addInstrumentData(data); if (data.name) setCurrentSongName(data.name); } catch { console.warn('[song] unreadable file'); } } })()} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
+              <div onClick={()=>setBuildSheet('open')} className="haar-hover" style={{ textAlign:'center', cursor:'pointer' }}>
                 <div style={{ width:52, height:52, borderRadius:'50%', border:'1px solid rgba(216,166,255,0.5)', background:'rgba(216,166,255,0.06)', boxShadow:'0 0 18px 3px rgba(216,166,255,0.4), inset 0 0 14px rgba(216,166,255,0.15)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <svg width="22" height="22" viewBox="0 0 20 20"><g stroke="#d8a6ff" strokeWidth="1.3" fill="none" opacity="0.9"><path d="M3 5h5l2 2h7v9H3z"/></g></svg>
                 </div>
