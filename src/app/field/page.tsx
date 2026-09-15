@@ -27,6 +27,7 @@ import {
   microcosmTapOn, microcosmTapOff, microcosmCaptureTap, samplerClick, samplerLoopPlay, samplerLoopStop, samplerLoopPos,
   samplerExportWav, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
 } from '../../audio/engine';
+import { cutBlocks } from '../../audio/cuts';
 import { perfEmit, perfClock, perfArm, perfDisarm } from '../../perf/bus';
 import Transport from '../../components/transport/Transport';
 import ArrangeRoom from '../../components/arrange/ArrangeRoom';
@@ -2372,23 +2373,9 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // range set: the region cycles - each pass is scheduled a bar ahead, blocks cut at the region edges. Second
   // press stops and returns the head. Players go straight to destination - the record tap never hears them.
   function arrSchedule(fromBar: number, toBar: number, t0: number, spb: number): number {
-    let n = 0;
-    const anySolo = arrTracksRef.current.some((t: any) => t.solo);
-    for (const t of arrTracksRef.current) { if (t.mute || (anySolo && !t.solo)) continue; for (const b of t.blocks) {
-      const buf = arrBufRef.current[b.id]; if (!buf) continue;
-      const bs = b.startBar, be = b.startBar + b.lenBars;
-      const s0 = Math.max(bs, fromBar), e0 = Math.min(be, toBar);
-      if (e0 <= s0) continue;
-      const src = b.srcBars && b.srcBars < b.lenBars + (b.offset || 0) ? b.srcBars * spb : undefined;   // needs to go round: loop the source
-      let off = ((b.offset || 0) + (s0 - bs)) * spb; if (src) off = off % src;
-      // the block's own voice: gain in dB, fades in bars - trimmed when the region starts inside the block or ends before its end
-      const gLin = Math.pow(10, (b.gain ?? 0) / 20);
-      const fIn = Math.max(0, (b.fadeIn ?? 0) - (s0 - b.startBar)) * spb;
-      const fOut = (e0 >= b.startBar + b.lenBars - 1e-6) ? Math.min(b.fadeOut ?? 0, e0 - s0) * spb : 0;
-      microcosmTapePlay(buf, t0 + (s0 - fromBar) * spb, gLin, off, (e0 - s0) * spb, src, fIn, fOut, 0, arrTracksRef.current.indexOf(t));   // into its channel: level, pan, EQ, sends live in the mixer graph
-      n++;
-    } }
-    return n;
+    const cuts = cutBlocks(arrTracksRef.current, arrBufRef.current, fromBar, toBar, t0, spb);
+    for (const c of cuts) microcosmTapePlay(c.buf, c.at, c.gain, c.offset, c.dur, c.loopSec, c.fadeIn, c.fadeOut, 0, c.track);   // into its channel: level, pan, EQ, sends live in the mixer graph
+    return cuts.length;
   }
   function arrPump(spb: number) {
     const c = arrCycRef.current; if (!c) return;
