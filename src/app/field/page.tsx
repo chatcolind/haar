@@ -2374,6 +2374,16 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // ── ARRANGE PLAY: every block a native player scheduled on the audio clock from the next bar. LOOP on with a
   // range set: the region cycles - each pass is scheduled a bar ahead, blocks cut at the region edges. Second
   // press stops and returns the head. Players go straight to destination - the record tap never hears them.
+  // every block's wav decoded and held in arrBufRef - the tape and EXPORT both need this before they cut
+  async function arrDecodeBlocks() {
+    await ensureStarted();
+    for (const t of arrTracksRef.current) for (const b of t.blocks) {
+      if (arrBufRef.current[b.id]) continue;
+      const bytes = await readBlock(arrSongName, b.file);
+      if (!bytes) { console.warn('[arrange] block not on disk', b.file); continue; }
+      try { arrBufRef.current[b.id] = await microcosmTapeDecode(bytes); setArrPeaksTick(t => t + 1); } catch (e) { console.warn('[arrange] decode failed', b.file, e); }
+    }
+  }
   function arrSchedule(fromBar: number, toBar: number, t0: number, spb: number): number {
     const cuts = cutBlocks(arrTracksRef.current, arrBufRef.current, fromBar, toBar, t0, spb);
     for (const c of cuts) microcosmTapePlay(c.buf, c.at, c.gain, c.offset, c.dur, c.loopSec, c.fadeIn, c.fadeOut, 0, c.track);   // into its channel: level, pan, EQ, sends live in the mixer graph
@@ -2418,12 +2428,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     }
     await ensureStarted();                                // the tape needs the audio running, not the instrument playing - Song plays the song, Start plays the instrument
     const tracks = arrTracksRef.current;
-    for (const t of tracks) for (const b of t.blocks) {
-      if (arrBufRef.current[b.id]) continue;
-      const bytes = await readBlock(arrSongName, b.file);
-      if (!bytes) { console.warn('[arrange] block not on disk', b.file); continue; }
-      try { arrBufRef.current[b.id] = await microcosmTapeDecode(bytes); setArrPeaksTick(t => t + 1); } catch (e) { console.warn('[arrange] decode failed', b.file, e); }
-    }
+    await arrDecodeBlocks();
     const spb = (60 / bpm) * 4;
     const now = microcosmAudioTime();
     const t0 = now + 0.08;                                            // the tape rolls NOW - the transport is the clock
@@ -2533,6 +2538,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   function arrMasterChange(db: number) { setArrMaster(db); arrMasterRef.current = db; microcosmTapeMixMaster({ level: db, limiter: arrLimiter }); writeSongFile(songDoc(arrTracksRef.current, { master: db })); }
   // EXPORT: the whole song through the desk, offline, to mix/<song>.wav in the package
   async function arrExport() {
+    await arrDecodeBlocks();
     const tracks = arrTracksRef.current;
     const r = await renderSong({ tracks, bufs: arrBufRef.current, mixes: tracks.map((t: any) => trackMixOf(t)), master: { level: arrMasterRef.current, limiter: arrLimiter }, fx: arrFx, bpm, spb: (60 / bpm) * 4 });
     if (!r) { console.log('[export] nothing to render'); return; }
