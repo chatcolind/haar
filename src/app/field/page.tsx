@@ -2432,7 +2432,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     await arrDecodeBlocks();
     const spb = (60 / bpm) * 4;
     const now = microcosmAudioTime();
-    const t0 = now + 0.08;                                            // the tape rolls NOW - the transport is the clock
+    const t0 = arrPrintT0Ref.current ?? (now + 0.08); arrPrintT0Ref.current = null;   // the tape rolls NOW - or, for a print, on the downbeat after its count-in
     const cycling = arrLoop && arrLoopA != null && arrLoopBars >= 1;
     if (cycling) {
       const A = arrLoopA as number, len = arrLoopBars;
@@ -2451,7 +2451,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     arrPlayFromRef.current = fromBar;
     barAudioAnchorRef.current = t0;                                   // the bar clock re-anchors to the press
     const n = arrSchedule(fromBar, Infinity, t0, spb);
-    if (arrPrintRef.current) { microcosmTapeTapStart(t0); arrPrintTimerRef.current = window.setTimeout(() => arrPlayRef.current(), ((songEndBar(tracks) - fromBar) * spb + 3) * 1000 + 80); }   // the tap opens as the tape rolls; closes 3 s after the last block
+    if (arrPrintRef.current) { microcosmTapeTapStart(t0); arrPrintTimerRef.current = window.setTimeout(() => arrPlayRef.current(), ((songEndBar(tracks) - fromBar) * spb + 3 + (t0 - now)) * 1000); }   // the tap opens as the tape rolls; closes 3 s after the last block
     setArrPlaying(true);
     setArrStatus('tape · ' + n + ' block' + (n === 1 ? '' : 's') + ' · from bar ' + (fromBar + 1));
     const sweep = () => { const h = Math.max(fromBar, fromBar + (microcosmAudioTime() - t0) / spb); arrPlayheadRef.current = h; setArrPlayhead(h); arrRafRef.current = requestAnimationFrame(sweep); };
@@ -2468,7 +2468,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     await writeSongFile(songDoc(fresh, { name }));
     setArrStatus('new song · ' + name);
   }
-  const arrPrintRef = useRef(false); const arrPrintTimerRef = useRef(0);    // PRINT: the tape rolls with the tap open
+  const arrPrintRef = useRef(false); const arrPrintTimerRef = useRef(0); const arrPrintT0Ref = useRef<number | null>(null);    // PRINT: the tape rolls with the tap open
   const arrRackRef = useRef<any[]>([]);                              // the rack as last saved / opened - every song write carries it
   const arrKeyRef = useRef<any>(null);
   function songDoc(tracks: any[], patch: any = {}) { return { name: arrSongName, bpm, tracks, rack: arrRackRef.current, master: arrMasterRef.current, limiter: arrLimiter, fx: arrFx, key: arrKeyRef.current ?? { root: playNote, semi: playSemi, octave, lockKey, scaleLock, scaleMode }, ...patch } as any; }
@@ -2558,8 +2558,11 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     arrPrintRef.current = true;
     setArrPlayhead(0); arrPlayheadRef.current = 0;
     const spb = (60 / bpm) * 4;
+    await new Promise(r => setTimeout(r, 30));                            // the head is at bar 1 by the next render
+    const t0 = microcosmAudioTime() + 0.1;
+    if (arrClick) { const beat = spb / 4; for (let i = 0; i < 4; i++) window.setTimeout(() => samplerClick(i === 0), (0.1 + i * beat) * 1000); }   // four beats, then the tape rolls on the fifth
+    arrPrintT0Ref.current = arrClick ? t0 + spb : t0;
     setArrStatus(arrClick ? 'print · one bar of count-in' : 'print · rolling');
-    await new Promise(r => setTimeout(r, arrClick ? spb * 1000 : 30));   // the head is at bar 1 by the next render
     arrPlayRef.current();
   }
   async function arrPrintFinish() {
