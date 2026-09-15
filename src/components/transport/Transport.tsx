@@ -87,7 +87,8 @@ export default function Transport(p: TransportProps) {
     <div onClick={p.onRec} title="REC: arms on the next bar. REC again: stops on the next bar." style={{ ...btn, border: `2px solid ${p.rec === 'idle' ? 'rgba(255,90,90,0.7)' : RED}`, background: recBg, color: RED, animation: p.rec === 'armed' ? 'haarPulse 0.7s ease-in-out infinite' : 'none', fontSize: 11, fontWeight: 700 }}>{p.rec === 'rolling' ? p.recBar : '●'}</div>
   </div>;
   const target = <div onClick={p.onCycleTarget} title="record target - click to cycle tracks" style={{ ...cell, cursor: 'pointer' }}><span style={{ color: 'rgba(42,20,51,0.5)', fontSize: 10, letterSpacing: '0.2em' }}>TO</span><span style={{ color: p.rec === 'idle' ? '#2a1433' : RED, fontWeight: 500 }}>{p.target}</span></div>;
-  const status = <div style={{ ...cell, borderRight: 'none', color: p.rec === 'idle' ? 'rgba(42,20,51,0.55)' : RED, fontSize: 11, minWidth: 150 }}>{p.status}</div>;
+  const loud = /^(printed|exported)/.test(p.status);   // a file landed on disk: say it in full voice
+  const status = <div style={{ ...cell, borderRight: 'none', color: loud ? '#2a1433' : p.rec === 'idle' ? 'rgba(42,20,51,0.55)' : RED, fontSize: loud ? 12.5 : 11, fontWeight: loud ? 700 : 400, minWidth: 150 }}>{p.status}</div>;
 
   const frame: React.CSSProperties = pos.docked
     ? { position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1000, justifyContent: 'center', borderRadius: 0, borderTop: '1px solid rgba(255,255,255,0.6)' }
