@@ -28,6 +28,7 @@ import {
   samplerExportWav, microcosmAddOrb as samplerAddOrb, microcosmRemoveOrb as samplerRemoveOrb, microcosmEngineSource as samplerEngineSource, microcosmEngineActive as samplerEngineActive,
 } from '../../audio/engine';
 import { cutBlocks } from '../../audio/cuts';
+import { renderSong } from '../../audio/render';
 import { perfEmit, perfClock, perfArm, perfDisarm } from '../../perf/bus';
 import Transport from '../../components/transport/Transport';
 import ArrangeRoom from '../../components/arrange/ArrangeRoom';
@@ -1980,6 +1981,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       }
       // keep the source-id counter clear of collisions is unnecessary (timestamp ids)
     }
+    if (arrangeOpen) { const saved = hushRef.current ?? {}; for (const o of restored) { saved[o.id] = microcosmGetEngineMode(o.id); microcosmSetEngineMode(o.id, 'touch'); } hushRef.current = saved; }   // Arrange is open: the song's rack arrives silent, its modes kept for Build
     setFieldOrbs(restored); setCurrentSongName(name); setSongMenu(null);
     // and press the key it was played at, through the same door a finger uses - so every instrument is tuned exactly as it was saved
     if (data.key?.root) { pendingRetuneRef.current = { note: data.key.root, semi: data.key.semi ?? 0 }; setRetuneTick(t => t + 1); }
@@ -2520,7 +2522,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // RETUNE ON OPEN: the key press a loader asks for, made from a fresh render so lockKey / octave / the engines are all current
   const pendingRetuneRef = useRef<{ note: string; semi: number } | null>(null);
   const [retuneTick, setRetuneTick] = useState(0);
-  useEffect(() => { const q = pendingRetuneRef.current; if (q && fieldOrbs.length) { pendingRetuneRef.current = null; try { playAt(q.note, q.semi); } catch (e) { console.warn('[retune]', e); } } }, [retuneTick, lockKey, octave, fieldOrbs, constellations]);   // Build's Save and Open doors: song or instrument
+  useEffect(() => { const q = pendingRetuneRef.current; if (q && fieldOrbs.length && !arrangeOpen) { pendingRetuneRef.current = null; try { playAt(q.note, q.semi); } catch (e) { console.warn('[retune]', e); } } }, [retuneTick, lockKey, octave, fieldOrbs, constellations, arrangeOpen]);   // Build's Save and Open doors: song or instrument
   async function arrShowSongs() { setSongList(await listSongsOnDisk()); }
   // THE DESK: state, apply, save, open. Faders move the graph at once; only solo re-cuts.
   const [arrMaster, setArrMaster] = useState(0); const arrMasterRef = useRef(0); arrMasterRef.current = arrMaster;
@@ -2529,6 +2531,15 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   const trackMixOf = (t: any) => ({ level: t.level ?? 0, pan: t.pan ?? 0, eq: t.eq ?? { lo: 0, mid: 0, hi: 0 }, sends: t.sends ?? { rev: 0, dly: 0 }, mute: !!t.mute });
   useEffect(() => { arrTracks.forEach((t: any, i: number) => microcosmTapeMixTrack(i, trackMixOf(t))); microcosmTapeMixMaster({ level: arrMasterRef.current, limiter: arrLimiter }); microcosmTapeMixFx(arrFx, bpm); }, [arrTracks, bpm, arrLimiter, arrFx]);
   function arrMasterChange(db: number) { setArrMaster(db); arrMasterRef.current = db; microcosmTapeMixMaster({ level: db, limiter: arrLimiter }); writeSongFile(songDoc(arrTracksRef.current, { master: db })); }
+  // EXPORT: the whole song through the desk, offline, to mix/<song>.wav in the package
+  async function arrExport() {
+    const tracks = arrTracksRef.current;
+    const r = await renderSong({ tracks, bufs: arrBufRef.current, mixes: tracks.map((t: any) => trackMixOf(t)), master: { level: arrMasterRef.current, limiter: arrLimiter }, fx: arrFx, bpm, spb: (60 / bpm) * 4 });
+    if (!r) { console.log('[export] nothing to render'); return; }
+    const bytes = samplerExportWavStereo(r.L, r.R, arrSongName, r.sampleRate, true) as ArrayBuffer;
+    const ok = await writeInPackage(arrSongName, 'mix', arrSongName + '.wav', bytes, true);
+    console.log('[export]', ok ? 'wrote' : 'FAILED', 'mix/' + arrSongName + '.wav', r.seconds.toFixed(1) + 's');
+  }
   function arrLimiterChange(on: boolean) { setArrLimiter(on); writeSongFile(songDoc(arrTracksRef.current, { limiter: on })); }
   function arrFxChange(fx: typeof arrFx) { setArrFx(fx); writeSongFile(songDoc(arrTracksRef.current, { fx })); }
   function arrTrackChange(i: number, patch: { mute?: boolean; solo?: boolean; name?: string; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } }) {
@@ -2956,7 +2967,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           peaksFor={arrPeaksFor} peaksTick={arrPeaksTick}
           onNormalise={arrNormalise}
           onTrackChange={arrTrackChange}
-          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs}
+          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs} onExport={arrExport}
           master={arrMaster} limiter={arrLimiter} fx={arrFx} onMaster={arrMasterChange} onLimiter={arrLimiterChange} onFx={arrFxChange}
           meters={microcosmTapeMixFrame}
           songName={arrSongName}

@@ -32,7 +32,10 @@ export async function renderSong(a: RenderArgs): Promise<Rendered | null> {
   const ctx = new OfflineAudioContext(2, Math.ceil(seconds * sr), sr);
   const mixer = new TapeMixer(ctx, Math.max(16, a.tracks.length), a.bpm);
   a.mixes.forEach((m, i) => mixer.setTrack(i, m)); mixer.setMaster(a.master); mixer.setFx(a.fx, a.bpm);
-  for (const c of cutBlocks(a.tracks, a.bufs, 0, endBar, 0, a.spb)) playCut(ctx, mixer.channel(c.track).input, c);
+  const cuts = cutBlocks(a.tracks, a.bufs, 0, endBar, 0, a.spb);
+  for (const c of cuts) playCut(ctx, mixer.channel(c.track).input, c);
   const out = await ctx.startRendering();
+  let peak = 0; const l0 = out.getChannelData(0); for (let i = 0; i < l0.length; i += 16) peak = Math.max(peak, Math.abs(l0[i]));
+  console.log('[render]', cuts.length, 'cuts | endBar', endBar, '| sr', sr, '| peak', peak.toFixed(4), '| bufs', Object.keys(a.bufs).length, cuts.map(c => 't' + c.track + ' at ' + c.at.toFixed(2) + ' dur ' + c.dur.toFixed(2) + ' off ' + c.offset.toFixed(2) + ' g ' + c.gain.toFixed(2) + ' buf ' + c.buf.duration.toFixed(2) + 's@' + c.buf.sampleRate).join(' / '));
   return { L: out.getChannelData(0), R: out.getChannelData(1), sampleRate: sr, seconds };
 }
