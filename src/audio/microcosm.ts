@@ -269,9 +269,13 @@ export class Microcosm {
   // Splice the tape chain between limiter and the destination.
   connectOut(dest: AudioNode): void {
     this.buildTape();
+    // THE ROOM: the instrument bus - the whole instrument (master reel + clean lanes) leaves through one unity gain. Build: straight to
+    // dest, bit-identical. Arrange: the bus is switched into the armed track's desk channel, so the desk and PRINT hear the instrument.
+    if (!this.instBus) { this.instBus = this.ctx.createGain(); this.instBus.connect(dest); this.instRoute = dest; }
+    const bus = this.instBus;
     this.nativeOut.connect(this.limiter);
     this.limiter.connect(this.tapeWobbleDelay as DelayNode);   // into tape
-    (this.tapeMakeup as GainNode).connect(dest);      // tape out (post makeup) -> destination
+    (this.tapeMakeup as GainNode).connect(bus);      // tape out (post makeup) -> destination
     // CLEAN CHANNELS: four native strips, one per lane (worklet outputs 9-12).
     // Strip: EQ (3 solid Biquads) -> Compressor -> [space send + tape send, born 0] -> dry gain -> dest.
     // Everything born flat/zero/dry - the strip shapes only when asked.
@@ -289,7 +293,7 @@ export class Microcosm {
         const dry = this.ctx.createGain(); dry.gain.value = 1.0;
         this.node?.connect(lo, 9 + ln);
         lo.connect(mid); mid.connect(hi); hi.connect(comp); comp.connect(makeup);
-        makeup.connect(dry); dry.connect(dest);
+        makeup.connect(dry); dry.connect(bus);
         makeup.connect(spaceSend); spaceSend.connect(this.reverb);            // the space, from zero
         makeup.connect(tapeSend); tapeSend.connect(this.tapeWobbleDelay as AudioNode);   // the master reel, from zero
         this._cleanStrips.push({ lo, mid, hi, comp, makeup, spaceSend, tapeSend, dry });
@@ -467,6 +471,15 @@ export class Microcosm {
     src.onended = () => { const i = this._tape.indexOf(rec); if (i >= 0) this._tape.splice(i, 1); try { g.disconnect(); } catch {} };
   }
   private _mixer: TapeMixer | null = null;
+  private instBus: GainNode | null = null; private instRoute: AudioNode | null = null;
+  /** THE ROOM: where the instrument goes - a desk channel (Arrange, the armed track) or straight out (Build, null). */
+  instrumentRoute(track: number | null): void {
+    const bus = this.instBus; if (!bus) return;
+    const next: AudioNode = track == null ? this.ctx.destination : this.tapeMixer().channel(track).input;
+    if (next === this.instRoute) return;
+    try { bus.disconnect(); } catch {}
+    bus.connect(next); this.instRoute = next;
+  }
   tapeMixer(): TapeMixer { if (!this._mixer) this._mixer = new TapeMixer(this.ctx, 16); return this._mixer; }
   tapeMixTrack(i: number, m: TrackMix): void { this.tapeMixer().setTrack(i, m); }
   tapeMixMaster(m: MasterMix): void { this.tapeMixer().setMaster(m); }

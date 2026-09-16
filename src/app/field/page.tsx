@@ -19,7 +19,7 @@ import {
   microcosmInputOn, microcosmInputOff, microcosmLiveArm, microcosmSynthOn, microcosmSynthOff,
   microcosmMonitor,
   microcosmLoadSourceData,
-  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeTapStart, microcosmTapeTapStop, microcosmTapeMixTrack, microcosmTapeMixMaster, microcosmTapeMixFx, microcosmTapeMixFrame, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
+  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeTapStart, microcosmTapeTapStop, microcosmInstrumentRoute, microcosmTapeMixTrack, microcosmTapeMixMaster, microcosmTapeMixFx, microcosmTapeMixFrame, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
   microcosmCleanSync, microcosmCleanGain, microcosmCleanStrip,
   microcosmSetEngineMode, microcosmGetEngineMode, microcosmEngineFire,
   samplerAnalyseRoot,
@@ -2457,11 +2457,12 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   const armRef = useRef<Set<string> | null>(null);
   const armPrevSelRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!arrangeOpen) { armRef.current = null; const prev = armPrevSelRef.current; armPrevSelRef.current = null; if (prev) setSelectedInst(prev); return; }
+    if (!arrangeOpen) { armRef.current = null; microcosmInstrumentRoute(null); const prev = armPrevSelRef.current; armPrevSelRef.current = null; if (prev) setSelectedInst(prev); return; }
     if (armPrevSelRef.current == null) armPrevSelRef.current = selectedInst;
     const tr: any = arrTracks[arrSelTrack]; const inst: any = tr?.instrument ? constellations.find((c: any) => c.name === tr.instrument) : null;
     const ids: string[] = inst?.orbIds ?? [];
     armRef.current = new Set(ids);
+    microcosmInstrumentRoute(arrSelTrack);                                      // the instrument sounds through this track's channel
     console.log('[arm] track', arrSelTrack + 1, '·', tr?.instrument ?? '(none)', '· inst', inst?.id ?? '-', '· ids', ids, '· live', fieldOrbs.map((o: any) => o.id));
     for (const c of constellations) if (c.id !== inst?.id) for (const id of c.orbIds) microcosmSetEngineMode(id, 'touch');
     if (inst) { setSelectedInst(inst.id); const mode = tr.recMode ?? 'touch'; for (const id of ids) microcosmSetEngineMode(id, mode); if (state !== 'playing') void doStart(); }   // the armed instrument is up - touch is silent until the key
