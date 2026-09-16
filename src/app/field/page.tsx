@@ -2461,12 +2461,14 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   const cardDragStart = (e: React.PointerEvent) => { cardDrag.current = { x0: e.clientX, y0: e.clientY, px: cardPos.x, py: cardPos.y }; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); };
   const cardDragMove = (e: React.PointerEvent) => { const d = cardDrag.current; if (!d) return; setCardPos({ x: Math.max(0, Math.min(dim.w - 80, d.px + e.clientX - d.x0)), y: Math.max(0, Math.min(dim.h - 80, d.py + e.clientY - d.y0)) }); };
   const cardDragEnd = () => { cardDrag.current = null; };
+  // a track names its instrument; the rack can hold an empty stock constellation of the same name - the one with engines wins
+  const instByName = (name: string | null | undefined): any => name ? (constellations.find((c: any) => c.name === name && c.orbIds.length > 0) ?? constellations.find((c: any) => c.name === name) ?? null) : null;
   const armRef = useRef<Set<string> | null>(null);
   const armPrevSelRef = useRef<string | null>(null);
   useEffect(() => {
     if (!arrangeOpen) { armRef.current = null; microcosmInstrumentRoute(null); const prev = armPrevSelRef.current; armPrevSelRef.current = null; if (prev) setSelectedInst(prev); return; }
     if (armPrevSelRef.current == null) armPrevSelRef.current = selectedInst;
-    const tr: any = arrTracks[arrSelTrack]; const inst: any = tr?.instrument ? constellations.find((c: any) => c.name === tr.instrument) : null;
+    const tr: any = arrTracks[arrSelTrack]; const inst: any = instByName(tr?.instrument);
     const ids: string[] = inst?.orbIds ?? [];
     armRef.current = new Set(ids);
     microcosmInstrumentRoute(arrSelTrack);                                      // the instrument sounds through this track's channel
@@ -2594,7 +2596,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const cur: any = arrTracksRef.current[i]; if (patch.instrument && cur && (/^TRACK \d+$/.test(cur.name) || !cur.name || cur.name === String(i + 1) || cur.name === cur.instrument)) patch = { ...patch, name: patch.instrument };   // a stock-named track takes its instrument's name
     const next = arrTracksRef.current.map((t: any, k: number) => k === i ? { ...t, ...patch } : t);
     if (patch.instrument) {                                          // THE ROOM: an instrument on a track is in the song - its snapshot goes into the package now
-      const c: any = constellations.find((c: any) => c.name === patch.instrument);
+      const c: any = instByName(patch.instrument);
       if (c) { const file = c.name + '.json'; void writeInPackage(arrSongName, 'instruments', file, buildInstrumentJson(c.name, c.id, c.name), true); if (!arrRackRef.current.some((r: any) => r.file === file)) arrRackRef.current = [...arrRackRef.current, { name: c.name, file, selected: false }]; }
     }
     arrCommit(next, patch.name != null ? 'renamed track ' + (i + 1) : patch.instrument != null ? (patch.instrument ? 'instrument · ' + patch.instrument.replace(/\.json$/, '') : 'no instrument') + ' · track ' + (i + 1) : patch.recMode ? patch.recMode + ' · track ' + (i + 1) : (patch.solo != null ? 'solo ' + (patch.solo ? 'on' : 'off') : 'mute ' + (patch.mute ? 'on' : 'off')) + ' · track ' + (i + 1));
@@ -3020,7 +3022,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           peaksFor={arrPeaksFor} peaksTick={arrPeaksTick}
           onNormalise={arrNormalise}
           onTrackChange={arrTrackChange}
-          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs} onExport={arrExport} onPrint={arrPrint} onOpenCard={(i: number) => { const tr: any = arrTracks[i]; const c: any = tr?.instrument ? constellations.find((c: any) => c.name === tr.instrument) : null; const id = c?.orbIds?.[0]; if (id) { setArrSelTrack(i); enterFocus(id); } }}
+          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs} onExport={arrExport} onPrint={arrPrint} onOpenCard={(i: number) => { const tr: any = arrTracks[i]; const c: any = instByName(tr?.instrument); const id = c?.orbIds?.[0]; if (id) { setArrSelTrack(i); enterFocus(id); } }}
           master={arrMaster} limiter={arrLimiter} fx={arrFx} onMaster={arrMasterChange} onLimiter={arrLimiterChange} onFx={arrFxChange}
           meters={microcosmTapeMixFrame}
           songName={arrSongName}
