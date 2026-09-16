@@ -145,7 +145,7 @@ export async function openInstrumentFile(): Promise<string | null> {
 // Move a song folder and its audio goes with it. Nothing lives outside the package.
 /** gain (dB), fadeIn / fadeOut (bars): the take's voice, applied at play time, never written into the wav */
 export type HaarBlock = { gain?: number; fadeIn?: number; fadeOut?: number; id: string; startBar: number; lenBars: number; name: string; file: string; srcBars?: number; offset?: number; perf?: string; instrument?: string };
-export type HaarTrack = { id: string; name: string; blocks: HaarBlock[]; mute?: boolean; solo?: boolean; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } };   // level dB, pan -1..1, eq dB, sends 0..1
+export type HaarTrack = { id: string; name: string; blocks: HaarBlock[]; instrument?: string; recMode?: 'touch' | 'drone'; mute?: boolean; solo?: boolean; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } };   // level dB, pan -1..1, eq dB, sends 0..1
 export type HaarSong  = { name: string; bpm: number; tracks: HaarTrack[]; master?: number; limiter?: boolean; fx?: { rev: { size: number; damp: number; mix: number }; dly: { beats: number; feedback: number; mix: number } } };
 
 export async function songDir(name: string, create: boolean = true): Promise<FileSystemDirectoryHandle | null> {

@@ -2574,9 +2574,9 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   }
   function arrLimiterChange(on: boolean) { setArrLimiter(on); writeSongFile(songDoc(arrTracksRef.current, { limiter: on })); }
   function arrFxChange(fx: typeof arrFx) { setArrFx(fx); writeSongFile(songDoc(arrTracksRef.current, { fx })); }
-  function arrTrackChange(i: number, patch: { mute?: boolean; solo?: boolean; name?: string; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } }) {
+  function arrTrackChange(i: number, patch: { mute?: boolean; solo?: boolean; name?: string; instrument?: string; recMode?: 'touch' | 'drone'; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } }) {
     const next = arrTracksRef.current.map((t: any, k: number) => k === i ? { ...t, ...patch } : t);
-    arrCommit(next, patch.name != null ? 'renamed track ' + (i + 1) : (patch.solo != null ? 'solo ' + (patch.solo ? 'on' : 'off') : 'mute ' + (patch.mute ? 'on' : 'off')) + ' · track ' + (i + 1));
+    arrCommit(next, patch.name != null ? 'renamed track ' + (i + 1) : patch.instrument != null ? (patch.instrument ? 'instrument · ' + patch.instrument.replace(/\.json$/, '') : 'no instrument') + ' · track ' + (i + 1) : patch.recMode ? patch.recMode + ' · track ' + (i + 1) : (patch.solo != null ? 'solo ' + (patch.solo ? 'on' : 'off') : 'mute ' + (patch.mute ? 'on' : 'off')) + ' · track ' + (i + 1));
     arrTracksRef.current = next;                                                     // the tape reads the ref: make it true now
     if (patch.solo != null) arrRecycle(arrLoop, arrLoopA, arrLoopBars);   // solo re-cuts; mute, level, pan, EQ and sends move in the graph at once (the effect on arrTracks applies them)
   }
@@ -3005,7 +3005,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           songName={arrSongName}
           onOpenInstrument={(id) => { const b = arrTracks.flatMap(t => t.blocks).find(x => x.id === id); if (b?.instrument) openInstrumentSnapshot(b.instrument); }}
           tracks={arrTracks} playhead={arrPlayhead} zoom={arrZoom} scroll={arrScroll}
-          selTrack={arrSelTrack} selBlock={arrSelBlock}
+          selTrack={arrSelTrack} selBlock={arrSelBlock} rack={constellations.filter((c: any) => c.orbIds.length > 0).map((c: any) => ({ name: c.name, file: c.name }))}
           rec={arrRec} recStartBar={arrRecRef.current?.startBar ?? 0}
           onSelectTrack={(i) => { if (arrRec === 'idle') setArrSelTrack(i); }}
           onSelectBlock={setArrSelBlock}

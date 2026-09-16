@@ -16,9 +16,9 @@ export type ArrangeRoomProps = {
   loopA: number | null; loopBars: number; loopOn: boolean; onSetLoop: (a: number, b: number) => void;
   onBlockChange: (id: string, patch: { startBar?: number; lenBars?: number; gain?: number; fadeIn?: number; fadeOut?: number; name?: string }, track?: number) => void;
   onNormalise?: (id: string) => void;
-  onTrackChange?: (i: number, patch: { mute?: boolean; solo?: boolean; name?: string; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } }) => void;
+  onTrackChange?: (i: number, patch: { mute?: boolean; solo?: boolean; name?: string; instrument?: string; recMode?: 'touch' | 'drone'; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } }) => void;
   onOpenInstrument?: (id: string) => void;
-  onSaveSong?: () => void; onOpenSong?: () => void; onExport?: () => void; onPrint?: () => void;
+  onSaveSong?: () => void; onOpenSong?: () => void; rack?: { name: string; file: string }[]; onExport?: () => void; onPrint?: () => void;
   meters?: () => { bands: number[][]; master: number[] } | null;
   master?: number; limiter?: boolean; fx?: any; onMaster?: (db: number) => void; onLimiter?: (on: boolean) => void; onFx?: (fx: any) => void;
   songName?: string;
@@ -87,6 +87,7 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
   type Gest = { id: string; mode: 'move' | 'resize'; copy: boolean; x0: number; y0: number; startBar: number; lenBars: number; track: number; dBar: number; dTrack: number; moved: boolean };
   const gestRef = useRef<Gest | null>(null);
   const [gest, setGest] = useState<Gest | null>(null);
+  const [pickFor, setPickFor] = useState<number | null>(null);   // which track's instrument picker is open
   const [mixView, setMixView] = useState(false);          // the desk, in place of the lanes
   const onTileDown = (e: React.PointerEvent, b: ArrBlock, ti: number) => {
     e.stopPropagation();
@@ -142,8 +143,14 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
           {p.tracks.map((t, i) => {
             const on = i === p.selTrack, empty = t.blocks.length === 0;
             return (
-              <div key={t.id} onClick={() => p.onSelectTrack(i)} title="record target" style={{ height: ROW_H, boxSizing: 'border-box', padding: '10px 12px', borderBottom: '0.5px solid rgba(255,255,255,0.06)', cursor: 'pointer', background: on ? 'rgba(255,90,90,0.12)' : 'transparent', borderLeft: on ? `2px solid ${RED}` : '2px solid transparent' }}>
+              <div key={t.id} onClick={() => p.onSelectTrack(i)} title="record target" style={{ position: 'relative', height: ROW_H, boxSizing: 'border-box', padding: '10px 12px', borderBottom: '0.5px solid rgba(255,255,255,0.06)', cursor: 'pointer', background: on ? 'rgba(255,90,90,0.12)' : 'transparent', borderLeft: on ? `2px solid ${RED}` : '2px solid transparent' }}>
                 <div style={{ fontSize: 13, letterSpacing: '0.12em', fontWeight: 500, color: on ? RED : (empty ? INK3 : INK), display: 'flex', alignItems: 'baseline', gap: 8 }}>{i + 1} {t.name.replace(/^TRACK \d+$/, '')}{on ? ' ●' : ''}<span onClick={(e) => { e.stopPropagation(); const n = window.prompt('name this track', t.name && t.name !== String(i + 1) ? t.name : ''); if (n != null) p.onTrackChange?.(i, { name: n.trim() || String(i + 1) }); }} title="tap to name the track" style={{ fontSize: 12, fontWeight: 400, letterSpacing: '0.04em', cursor: 'text', color: t.name && t.name !== String(i + 1) ? INK : INK3, borderBottom: '1px dotted rgba(255,255,255,0.35)' }}>{t.name && t.name !== String(i + 1) ? t.name : 'name'}</span></div>
+                <div onClick={(e) => { e.stopPropagation(); setPickFor(pickFor === i ? null : i); }} title="the track's instrument - tap to choose from the rack" style={{ fontSize: 10.5, letterSpacing: '0.06em', marginTop: 5, cursor: 'pointer', color: t.instrument ? INK : INK3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.instrument ? '♪ ' + t.instrument.replace(/\.json$/, '') : 'instrument ▾'}</div>
+                {pickFor === i && <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: 8, right: 8, zIndex: 30, marginTop: 2, padding: '6px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(30,18,44,0.92)', backdropFilter: 'blur(14px)', boxShadow: '0 12px 30px rgba(0,0,0,0.35)' }}>
+                  {(p.rack || []).length === 0 && <div style={{ padding: '4px 12px', fontSize: 10.5, color: INK3 }}>no instruments in this song</div>}
+                  {(p.rack || []).map(r => <div key={r.file} onClick={() => { p.onTrackChange?.(i, { instrument: r.file }); setPickFor(null); }} style={{ padding: '4px 12px', fontSize: 11, cursor: 'pointer', color: t.instrument === r.file ? '#fff' : INK }}>{r.name}</div>)}
+                  {t.instrument && <div onClick={() => { p.onTrackChange?.(i, { instrument: '' }); setPickFor(null); }} style={{ padding: '4px 12px', fontSize: 10.5, cursor: 'pointer', color: INK3, borderTop: '0.5px solid rgba(255,255,255,0.15)', marginTop: 4 }}>none</div>}
+                </div>}
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
                 <span onClick={() => p.onTrackChange?.(i, { mute: !t.mute })} title="mute" style={{ width: 20, height: 20, borderRadius: 10, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid ' + (t.mute ? '#ffd27a' : 'rgba(255,255,255,0.35)'), background: t.mute ? 'rgba(255,210,122,0.35)' : 'transparent', color: t.mute ? '#ffd27a' : INK2 }}>M</span>
                 <span onClick={() => p.onTrackChange?.(i, { solo: !t.solo })} title="solo" style={{ width: 20, height: 20, borderRadius: 10, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid ' + (t.solo ? '#a6ffd8' : 'rgba(255,255,255,0.35)'), background: t.solo ? 'rgba(166,255,216,0.3)' : 'transparent', color: t.solo ? '#a6ffd8' : INK2 }}>S</span>
