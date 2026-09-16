@@ -2168,7 +2168,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
     for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
     // TOUCH: a key press is also the finger - armed orbs start at this pitch (drone orbs ignore fire)
-    const gate = armRef.current; for (const o of fieldOrbs) if (!gate || gate.has(o.id)) microcosmEngineFire(o.id, true);   // THE ROOM: in Arrange only the armed track's instrument answers
+    const gate = armRef.current; const fired: string[] = []; for (const o of fieldOrbs) if (!gate || gate.has(o.id)) { microcosmEngineFire(o.id, true); fired.push(o.id); } if (gate) console.log('[fire] gate', Array.from(gate), '· fired', fired, '· modes', fired.map(id => microcosmGetEngineMode(id)));   // THE ROOM: in Arrange only the armed track's instrument answers
   }
   // TOUCH release: the finger comes off - every armed orb stops (its own tail finishes naturally)
   function releaseTouch() {
@@ -2356,6 +2356,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       if (!arrPlaying) setArrPlayhead(startBar + bars);                  // the head moves on: the next take follows, it does not pile
       setArrStatus((onDisk ? 'landed · ' : 'landed but NOT on disk (no home) · ') + block.name + ' · ' + bars + ' bars · ' + (L.length / SR).toFixed(2) + ' s');
       console.log('[arrange] block landed', block, onDisk ? 'on disk' : 'NOT on disk');
+      void arrDecodeBlocks();                                   // the take is decoded now - its wave shows before it ever plays
     });
     if (arrLoop) microcosmRecordStopAt(Math.round((nextBar + arrLoopBars * spb) * SR));   // LOOP: stops itself
   }
@@ -2461,6 +2462,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const tr: any = arrTracks[arrSelTrack]; const inst: any = tr?.instrument ? constellations.find((c: any) => c.name === tr.instrument) : null;
     const ids: string[] = inst?.orbIds ?? [];
     armRef.current = new Set(ids);
+    console.log('[arm] track', arrSelTrack + 1, '·', tr?.instrument ?? '(none)', '· inst', inst?.id ?? '-', '· ids', ids, '· live', fieldOrbs.map((o: any) => o.id));
     for (const c of constellations) if (c.id !== inst?.id) for (const id of c.orbIds) microcosmSetEngineMode(id, 'touch');
     if (inst) { setSelectedInst(inst.id); const mode = tr.recMode ?? 'touch'; for (const id of ids) microcosmSetEngineMode(id, mode); if (state !== 'playing') void doStart(); }   // the armed instrument is up - touch is silent until the key
   }, [arrangeOpen, arrSelTrack, arrTracks, constellations, state]);
