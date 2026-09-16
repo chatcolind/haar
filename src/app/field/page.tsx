@@ -447,13 +447,7 @@ export default function FieldPage() {
   const arrBufRef = useRef<Record<string, AudioBuffer>>({});   // decoded blocks, by id
   const arrRafRef = useRef(0);
   const arrPlayFromRef = useRef(0);                              // where play began - stop returns the head here
-  useEffect(() => {                                              // the song comes back from disk when the room opens
-    if (!arrangeOpen) return;
-    (async () => {
-      const sg = await readSongFile(arrSongName);
-      if (sg && sg.tracks && sg.tracks.length) { setArrTracks(sg.tracks as any); setArrStatus('song loaded · ' + sg.tracks.reduce((n, t) => n + t.blocks.length, 0) + ' blocks'); }
-    })();
-  }, [arrangeOpen, arrSongName]); // bar position while the tape runs
+  // A fresh start is empty. Nothing comes back from disk on its own - a song returns through OPEN SONG, an instrument through the Open door.
   const [samplerDevs, setSamplerDevs] = useState<{id:string;label:string}[]>([]);
   const [samplerDev, setSamplerDev] = useState<string>('');
   const [devListOpen, setDevListOpen] = useState(false);
@@ -2174,7 +2168,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
     for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
     // TOUCH: a key press is also the finger - armed orbs start at this pitch (drone orbs ignore fire)
-    for (const o of fieldOrbs) microcosmEngineFire(o.id, true);
+    const gate = armRef.current; for (const o of fieldOrbs) if (!gate || gate.has(o.id)) microcosmEngineFire(o.id, true);   // THE ROOM: in Arrange only the armed track's instrument answers
   }
   // TOUCH release: the finger comes off - every armed orb stops (its own tail finishes naturally)
   function releaseTouch() {
@@ -2457,6 +2451,19 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const sweep = () => { const h = Math.max(fromBar, fromBar + (microcosmAudioTime() - t0) / spb); arrPlayheadRef.current = h; setArrPlayhead(h); arrRafRef.current = requestAnimationFrame(sweep); };
     arrRafRef.current = requestAnimationFrame(sweep);
   }
+  // THE ROOM: arm. In Arrange the selected track's instrument is the one that answers the key, in the track's mode; every other
+  // engine is deaf to it - not muted, never fired. No instrument on the track: nothing answers. Build: no gate.
+  const armRef = useRef<Set<string> | null>(null);
+  const armPrevSelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!arrangeOpen) { armRef.current = null; const prev = armPrevSelRef.current; armPrevSelRef.current = null; if (prev) setSelectedInst(prev); return; }
+    if (armPrevSelRef.current == null) armPrevSelRef.current = selectedInst;
+    const tr: any = arrTracks[arrSelTrack]; const inst: any = tr?.instrument ? constellations.find((c: any) => c.name === tr.instrument) : null;
+    const ids: string[] = inst?.orbIds ?? [];
+    armRef.current = new Set(ids);
+    for (const c of constellations) if (c.id !== inst?.id) for (const id of c.orbIds) microcosmSetEngineMode(id, 'touch');
+    if (inst) { setSelectedInst(inst.id); const mode = tr.recMode ?? 'touch'; for (const id of ids) microcosmSetEngineMode(id, mode); if (state !== 'playing') void doStart(); }   // the armed instrument is up - touch is silent until the key
+  }, [arrangeOpen, arrSelTrack, arrTracks, constellations, state]);
   const arrPlayRef = useRef<() => void>(() => {}); arrPlayRef.current = arrPlay;   // the latest toggle, for timers
   async function arrNewSong() {
     const name = (window.prompt('name the new song', 'song ' + new Date().toISOString().slice(0, 10)) || '').trim().replace(/[^\w\- ]/g, '_');
@@ -2575,7 +2582,12 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   function arrLimiterChange(on: boolean) { setArrLimiter(on); writeSongFile(songDoc(arrTracksRef.current, { limiter: on })); }
   function arrFxChange(fx: typeof arrFx) { setArrFx(fx); writeSongFile(songDoc(arrTracksRef.current, { fx })); }
   function arrTrackChange(i: number, patch: { mute?: boolean; solo?: boolean; name?: string; instrument?: string; recMode?: 'touch' | 'drone'; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } }) {
+    const cur: any = arrTracksRef.current[i]; if (patch.instrument && cur && (/^TRACK \d+$/.test(cur.name) || !cur.name || cur.name === String(i + 1) || cur.name === cur.instrument)) patch = { ...patch, name: patch.instrument };   // a stock-named track takes its instrument's name
     const next = arrTracksRef.current.map((t: any, k: number) => k === i ? { ...t, ...patch } : t);
+    if (patch.instrument) {                                          // THE ROOM: an instrument on a track is in the song - its snapshot goes into the package now
+      const c: any = constellations.find((c: any) => c.name === patch.instrument);
+      if (c) { const file = c.name + '.json'; void writeInPackage(arrSongName, 'instruments', file, buildInstrumentJson(c.name, c.id, c.name), true); if (!arrRackRef.current.some((r: any) => r.file === file)) arrRackRef.current = [...arrRackRef.current, { name: c.name, file, selected: false }]; }
+    }
     arrCommit(next, patch.name != null ? 'renamed track ' + (i + 1) : patch.instrument != null ? (patch.instrument ? 'instrument · ' + patch.instrument.replace(/\.json$/, '') : 'no instrument') + ' · track ' + (i + 1) : patch.recMode ? patch.recMode + ' · track ' + (i + 1) : (patch.solo != null ? 'solo ' + (patch.solo ? 'on' : 'off') : 'mute ' + (patch.mute ? 'on' : 'off')) + ' · track ' + (i + 1));
     arrTracksRef.current = next;                                                     // the tape reads the ref: make it true now
     if (patch.solo != null) arrRecycle(arrLoop, arrLoopA, arrLoopBars);   // solo re-cuts; mute, level, pan, EQ and sends move in the graph at once (the effect on arrTracks applies them)
