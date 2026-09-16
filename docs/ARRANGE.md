@@ -136,3 +136,28 @@ Reference renders: haar-reel.html (outside the repo).
                instant. UNDO on the header. Rename take and track by tapping.
   Rejected on the way: literal clouds (soft, bokeh, comedy), a rising sun (cheesy), a black transport bar
   in Build, a permanently open rack panel, a top-left snapshot rack.
+
+## THE ROOM - ratified 16 Sept 2026. Recording moves to Arrange. A track owns an instrument.
+
+Recording belongs where you can see time. "Come in at bar 16" is an Arrange sentence; Build has no bar 16. So:
+
+**A track carries an instrument.** Tap a track's header and the rack opens - the song's instruments - and you pick one. The track now has a voice. It stays on the track and in the song file (`HaarTrack.instrument`). One instrument may sit on several tracks.
+
+**Record on the track.** REC records the track's instrument onto the track, from the head, in one of two ways:
+- **touch** - you play it in. The instrument is armed and silent until you press.
+- **drone** - it plays itself; your hands are on XY and the knobs.
+Every take still carries its snapshot, as now. The take is recorded dry - the instrument's own voice, before the channel - so a take is never baked with today's reverb.
+
+**Engines through the desk.** An instrument on a track is heard through that track's channel: mute → level → EQ → pan → sends → master. Four things follow at once: you hear the instrument in the mix while you play or record; PRINT hears it, so a performance prints; the strip's light shows real signal per instrument; the tape and the instrument are one world, not two. The desk is the only way out.
+
+**The engine card.** With an instrument on the track, a door opens its inner room as a glass card over Skye - XY and the knobs first, the whole room later. It is live: parameters move while the song plays, while a take records, while PRINT runs.
+
+**Build keeps building.** Build is where instruments are made and auditioned: engines, sources, the rack, Start. REC leaves Build's console, with its target-track badge, once Arrange's REC is proven. Build's instrument is heard through a plain channel (flat, no sends) or through its assigned track's channel - decided when engines move to the desk.
+
+**Order, each step a working machine:**
+1. Instrument per track: the field, the picker on the header, REC in Arrange with touch / drone. Build's REC stays until this is proven.
+2. Engines through the desk.
+3. The engine card on Skye.
+4. REC off Build's console.
+
+Words: the **track's instrument** (what it carries), **arm** (select the track; its instrument is the one that sounds), **the card** (the instrument's inner room, in Arrange).
