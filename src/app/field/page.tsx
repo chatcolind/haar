@@ -1323,7 +1323,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     }
     // keep the live PREVIEW orb in step with the progression too, so auditioning follows the
     // chords exactly like a real orb would (preview is a faithful audition).
-    if (createEngineRef.current) microcosmOrbChordStep(PREVIEW_ID, stepT);   // live ref, not stale closure
+    if (createEngineRef.current) for (const pid of [PREVIEW_ID, ...previewIdsRef.current]) microcosmOrbChordStep(pid, stepT);   // live ref, not stale closure
     setProgProgress(0);
     setProgStepIdx(i);
     setProgStepDur(0);
@@ -1573,7 +1573,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   const [createList, setCreateList] = useState<string[]>([]);   // engines queued for this constellation (multi-add)
   function toggleEngineInList(engineType: string) {
     setCreateList(prev => [...prev, engineType]);   // tap adds one (can queue duplicates)
-    previewEngine(engineType);                       // preview the most-recent tap
+    const pid = 'preview_' + Date.now().toString(36); previewIdsRef.current.push(pid); previewEngine(engineType, pid);   // this tap's own preview - the earlier ones keep playing
   }
   async function doCreateOrb() {
     // build the list: queued engines, or fall back to the single previewed engine
@@ -1678,36 +1678,37 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     setConstellations(prev => prev.map(x => x.id === constId ? { ...x, sourceId: 'default' } : x));
   }
   const PREVIEW_ID = 'preview_temp';
-  async function previewEngine(engineType: string) {
+  const previewIdsRef = useRef<string[]>([]);   // the queue auditions together: one preview orb per tap, all alive until ADD or BACK
+  async function previewEngine(engineType: string, pid: string = PREVIEW_ID) {
     setCreateEngine(engineType);
     await ensureStarted();
-    microcosmCleanSync(PREVIEW_ID, null, 0);
-    microcosmRemoveOrb(PREVIEW_ID);
-    microcosmAddOrb(PREVIEW_ID, engineType, 0.8);
-    if (engineType === 'clean') microcosmCleanSync(PREVIEW_ID, 'src_pending', 0.8);   // CLEAN preview: the player, not grains
-    else microcosmCleanSync(PREVIEW_ID, null, 0);
+    microcosmCleanSync(pid, null, 0);
+    microcosmRemoveOrb(pid);
+    microcosmAddOrb(pid, engineType, 0.8);
+    if (engineType === 'clean') microcosmCleanSync(pid, 'src_pending', 0.8);   // CLEAN preview: the player, not grains
+    else microcosmCleanSync(pid, null, 0);
     // RESET the reused preview orb's pitch slots so nothing leaks between previews — e.g. a
     // prior WAV preview left a tuning offset that would detune a later synth preview.
-    microcosmOrbTuning(PREVIEW_ID, 0);
-    microcosmOrbRegister(PREVIEW_ID, 0);
-    microcosmOrbChordStep(PREVIEW_ID, 0);
-    microcosmOrbConductor(PREVIEW_ID, 0);
+    microcosmOrbTuning(pid, 0);
+    microcosmOrbRegister(pid, 0);
+    microcosmOrbChordStep(pid, 0);
+    microcosmOrbConductor(pid, 0);
     // Route the preview to whatever source the SELECTED constellation actually uses:
     //  - existing constellation -> its already-loaded source id + its tuning
     //  - new constellation with a chosen WAV -> the pending source
     //  - otherwise -> synth (default)
     const existing = createConstTarget !== '__new__' ? constellations.find(c => c.id === createConstTarget) : null;
     if (existing && existing.sourceId !== 'default') {
-      microcosmEngineSource(PREVIEW_ID, existing.sourceId);
-      if (existing.tune) microcosmOrbTuning(PREVIEW_ID, existing.tune);
+      microcosmEngineSource(pid, existing.sourceId);
+      if (existing.tune) microcosmOrbTuning(pid, existing.tune);
     } else if (createConstTarget==='__new__' && createSrc==='livein') {
-      microcosmEngineSource(PREVIEW_ID, 'live');   // preview granulates YOU, live, while choosing
+      microcosmEngineSource(pid, 'live');   // preview granulates YOU, live, while choosing
     } else if (createConstTarget==='__new__' && createSrc==='sample' && (window as any).__pendingSrc) {
       const ps = (window as any).__pendingSrc;
-      microcosmEngineSource(PREVIEW_ID, ps.id);
-      if (ps.tune) microcosmOrbTuning(PREVIEW_ID, ps.tune);
+      microcosmEngineSource(pid, ps.id);
+      if (ps.tune) microcosmOrbTuning(pid, ps.tune);
     } else {
-      microcosmEngineSource(PREVIEW_ID, 'default');
+      microcosmEngineSource(pid, 'default');
     }
     // arrive at the CURRENT pitch context immediately (conductor + chord). Ongoing progression
     // steps reach the preview via progStep's createEngineRef broadcast (a live ref, not a stale
@@ -1715,17 +1716,16 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const _prevExisting = createConstTarget !== '__new__' ? constellations.find(c=>c.id===createConstTarget) : null;
     const _prevIsDefault = _prevExisting ? _prevExisting.sourceId === 'default'
                           : !(createSrc==='sample' && (window as any).__pendingSrc);
-    applyJoinPitch(PREVIEW_ID, createConstTarget, _prevIsDefault);
-    microcosmEngineActive(PREVIEW_ID, true);
+    applyJoinPitch(pid, createConstTarget, _prevIsDefault);
+    microcosmEngineActive(pid, true);
     // STUDIO: instant/full for snappy auditioning. LIVE: slow graceful entry to ~90% — the
     // preview IS the bloom-in; when you then add the orb it's already playing at level (no second fade).
-    if (liveMode) { microcosmFadeInEngine(PREVIEW_ID, 0.9, 2.0); (window as any).__previewLevel = 0.9; }
-    else { microcosmEngineLevel(PREVIEW_ID, 0.8); (window as any).__previewLevel = 0.8; }
+    if (liveMode) { microcosmFadeInEngine(pid, 0.9, 2.0); (window as any).__previewLevel = 0.9; }
+    else { microcosmEngineLevel(pid, 0.8); (window as any).__previewLevel = 0.8; }
   }
   function stopPreview() {
-    microcosmEngineActive(PREVIEW_ID, false);
-    microcosmCleanSync(PREVIEW_ID, null, 0);
-    microcosmRemoveOrb(PREVIEW_ID);
+    for (const pid of [PREVIEW_ID, ...previewIdsRef.current]) { microcosmEngineActive(pid, false); microcosmCleanSync(pid, null, 0); microcosmRemoveOrb(pid); }   // every preview in the queue
+    previewIdsRef.current = [];
   }
   // ---- SAVE / RECALL instruments (was Universe) — localStorage cache; disk is Haar/Instruments ----
   const [songMenu, setSongMenu] = useState<null | 'save' | 'open'>(null);
@@ -2454,6 +2454,13 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   }
   // THE ROOM: arm. In Arrange the selected track's instrument is the one that answers the key, in the track's mode; every other
   // engine is deaf to it - not muted, never fired. No instrument on the track: nothing answers. Build: no gate.
+  // THE CARD: the instrument's inner room as a window over Skye - dragged by its top edge
+  const cardW = Math.min(1180, dim.w - 40), cardH = Math.min(680, dim.h - 150);
+  const [cardPos, setCardPos] = useState({ x: 160, y: 80 });
+  const cardDrag = useRef<{ x0: number; y0: number; px: number; py: number } | null>(null);
+  const cardDragStart = (e: React.PointerEvent) => { cardDrag.current = { x0: e.clientX, y0: e.clientY, px: cardPos.x, py: cardPos.y }; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); };
+  const cardDragMove = (e: React.PointerEvent) => { const d = cardDrag.current; if (!d) return; setCardPos({ x: Math.max(0, Math.min(dim.w - 80, d.px + e.clientX - d.x0)), y: Math.max(0, Math.min(dim.h - 80, d.py + e.clientY - d.y0)) }); };
+  const cardDragEnd = () => { cardDrag.current = null; };
   const armRef = useRef<Set<string> | null>(null);
   const armPrevSelRef = useRef<string | null>(null);
   useEffect(() => {
@@ -3013,7 +3020,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           peaksFor={arrPeaksFor} peaksTick={arrPeaksTick}
           onNormalise={arrNormalise}
           onTrackChange={arrTrackChange}
-          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs} onExport={arrExport} onPrint={arrPrint}
+          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs} onExport={arrExport} onPrint={arrPrint} onOpenCard={(i: number) => { const tr: any = arrTracks[i]; const c: any = tr?.instrument ? constellations.find((c: any) => c.name === tr.instrument) : null; const id = c?.orbIds?.[0]; if (id) { setArrSelTrack(i); enterFocus(id); } }}
           master={arrMaster} limiter={arrLimiter} fx={arrFx} onMaster={arrMasterChange} onLimiter={arrLimiterChange} onFx={arrFxChange}
           meters={microcosmTapeMixFrame}
           songName={arrSongName}
@@ -3495,17 +3502,22 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       {/* FOCUSED VIEW — orb left (alive), controls right on glass, universe faint behind */}
       {focused && (() => {
         const fo = fieldOrbs.find(o => o.id === focused);
+        const card = arrangeOpen; const cw = card ? cardW : dim.w, ch = card ? cardH : fh;   // THE CARD: the same room, in a window
         const fc = '#d8a6ff';  // breadcrumb tint (Orb resolves its own colour)
         return (
-          <div style={{ position:'absolute', inset:0, zIndex:150, pointerEvents:'none' }}>
+          <div style={card ? { position:'fixed', left: cardPos.x, top: cardPos.y, width: cardW, height: cardH, zIndex: 950, borderRadius: 22, overflow:'hidden', border:'1px solid rgba(255,255,255,0.28)', boxShadow:'0 40px 90px rgba(10,5,20,0.6), inset 0 1px 0 rgba(255,255,255,0.2)', background:'linear-gradient(180deg, rgba(40,20,60,0.6), rgba(14,8,24,0.78))', backdropFilter:'blur(22px)', WebkitBackdropFilter:'blur(22px)' } : { display:'contents' }}>
+          {card && <div onPointerDown={cardDragStart} onPointerMove={cardDragMove} onPointerUp={cardDragEnd} onPointerCancel={cardDragEnd} title="drag the card" style={{ position:'absolute', left:620, right:70, top:0, height:44, zIndex:4, cursor:'grab', touchAction:'none' }} />}
+          <div style={{ position:'absolute', inset:0, zIndex: card ? 1 : 150, pointerEvents:'none' }}>
             {/* dim scrim — visual only, stops above the keyboard so it stays playable */}
-            <div style={{ position:'absolute', left:0, right:0, top:0, bottom: consoleUp ? dim.h*0.30 : dim.h*0.06, background:'rgba(6,4,12,0.82)', backdropFilter:'blur(5px)', opacity: focusShown?1:0, transition:'opacity 0.42s ease, bottom 0.55s cubic-bezier(0.34,0.01,0.2,1)' }} />
+            <div style={{ position:'absolute', left:0, right:0, top:0, bottom: arrangeOpen ? 0 : consoleUp ? dim.h*0.30 : dim.h*0.06, background: arrangeOpen ? 'rgba(6,4,12,0.12)' : 'rgba(6,4,12,0.82)', backdropFilter:'blur(5px)', opacity: focusShown?1:0, transition:'opacity 0.42s ease, bottom 0.55s cubic-bezier(0.34,0.01,0.2,1)' }} />
 
             {/* breadcrumb + close */}
             <div style={{ position:'absolute', top:18, left:24, zIndex:3, display:'flex', alignItems:'center', gap:9, opacity: focusShown?1:0, transition:'opacity 0.42s ease', pointerEvents:'auto' }}>
-              <span onClick={exitFocus} style={{ fontSize:13, letterSpacing:'0.1em', color:'rgba(255,255,255,0.45)', cursor:'pointer' }}>FIELD</span>
+              <span onClick={exitFocus} style={{ fontSize:13, letterSpacing:'0.1em', color:'rgba(255,255,255,0.45)', cursor:'pointer' }}>{arrangeOpen ? 'ARRANGE' : 'FIELD'}</span>
               <span style={{ fontSize:13, color:'rgba(255,255,255,0.3)' }}>›</span>
               <span style={{ fontSize:13, letterSpacing:'0.1em', color:fc }}>{(fo?.label || focused).toUpperCase()}</span>
+              {card && (() => { const c = constRef.current.find(c => c.orbIds.includes(focused)); if (!c || c.orbIds.length < 2) return null;
+                return c.orbIds.filter(id => id !== focused).map(id => { const o = fieldOrbs.find(o => o.id === id); return <span key={id} onClick={() => setFocused(id)} title="the instrument's other engine - tap to open it" style={{ fontSize:13, letterSpacing:'0.1em', color:'rgba(255,255,255,0.45)', cursor:'pointer', marginLeft:4 }}>· {(o?.label || id).toUpperCase()}</span>; }); })()}
             {fieldOrbs.find(o=>o.id===focused)?.engineType==='tunnel' && (
                 <span onClick={()=>setPlanetOpen(true)} style={{ marginLeft:10, padding:'2px 10px', borderRadius:10, border:'0.5px solid rgba(166,255,216,0.4)', fontSize:9.5, letterSpacing:'0.14em', color:'#a6ffd8', cursor:'pointer', fontFamily:'Space Mono, monospace' }}>ENTER</span>
               )}</div>
@@ -3513,13 +3525,13 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
 
             {/* THE ORB — CENTRED, large, alive + XY-playable. x,y = CENTRE in px. */}
             <Orb id={focused} label={fo?.label || focused} colorKey={fo?.colorKey || 'tunnel'}
-              x={focusShown ? dim.w*0.50 : centrePos.x}
-              y={focusShown ? fh*0.42 : centrePos.y}
+              x={focusShown ? cw*0.50 : centrePos.x}
+              y={focusShown ? ch*0.42 : centrePos.y}
               size={focusShown ? 240 : centrePos.size}
               volume={0.7}
               selected={true} xy={xyMap[focused]} onSelect={handleBackTap} onXY={handleXY} hideLabel />
-            <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 150, textAlign:'center', fontSize:14, letterSpacing:'0.16em', color:'#f4ecff', zIndex:3 }}>{(fo?.label || focused).toUpperCase()}</div>
-            <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 174, textAlign:'center', fontSize:13, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
+            <div style={{ position:'absolute', left:0, right:0, top:ch*0.42 + 150, textAlign:'center', fontSize:14, letterSpacing:'0.16em', color:'#f4ecff', zIndex:3 }}>{(fo?.label || focused).toUpperCase()}</div>
+            <div style={{ position:'absolute', left:0, right:0, top:ch*0.42 + 174, textAlign:'center', fontSize:13, letterSpacing:'0.12em', color:'rgba(255,255,255,0.4)', zIndex:3 }}>still live · drag to play XY</div>
             {/* ORB REGISTER — interval offset from root (consonant set). Orb-tinted. */}
             {(() => {
               const oc = ORB_COLORS[fo?.colorKey || 'tunnel'] || ORB_COLORS['tunnel'];
@@ -3532,7 +3544,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 { semis:12, lbl:'+oct' }, { semis:24, lbl:'+2 oct' },
               ];
               return (
-                <div style={{ position:'absolute', left:0, right:0, top:fh*0.42 + 206, display:'flex', justifyContent:'center', alignItems:'center', flexWrap:'wrap', gap:10, maxWidth:620, margin:'0 auto', zIndex:50, pointerEvents:'auto' }}>
+                <div style={{ position:'absolute', left:0, right:0, top:ch*0.42 + 206, display:'flex', justifyContent:'center', alignItems:'center', flexWrap:'wrap', gap:10, maxWidth:620, margin:'0 auto', zIndex:50, pointerEvents:'auto' }}>
                   {INTERVALS.map(iv => {
                     const sel = cur === iv.semis;
                     return (
@@ -3553,7 +3565,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
             })()}
 
             {/* LEFT COLUMN — level + voices (distributed) */}
-            <div style={{ position:'absolute', left:'3%', top:64, bottom: (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', paddingLeft:18, overflow:'auto', zIndex:60, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
+            <div style={{ position:'absolute', left:'3%', top:64, bottom: arrangeOpen ? 24 : (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', paddingLeft:18, overflow:'auto', zIndex:60, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(-30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
               {/* LEVEL */}
               <div>
@@ -3666,7 +3678,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
             </div>
 
             {/* RIGHT COLUMN — signal path + flavour (distributed) */}
-            <div style={{ position:'absolute', right:'3%', top:64, bottom: (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:60, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
+            <div style={{ position:'absolute', right:'3%', top:64, bottom: arrangeOpen ? 24 : (consoleUp ? dim.h*0.30 : dim.h*0.06) + 16, width:'26%', maxWidth:340, boxSizing:'border-box', overflow:'auto', zIndex:60, display:'flex', flexDirection:'column', justifyContent:'space-between', gap:18, opacity: focusShown?1:0, transform: focusShown?'translateX(0)':'translateX(30px)', transition:'opacity 0.42s ease, transform 0.48s cubic-bezier(0.34,0.01,0.2,1)', pointerEvents:'auto' }}>
 
               {/* SIGNAL PATH — effect-orbs on a thread of light; tap to edit (UI ready, not yet audible) */}
               <div style={{ display: fieldOrbs.find(o=>o.id===focused)?.engineType==='clean' ? 'none' : undefined }}>
@@ -3940,6 +3952,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
               </div>
 
             </div>
+          </div>
           </div>
         );
       })()}
@@ -4441,7 +4454,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
                 const col = ORB_COLORS[e.colorKey] || ORB_COLORS['tunnel'];
                 return (
                   <div key={e.engineType} onClick={()=>toggleEngineInList(e.engineType)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12, width:104, cursor:'pointer', opacity: sel?1:0.82, transition:'opacity 0.2s, transform 0.2s', transform: sel?'scale(1.08)':'scale(1)', position:'relative' }}>
-                    {queued>0 && <div onClick={(ev)=>{ ev.stopPropagation(); setCreateList(prev=>{ const i=prev.lastIndexOf(e.engineType); if(i>=0){ const n=[...prev]; n.splice(i,1); if(n.length===0){ stopPreview(); setCreateEngine(null); } return n; } return prev; }); }} title="tap badge to remove one" style={{ position:'absolute', top:-4, right:18, zIndex:2, minWidth:22, height:22, padding:'0 6px', borderRadius:11, background:'#7af5c8', color:'#04140f', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center' }}>{queued}</div>}
+                    {queued>0 && <div onClick={(ev)=>{ ev.stopPropagation(); const i = createList.lastIndexOf(e.engineType); if (i < 0) return; const pid = previewIdsRef.current[i]; if (pid) { previewIdsRef.current.splice(i, 1); microcosmEngineActive(pid, false); microcosmCleanSync(pid, null, 0); microcosmRemoveOrb(pid); } setCreateList(prev=>{ const n=[...prev]; n.splice(i,1); if(n.length===0){ stopPreview(); setCreateEngine(null); } return n; }); }} title="tap badge to remove one" style={{ position:'absolute', top:-4, right:18, zIndex:2, minWidth:22, height:22, padding:'0 6px', borderRadius:11, background:'#7af5c8', color:'#04140f', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center' }}>{queued}</div>}
                     <div style={{ position:'relative' }}>
                       <div style={{ width: sel?66:58, height: sel?66:58, borderRadius:'50%', background:`radial-gradient(circle, ${col.core}, ${col.mid}55 52%, transparent 76%)`, boxShadow: sel?`0 0 30px 6px ${col.mid}99`:(alreadyHere?`0 0 22px 5px ${col.mid}88`:`0 0 12px 2px ${col.mid}33`), border: sel?`2px solid ${col.core}`:(alreadyHere?`2px solid ${col.core}`:'2px solid transparent') }} />
                       {alreadyHere && !sel && <div style={{ position:'absolute', top:-6, right:-2, width:10, height:10, borderRadius:'50%', background:'#7af5c8', boxShadow:'0 0 8px 2px rgba(122,245,200,0.8)' }} />}
