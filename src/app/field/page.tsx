@@ -418,7 +418,6 @@ export default function FieldPage() {
   const arrPlayheadRef = useRef(0);
   const arrUndoRef = useRef<any[][]>([]);
   const newBlockId = () => 'blk_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);                        // timeline snapshots - every change pushes one
-  const [arrClick, setArrClick] = useState(true);
   // BUILD'S WEATHER: yours to change, any time. Remembered; the instrument will carry it once instrument save learns it.
   const SKIES = ['plains', 'aurora', 'catatumbo', 'skye'] as const;
   const SKY_NAMES: Record<string, string> = { plains: 'plains', aurora: 'aurora', catatumbo: 'storm', skye: 'skye' };
@@ -1166,6 +1165,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   useEffect(() => { constRef.current = constellations; }, [constellations]);
   const [metroOn, setMetroOn] = useState(false);   // metronome click on/off
   const [metroLevel, setMetroLevel] = useState(0.5);   // metronome click volume 0..1
+  const arrClick = metroOn, setArrClick = setMetroOn;   // one click: Build's metronome and Arrange's CLICK are the same switch, same level
   const metroBeatRef = useRef(0);
   const metroNextRef = useRef(0);
   // METRONOME look-ahead scheduler — beats derived from the SHARED audio bar anchor,
