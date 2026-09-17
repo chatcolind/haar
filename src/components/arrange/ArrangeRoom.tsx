@@ -18,7 +18,7 @@ export type ArrangeRoomProps = {
   onNormalise?: (id: string) => void;
   onTrackChange?: (i: number, patch: { mute?: boolean; solo?: boolean; name?: string; instrument?: string; recMode?: 'touch' | 'drone'; level?: number; pan?: number; eq?: { lo: number; mid: number; hi: number }; sends?: { rev: number; dly: number } }) => void;
   onOpenInstrument?: (id: string) => void;
-  onSaveSong?: () => void; onOpenSong?: () => void; onOpenCard?: (i: number) => void; rack?: { name: string; file: string }[]; onExport?: () => void; onPrint?: () => void;
+  onSaveSong?: () => void; onOpenSong?: () => void; keysOn?: boolean; onKeys?: () => void; onOpenCard?: (i: number) => void; rack?: { name: string; file: string }[]; onExport?: () => void; onPrint?: () => void;
   meters?: () => { bands: number[][]; master: number[] } | null;
   master?: number; limiter?: boolean; fx?: any; onMaster?: (db: number) => void; onLimiter?: (on: boolean) => void; onFx?: (fx: any) => void;
   songName?: string;
@@ -246,6 +246,7 @@ export default function ArrangeRoom(p: ArrangeRoomProps) {
         <span style={{ display: 'flex', gap: 6 }}>{([['select', '1 · select'], ['cut', '3 · scissors'], ['erase', '5 · eraser']] as const).map(([k, l]) => <span key={k} onClick={() => setTool(k)} style={{ border: `0.5px solid ${tool === k ? '#7af5c8' : 'rgba(255,255,255,0.25)'}`, color: tool === k ? '#7af5c8' : 'rgba(255,255,255,0.5)', borderRadius: 6, padding: '2px 8px', cursor: 'pointer' }}>{l}</span>)}</span>
         <div style={{ flex: 1 }} />
         <span style={{ display: 'inline-flex', gap: 8 }}>
+          <span onClick={() => p.onKeys?.()} title="the keys - play the armed track's instrument on screen" style={{ padding: '7px 16px', borderRadius: 16, cursor: 'pointer', fontSize: 13, letterSpacing: '0.14em', border: '1px solid ' + (p.keysOn ? '#fff' : 'rgba(255,255,255,0.3)'), background: p.keysOn ? 'rgba(255,255,255,0.22)' : 'transparent', color: p.keysOn ? INK : 'rgba(255,255,255,0.55)', marginRight: 10 }}>KEYS</span>
           <span onClick={() => setMixView(false)} style={{ padding: '7px 16px', borderRadius: 16, cursor: 'pointer', fontSize: 13, letterSpacing: '0.14em', border: '1px solid ' + (mixView ? 'rgba(255,255,255,0.3)' : '#fff'), background: mixView ? 'transparent' : 'rgba(255,255,255,0.22)', color: mixView ? 'rgba(255,255,255,0.55)' : INK }}>ARRANGE</span>
           <span onClick={() => setMixView(true)} style={{ padding: '7px 16px', borderRadius: 16, cursor: 'pointer', fontSize: 13, letterSpacing: '0.14em', border: '1px solid ' + (mixView ? '#fff' : 'rgba(255,255,255,0.3)'), background: mixView ? 'rgba(255,255,255,0.22)' : 'transparent', color: mixView ? INK : 'rgba(255,255,255,0.55)' }}>MIX</span>
         </span>

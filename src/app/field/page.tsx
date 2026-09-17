@@ -2463,6 +2463,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   const cardDragEnd = () => { cardDrag.current = null; };
   // a track names its instrument; the rack can hold an empty stock constellation of the same name - the one with engines wins
   const instByName = (name: string | null | undefined): any => name ? (constellations.find((c: any) => c.name === name && c.orbIds.length > 0) ?? constellations.find((c: any) => c.name === name) ?? null) : null;
+  const [arrKeys, setArrKeys] = useState(false);   // THE KEYS in Arrange
   const armRef = useRef<Set<string> | null>(null);
   const armPrevSelRef = useRef<string | null>(null);
   useEffect(() => {
@@ -2810,6 +2811,72 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   };
   const zlabel: React.CSSProperties = { fontSize:11.5, fontWeight:500, letterSpacing:'0.25em', color:'rgba(255,255,255,0.3)', marginBottom:14 };
 
+  // THE KEYS: one keyboard row, two places - Build's console, and a floating strip in Arrange behind the KEYS pill
+  const keyboardRow = (
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
+          {/* SCALE-LOCK: minimal Haar control — one glowing token. Tap = toggle locked <-> free
+              (chromatic). Major/minor is set by the song key, not here. */}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'center', marginBottom:10 }}>
+            <span
+              onClick={()=>setScaleLock(v=>!v)}   // simple toggle: locked <-> free (chromatic). Major/minor stays as the song key set it.
+              title="Tap: lock to the song key / free to chromatic"
+              style={{ fontSize:13, letterSpacing:'0.14em', cursor:'pointer', userSelect:'none', transition:'all 0.25s ease',
+                color: scaleLock?'#ffe066':'rgba(255,255,255,0.32)',
+                textShadow: scaleLock?'0 0 12px rgba(255,210,80,0.55)':'none' }}>
+              {scaleLock ? `${FLAT_NAMES[NOTES.indexOf(lockKey)]} ${scaleMode}` : 'free'}
+            </span>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:4, maxWidth:'100%' }}>
+            <div onClick={()=>{ const o=Math.max(-3,octave-1); setOctave(o); playAt(playNote, playSemi); }}
+              style={{ fontSize:15, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none', padding:'0 6px' }}>◂</div>
+            {(() => {
+              const li = NOTES.indexOf(lockKey);
+              const cells = [];
+              const cIdx = NOTES.indexOf('C');
+              for (let off = -12; off <= 12; off++) {
+                let raw = li + off;
+                let idx = ((raw % 12) + 12) % 12;
+                const n = NOTES[idx];
+                const sharp = n.includes('#');
+                // absolute octave number: base octave 4 at register 0, locked root.
+                // semitone position of this cell relative to a fixed C4 = (li - cIdx) + off + octave*12
+                const semisFromC4 = (li - cIdx) + off + octave * 12;
+                const octNum = 4 + Math.floor(semisFromC4 / 12);
+                const noteLabel = n + octNum;
+                const isLock = off === 0;
+                const isPlay = (off === playSemi);   // off IS the semitone distance from root
+                // SCALE-LOCK: when locked, show ONLY the scale notes (skip the rest), named with flats
+                const degree = ((off % 12) + 12) % 12;
+                const inScale = SCALE_SEMIS[scaleMode].includes(degree);
+                if (scaleLock && !inScale) continue;                 // hide out-of-scale notes entirely
+                const label = scaleLock ? (FLAT_NAMES[idx] + octNum) : noteLabel;   // flats+oct when locked
+                const sz = isLock ? 34 : (scaleLock ? 26 : (sharp ? 17 : 26));   // all scale notes same size when locked
+                cells.push(
+                  <div key={off} onPointerDown={()=>tapNote(n, off)} onPointerUp={releaseTouch} onPointerLeave={releaseTouch} title={noteLabel}
+                    style={{ width:sz, height:sz, borderRadius:'50%', cursor:'pointer', flexShrink:0, transition:'all 0.3s ease',
+                      display:'flex', alignItems:'center', justifyContent:'center',
+                      fontSize: isLock?12:(scaleLock?10:(sharp?8:10)), fontWeight: (isLock||isPlay)?700:500,
+                      boxShadow: isLock ? '0 0 12px 1px rgba(255,210,80,0.45)' : 'none',
+                      background: isLock
+                        ? 'radial-gradient(circle, #ffe066 0%, rgba(224,170,40,0.6) 52%, transparent 78%)'
+                        : isPlay
+                          ? 'radial-gradient(circle, #fff 0%, rgba(170,196,255,0.7) 48%, transparent 76%)'
+                          : (sharp && !scaleLock)
+                            ? 'radial-gradient(circle, rgba(120,130,160,0.5) 0%, rgba(60,68,92,0.22) 55%, transparent 80%)'
+                            : 'radial-gradient(circle, rgba(234,240,255,0.42) 0%, rgba(170,192,232,0.14) 55%, transparent 80%)',
+                      color: isLock?'#2a2008':isPlay?'#1a2030':(scaleLock?'#e8eeff':(sharp?'rgba(215,222,238,0.6)':'#e8eeff')) }}>
+                    {scaleLock ? label : ((isLock||isPlay||!sharp)? noteLabel : '')}
+                  </div>
+                );
+              }
+              return cells;
+            })()}
+            <div onClick={()=>{ const o=Math.min(3,octave+1); setOctave(o); playAt(playNote, playSemi); }}
+              style={{ fontSize:15, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none', padding:'0 6px' }}>▸</div>
+          </div>
+        </div>
+  );
+
   return (
     <main onPointerMove={fieldHover} onClick={fieldClickConst} style={{ position:'fixed', inset:0, overflow:'hidden', touchAction:'none', background:'transparent', zIndex:0, fontFamily:'-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif', color:'#fff' }}>
       {/* SPHERES: source stars + orbit paths (behind everything) */}
@@ -2936,6 +3003,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       {/* SAMPLER - FINAL SCREEN. One centre axis, one label voice, framed wave, contrast floor. */}
       <canvas ref={rippleCanvasRef} style={{ position: 'fixed', inset: 0, zIndex: 2, pointerEvents: 'none' }} />
       <Sky scene={arrangeOpen ? arrSky : samplerOpen ? 'catatumbo' : focused ? 'aurora' : buildSky} zIndex={arrangeOpen ? 899 : samplerOpen ? 499 : -1} />
+      {arrangeOpen && arrKeys && <div style={{ position:'fixed', left:'50%', transform:'translateX(-50%)', bottom:210, zIndex:960, padding:'14px 22px 10px', borderRadius:22, border:'1px solid rgba(255,255,255,0.28)', background:'linear-gradient(180deg, rgba(40,20,60,0.55), rgba(14,8,24,0.72))', backdropFilter:'blur(22px)', WebkitBackdropFilter:'blur(22px)', boxShadow:'0 30px 70px rgba(10,5,20,0.5), inset 0 1px 0 rgba(255,255,255,0.2)' }}>{keyboardRow}</div>}
       {arrangeOpen && <Transport
         songName={arrSongName} posBar={arrPlayhead} bpm={bpm} playing={arrPlaying} rec={arrRec} recBar={arrRecBar}
         target={(arrSelTrack + 1) + ' ' + (arrTracks[arrSelTrack]?.name || '').replace(/^TRACK \d+$/, '')}
@@ -3022,7 +3090,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
           peaksFor={arrPeaksFor} peaksTick={arrPeaksTick}
           onNormalise={arrNormalise}
           onTrackChange={arrTrackChange}
-          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs} onExport={arrExport} onPrint={arrPrint} onOpenCard={(i: number) => { const tr: any = arrTracks[i]; const c: any = instByName(tr?.instrument); const id = c?.orbIds?.[0]; if (id) { setArrSelTrack(i); enterFocus(id); } }}
+          onSaveSong={arrSaveSong} onOpenSong={arrShowSongs} onExport={arrExport} onPrint={arrPrint} keysOn={arrKeys} onKeys={() => setArrKeys(v => !v)} onOpenCard={(i: number) => { const tr: any = arrTracks[i]; const c: any = instByName(tr?.instrument); const id = c?.orbIds?.[0]; if (id) { setArrSelTrack(i); enterFocus(id); } }}
           master={arrMaster} limiter={arrLimiter} fx={arrFx} onMaster={arrMasterChange} onLimiter={arrLimiterChange} onFx={arrFxChange}
           meters={microcosmTapeMixFrame}
           songName={arrSongName}
@@ -4103,68 +4171,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       <div style={{ position:'absolute', left:0, right:0, bottom: mixOpen ? mixerH : 0, height: dim.h*0.30, display:'flex', flexDirection:'column', justifyContent:'center', gap:18, padding:'0 40px', boxSizing:'border-box', transition:'bottom 0.4s cubic-bezier(0.34,0.01,0.2,1), transform 0.55s cubic-bezier(0.34,0.01,0.2,1), opacity 0.4s ease', zIndex: mixOpen ? 180 : 'auto', transform: consoleUp ? 'translateY(0)' : 'translateY(110%)', opacity: consoleUp ? 1 : 0, pointerEvents: consoleUp ? 'auto' : 'none' }}>
 
         {/* TIER 1 — full-width keyboard */}
-        <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
-          {/* SCALE-LOCK: minimal Haar control — one glowing token. Tap = toggle locked <-> free
-              (chromatic). Major/minor is set by the song key, not here. */}
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'center', marginBottom:10 }}>
-            <span
-              onClick={()=>setScaleLock(v=>!v)}   // simple toggle: locked <-> free (chromatic). Major/minor stays as the song key set it.
-              title="Tap: lock to the song key / free to chromatic"
-              style={{ fontSize:13, letterSpacing:'0.14em', cursor:'pointer', userSelect:'none', transition:'all 0.25s ease',
-                color: scaleLock?'#ffe066':'rgba(255,255,255,0.32)',
-                textShadow: scaleLock?'0 0 12px rgba(255,210,80,0.55)':'none' }}>
-              {scaleLock ? `${FLAT_NAMES[NOTES.indexOf(lockKey)]} ${scaleMode}` : 'free'}
-            </span>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:4, maxWidth:'100%' }}>
-            <div onClick={()=>{ const o=Math.max(-3,octave-1); setOctave(o); playAt(playNote, playSemi); }}
-              style={{ fontSize:15, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none', padding:'0 6px' }}>◂</div>
-            {(() => {
-              const li = NOTES.indexOf(lockKey);
-              const cells = [];
-              const cIdx = NOTES.indexOf('C');
-              for (let off = -12; off <= 12; off++) {
-                let raw = li + off;
-                let idx = ((raw % 12) + 12) % 12;
-                const n = NOTES[idx];
-                const sharp = n.includes('#');
-                // absolute octave number: base octave 4 at register 0, locked root.
-                // semitone position of this cell relative to a fixed C4 = (li - cIdx) + off + octave*12
-                const semisFromC4 = (li - cIdx) + off + octave * 12;
-                const octNum = 4 + Math.floor(semisFromC4 / 12);
-                const noteLabel = n + octNum;
-                const isLock = off === 0;
-                const isPlay = (off === playSemi);   // off IS the semitone distance from root
-                // SCALE-LOCK: when locked, show ONLY the scale notes (skip the rest), named with flats
-                const degree = ((off % 12) + 12) % 12;
-                const inScale = SCALE_SEMIS[scaleMode].includes(degree);
-                if (scaleLock && !inScale) continue;                 // hide out-of-scale notes entirely
-                const label = scaleLock ? (FLAT_NAMES[idx] + octNum) : noteLabel;   // flats+oct when locked
-                const sz = isLock ? 34 : (scaleLock ? 26 : (sharp ? 17 : 26));   // all scale notes same size when locked
-                cells.push(
-                  <div key={off} onPointerDown={()=>tapNote(n, off)} onPointerUp={releaseTouch} onPointerLeave={releaseTouch} title={noteLabel}
-                    style={{ width:sz, height:sz, borderRadius:'50%', cursor:'pointer', flexShrink:0, transition:'all 0.3s ease',
-                      display:'flex', alignItems:'center', justifyContent:'center',
-                      fontSize: isLock?12:(scaleLock?10:(sharp?8:10)), fontWeight: (isLock||isPlay)?700:500,
-                      boxShadow: isLock ? '0 0 12px 1px rgba(255,210,80,0.45)' : 'none',
-                      background: isLock
-                        ? 'radial-gradient(circle, #ffe066 0%, rgba(224,170,40,0.6) 52%, transparent 78%)'
-                        : isPlay
-                          ? 'radial-gradient(circle, #fff 0%, rgba(170,196,255,0.7) 48%, transparent 76%)'
-                          : (sharp && !scaleLock)
-                            ? 'radial-gradient(circle, rgba(120,130,160,0.5) 0%, rgba(60,68,92,0.22) 55%, transparent 80%)'
-                            : 'radial-gradient(circle, rgba(234,240,255,0.42) 0%, rgba(170,192,232,0.14) 55%, transparent 80%)',
-                      color: isLock?'#2a2008':isPlay?'#1a2030':(scaleLock?'#e8eeff':(sharp?'rgba(215,222,238,0.6)':'#e8eeff')) }}>
-                    {scaleLock ? label : ((isLock||isPlay||!sharp)? noteLabel : '')}
-                  </div>
-                );
-              }
-              return cells;
-            })()}
-            <div onClick={()=>{ const o=Math.min(3,octave+1); setOctave(o); playAt(playNote, playSemi); }}
-              style={{ fontSize:15, color:'rgba(255,255,255,0.4)', cursor:'pointer', userSelect:'none', padding:'0 6px' }}>▸</div>
-          </div>
-        </div>
+        {keyboardRow}
 
         {/* TIER 2 — FIELD (left) · FLAVOUR (centre) · SYSTEM (right) — hidden while mixing */}
         {!mixOpen && (
