@@ -1171,7 +1171,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // METRONOME look-ahead scheduler — beats derived from the SHARED audio bar anchor,
   // so beat 1 (accent) always coincides with the progression's bar boundary.
   useEffect(() => {
-    if (!(metroOn || (arrClick && (arrPlaying || arrRec !== 'idle')))) return;
+    if (!(metroOn && (state === 'playing' || arrPlaying || arrRec !== 'idle'))) return;   // the click runs only while something does - stop in either room stops it
     let scheduledUntil = microcosmAudioTime();   // audio-time up to which we've already scheduled
     const anchor0 = scheduledUntil;              // FIX: stable anchor when no progression is running.
     // (The old fallback re-read audioTime every tick, so the anchor rode alongside 'now' and the
@@ -1195,7 +1195,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     tick();
     const id = setInterval(tick, 25);
     return () => clearInterval(id);
-  }, [metroOn, bpm, arrClick, arrPlaying, arrRec]);
+  }, [metroOn, bpm, arrPlaying, arrRec, state]);
   const [progRunning, setProgRunning] = useState(false);
   const [progStepIdx, setProgStepIdx] = useState(0);    // which step is active (for UI highlight)
   const progTransposeRef = useRef(0);                   // current progression transpose (semitones), read by freq calc
