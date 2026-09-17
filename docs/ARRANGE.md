@@ -184,6 +184,8 @@ Words: the **track's instrument** (what it carries), **arm** (select the track; 
 Gone: SIGNAL PATH (never audible), the second DENSITY, VOICES (the synth's - moves to the source in Build).
 The desk stays the mix: the track's EQ, sends, fader. Instrument space and mix space are two things.
 
+**Build's console, placed:** SWELL is a gesture, not a setting - one gust across the whole field (levels, the focused engine's XY and density, the filter) and back; stays instrument-wide, should also work from Arrange. LIFE is a dial wired to nothing - it was the Eno dial, the instrument drifting on its own (slow walks over XY, density, flavour, over minutes); it gets its own block later, THE LIFE, not a knob in MOTION. TAPE: the reel stays one per instrument; how much of an engine goes through it is the engine's (DISTANCE), so it leaves the console as a global.
+
 **Known broken, on this card:** FREEZE does not take on a synth - the grains never switch to the capture (tested 17 Sept). Fauve has bugs and is a sample concept - it cuts fragments of a wave - so on a synth it becomes available only after FREEZE; fixed on wave sources where it can be heard.
 
 **Work order:**
