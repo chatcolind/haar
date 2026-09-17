@@ -411,6 +411,9 @@ export class Microcosm {
   private engineFill: Record<string, number> = {};      // 0..1 probability a grid point fires
   private engineSeed: Record<string, number> = {};      // seeds the fill dice (stable, re-rollable)
   private engineGridN: Record<string, number> = {};     // running grid-point counter per orb
+  private engineGridK: Record<string, number> = {};   // the next grid line each locked engine waits for
+  private barAnchor = 0;
+  setBarAnchor(t: number): void { this.barAnchor = t; this.engineGridK = {}; }   // the bar clock re-anchored: every locked engine rejoins
   setOrbLock(id: string, on: boolean): void { this.engineLocked[id] = on; }
   setOrbSubdiv(id: string, n: number): void { this.engineSubdiv[id] = n; }
   setOrbFill(id: string, f: number): void { this.engineFill[id] = Math.max(0, Math.min(1, f)); }
@@ -751,17 +754,20 @@ export class Microcosm {
           this._currentEngine = id;   // tag grains with the ORB ID (the rack key)
           const fn = tickFns[e.engineType];   // recipe chosen by engineType, decoupled from id
           if (this.engineLocked[id]) {
-            // TEMPO-LOCKED: grid delay from BPM+subdivision; fill dice decides fire vs rest.
+            // TEMPO-LOCKED: grid lines on the audio clock from the bar anchor - the click's anchor - so lateness never accumulates
             const subdiv = this.engineSubdiv[id] || 2;                 // default eighth notes
-            const gridMs = (60 / this.bpm) * 1000 / subdiv;            // one grid step in ms
-            const n = (this.engineGridN[id] || 0);
-            const fill = this.engineFill[id] ?? 1;
-            const seed = this.engineSeed[id] ?? 1;
-            if (fill >= 1 || this.fillRoll(seed, n) < fill) {
-              if (fn) fn(e.level);   // fire the grains (density still drives thickness)
+            const gridSec = (60 / this.bpm) / subdiv;
+            const now = this.ctx.currentTime, anchor = this.barAnchor;
+            let k = this.engineGridK[id];
+            if (k == null || Math.abs(anchor + k * gridSec - now) > gridSec) k = Math.ceil((now - anchor) / gridSec);   // off the grid either way (tempo or division changed): rejoin at its next line
+            if (anchor + k * gridSec <= now + STEP / 1000) {
+              const fill = this.engineFill[id] ?? 1;
+              const seed = this.engineSeed[id] ?? 1;
+              if (fill >= 1 || this.fillRoll(seed, k) < fill) { if (fn) fn(e.level); }   // fire the grains (density still drives thickness)
+              k += 1;
             }
-            this.engineGridN[id] = n + 1;
-            this.engineTickAccum[id] = gridMs;
+            this.engineGridK[id] = k;
+            this.engineTickAccum[id] = 0;                              // look again next tick
           } else {
             // FREE: organic density-driven rate (the fn returns its own next delay).
             const next = fn ? fn(e.level) : 100;

@@ -19,7 +19,7 @@ import {
   microcosmInputOn, microcosmInputOff, microcosmLiveArm, microcosmSynthOn, microcosmSynthOff,
   microcosmMonitor,
   microcosmLoadSourceData,
-  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeTapStart, microcosmTapeTapStop, microcosmInstrumentRoute, microcosmTapeMixTrack, microcosmTapeMixMaster, microcosmTapeMixFx, microcosmTapeMixFrame, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
+  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeTapStart, microcosmTapeTapStop, microcosmInstrumentRoute, microcosmBarAnchor, microcosmTapeMixTrack, microcosmTapeMixMaster, microcosmTapeMixFx, microcosmTapeMixFrame, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
   microcosmCleanSync, microcosmCleanGain, microcosmCleanStrip,
   microcosmSetEngineMode, microcosmGetEngineMode, microcosmEngineFire,
   samplerAnalyseRoot,
@@ -1342,7 +1342,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     progIdxRef.current = 0;
     // anchor the shared bar clock to the progression's downbeat so the metronome's
     // pulse 1 lines up with chord bar 1
-    barAudioAnchorRef.current = microcosmAudioTime();
+    barAudioAnchorRef.current = microcosmAudioTime(); microcosmBarAnchor(microcosmAudioTime());
     barAnchorRef.current = performance.now();
     progStep();
   }
@@ -2314,7 +2314,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const now = microcosmAudioTime();
     const anchor = barAudioAnchorRef.current || now;
     const onBar = arrPlaying ? anchor + Math.ceil((now - anchor) / spb + 0.02) * spb : now + 0.08;   // tape rolling: its next bar; else NOW
-    if (!arrPlaying) barAudioAnchorRef.current = onBar;                        // the bar clock re-anchors to the press
+    if (!arrPlaying) barAudioAnchorRef.current = onBar; microcosmBarAnchor(onBar);                        // the bar clock re-anchors to the press
     const nextBar = arrClick ? onBar + spb : onBar;                             // click on: one bar of count-in first
     const startBar = (arrLoop && arrLoopA != null) ? arrLoopA : Math.floor(arrPlayhead);
     const trackIdx = arrSelTrack;
@@ -2401,7 +2401,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       const t0v = t0 - (from - A) * spb;                              // virtual start of this pass, so phase = elapsed mod len
       arrSchedule(from, A + len, t0, spb);                             // the rest of this pass
       arrCycRef.current = { A, len, t0: t0v, cycle: 1, scheduledTo: t0v + len * spb };
-      barAudioAnchorRef.current = t0v;
+      barAudioAnchorRef.current = t0v; microcosmBarAnchor(t0v);
       arrLoopTimerRef.current = window.setInterval(() => arrPump(spb), 200);
       const sweep = () => { const c = arrCycRef.current; if (c) { const el = (microcosmAudioTime() - c.t0) / spb; const h = el < 0 ? c.A : c.A + (el % c.len); arrPlayheadRef.current = h; setArrPlayhead(h); } arrRafRef.current = requestAnimationFrame(sweep); };
       arrRafRef.current = requestAnimationFrame(sweep);
@@ -2410,7 +2410,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       arrCycRef.current = null;
       const from = head;
       arrSchedule(from, Infinity, t0, spb);
-      barAudioAnchorRef.current = t0 - (from - Math.floor(from)) * spb;
+      barAudioAnchorRef.current = t0 - (from - Math.floor(from)) * spb; microcosmBarAnchor(t0 - (from - Math.floor(from)) * spb);
       const sweep = () => { const h = from + (microcosmAudioTime() - t0) / spb; arrPlayheadRef.current = h; setArrPlayhead(h); arrRafRef.current = requestAnimationFrame(sweep); };
       arrRafRef.current = requestAnimationFrame(sweep);
       setArrStatus('tape · straight on from bar ' + (Math.floor(from) + 1));
@@ -2432,7 +2432,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     if (cycling) {
       const A = arrLoopA as number, len = arrLoopBars;
       arrPlayFromRef.current = A;
-      barAudioAnchorRef.current = t0;                                 // the bar clock re-anchors to the press
+      barAudioAnchorRef.current = t0; microcosmBarAnchor(t0);                                 // the bar clock re-anchors to the press
       arrCycRef.current = { A, len, t0, cycle: 0, scheduledTo: t0 };
       arrPump(spb); arrLoopTimerRef.current = window.setInterval(() => arrPump(spb), 200);
       setArrPlaying(true); setArrStatus('cycling · bars ' + (A + 1) + '-' + (A + len));
@@ -2444,7 +2444,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const anyAhead = tracks.some(t => t.blocks.some(b => b.startBar + b.lenBars > fromBar));
     if (!anyAhead) fromBar = 0;                                   // nothing ahead of the head: rewind to bar 1
     arrPlayFromRef.current = fromBar;
-    barAudioAnchorRef.current = t0;                                   // the bar clock re-anchors to the press
+    barAudioAnchorRef.current = t0; microcosmBarAnchor(t0);                                   // the bar clock re-anchors to the press
     const n = arrSchedule(fromBar, Infinity, t0, spb);
     if (arrPrintRef.current) { microcosmTapeTapStart(t0); arrPrintTimerRef.current = window.setTimeout(() => arrPlayRef.current(), ((songEndBar(tracks) - fromBar) * spb + 3 + (t0 - now)) * 1000); }   // the tap opens as the tape rolls; closes 3 s after the last block
     setArrPlaying(true);
@@ -2640,7 +2640,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   }
   async function doStart() {
     if (!started.current) { await ensureStarted(); return; }
-    await microcosmStart(); activateRack(); setState('playing'); barAnchorRef.current = performance.now(); barAudioAnchorRef.current = microcosmAudioTime();
+    await microcosmStart(); activateRack(); setState('playing'); barAnchorRef.current = performance.now(); barAudioAnchorRef.current = microcosmAudioTime(); microcosmBarAnchor(microcosmAudioTime());
   }
   function doStop() {
     microcosmStopEngine(); microcosmFauveOffAll();
