@@ -161,3 +161,39 @@ Every take still carries its snapshot, as now. The take is recorded dry - the in
 4. REC off Build's console.
 
 Words: the **track's instrument** (what it carries), **arm** (select the track; its instrument is the one that sounds), **the card** (the instrument's inner room, in Arrange).
+
+## THE ENGINES - ratified 17 Sept 2026. An engine is a recipe. Five, by role. The card is the recipe.
+
+**An engine is a recipe** - a set of numbers one grain player reads (Tunnel is already this; `CLOUD_RECIPES` / `tickCloud`). Everything an engine is can be seen, tweaked by ear, and saved. The factory engines live in code and can never be overwritten; anything Colin makes is SAVE AS - a named file in `Haar/Engines/`, editable, deletable. A song package carries the recipes it used, as it carries instruments.
+
+**Five factory engines, by role** (which of the twelve fills each is decided by ear on the workbench; the rest are parked, not deleted):
+1. the honest one - the source as it is (Clean)
+2. the bed - sustained, slow (Mosaic)
+3. the depth - a sound becomes a place (Tunnel)
+4. the broken one - rhythm from damage (Glitch / Reverse / Strum audition for it)
+5. the air - high, thin, moving (Shimmer / Haze / Bubbles / Swarm audition for it)
+
+**The card is the recipe** - six blocks, every control audible, none repeated:
+- SOURCE - ring depth (how far behind the head it reads); FREEZE (2s/4s/8s: the synth captured as a wave you can scan)
+- GRAIN - density, size, spread
+- TIME - FREE / LOCK, grid, rests, pattern (LOCK is tight: grid lines on the audio clock, grains scheduled to the frame, the finger quantised to the beat)
+- MOTION - what survives of absence and chaos once each is defined by ear
+- TONE - the engine's own filter
+- DISTANCE - the engine's send into the instrument's one space and one tape (Tunnel wet, Mosaic dry). The reverb stays one; the amounts are per engine (a small worklet edit: per-engine sums already exist)
+- FLAVOUR - kept and leaned into, **per engine**: the scale is the engine's (Dorian on the air, Hijaz on the broken one, at once). `flavourRef` is already per orb; only the palette is global today.
+Gone: SIGNAL PATH (never audible), the second DENSITY, VOICES (the synth's - moves to the source in Build).
+The desk stays the mix: the track's EQ, sends, fader. Instrument space and mix space are two things.
+
+**Known broken, on this card:** FREEZE does not take on a synth - the grains never switch to the capture (tested 17 Sept). Fauve has bugs and is a sample concept - it cuts fragments of a wave - so on a synth it becomes available only after FREEZE; fixed on wave sources where it can be heard.
+
+**Work order:**
+0. this block
+1. the workbench: Mosaic as a recipe, A/B'd against the code until it cannot be told apart; the card reads and writes it live
+2. the five by ear on the workbench, each with a reference recording Colin signs off; the rest parked
+3. the honest card as each engine needs it: cuts, VOICES to the source, DISTANCE sends, FLAVOUR per engine, FREEZE fixed first
+4. SAVE AS; Create's row shows factory + mine; songs carry recipes
+5. Fauve via FREEZE
+Snags run alongside, in the order they hurt.
+
+**The end point:** five engines Colin would put his name to, the room end to end, one track made start to finish in Haar. Pitched beside Ableton, not at it: an instrument with a room, played rather than assembled, the print going wherever it needs to.
+
