@@ -8,6 +8,7 @@ export type TransportProps = {
   songName: string;
   posBar: number;                  // fractional bar, 0-based
   bpm: number;
+  onBpm?: (bpm: number) => void;
   playing: boolean;
   rec: 'idle' | 'armed' | 'rolling';
   recBar: number;
@@ -73,7 +74,15 @@ export default function Transport(p: TransportProps) {
       : <span style={{ color: '#2a1433', fontWeight: 500 }}>{p.songName}</span>}
   </div>;
   const position = <div style={{ ...cell, fontSize: 19, color: p.rec === 'rolling' ? RED : '#2a1433', minWidth: 84, justifyContent: 'center' }}>{posText}</div>;
-  const tempo = <div style={cell}><span style={{ color: '#2a1433', fontSize: 14 }}>{p.bpm}</span><span style={{ color: 'rgba(42,20,51,0.5)', fontSize: 10, letterSpacing: '0.2em' }}>BPM</span></div>;
+  // TEMPO: drag the number up or down (1 BPM per 4 px) or scroll on it; 40..240
+  const bpmDrag = React.useRef<{ y0: number; b0: number } | null>(null);
+  const setBpmTo = (b: number) => p.onBpm?.(Math.max(40, Math.min(240, Math.round(b))));
+  const tempo = <div style={{ ...cell, cursor: p.onBpm ? 'ns-resize' : 'default', userSelect: 'none', touchAction: 'none' }} title="tempo - drag up or down, or scroll"
+    onPointerDown={(e) => { if (!p.onBpm) return; bpmDrag.current = { y0: e.clientY, b0: p.bpm }; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); }}
+    onPointerMove={(e) => { const d = bpmDrag.current; if (!d) return; setBpmTo(d.b0 + (d.y0 - e.clientY) / 4); }}
+    onPointerUp={() => { bpmDrag.current = null; }} onPointerCancel={() => { bpmDrag.current = null; }}
+    onWheel={(e) => { if (!p.onBpm) return; e.preventDefault(); setBpmTo(p.bpm + (e.deltaY < 0 ? 1 : -1)); }}>
+    <span style={{ color: '#2a1433', fontSize: 14 }}>{p.bpm}</span><span style={{ color: 'rgba(42,20,51,0.5)', fontSize: 10, letterSpacing: '0.2em' }}>BPM</span></div>;
   const toggles = <div style={cell}>
     <span onClick={p.onToggleClick} style={pill(!!p.click, !p.onToggleClick)}>CLICK</span>
     <span onClick={p.onToggleLoop} style={pill(!!p.loop, !p.onToggleLoop)}>LOOP</span>

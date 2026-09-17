@@ -3004,7 +3004,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
       <canvas ref={rippleCanvasRef} style={{ position: 'fixed', inset: 0, zIndex: 2, pointerEvents: 'none' }} />
       <Sky scene={arrangeOpen ? arrSky : samplerOpen ? 'catatumbo' : focused ? 'aurora' : buildSky} zIndex={arrangeOpen ? 899 : samplerOpen ? 499 : -1} />
       {arrangeOpen && arrKeys && <div style={{ position:'fixed', left:'50%', transform:'translateX(-50%)', bottom:210, zIndex:960, padding:'14px 22px 10px', borderRadius:22, border:'1px solid rgba(255,255,255,0.28)', background:'linear-gradient(180deg, rgba(40,20,60,0.55), rgba(14,8,24,0.72))', backdropFilter:'blur(22px)', WebkitBackdropFilter:'blur(22px)', boxShadow:'0 30px 70px rgba(10,5,20,0.5), inset 0 1px 0 rgba(255,255,255,0.2)' }}>{keyboardRow}</div>}
-      {arrangeOpen && <Transport
+      {arrangeOpen && <Transport onBpm={(b: number) => { setBpm(b); microcosmBpm(b); writeSongFile(songDoc(arrTracksRef.current, { bpm: b })); }}
         songName={arrSongName} posBar={arrPlayhead} bpm={bpm} playing={arrPlaying} rec={arrRec} recBar={arrRecBar}
         target={(arrSelTrack + 1) + ' ' + (arrTracks[arrSelTrack]?.name || '').replace(/^TRACK \d+$/, '')}
         status={arrStatus}
