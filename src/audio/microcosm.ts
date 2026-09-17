@@ -374,7 +374,7 @@ export class Microcosm {
     const sprayEng = this.engineSpray[this._currentEngine];
     const absEng = this.engineAbsence[this._currentEngine] || 0;
     const chaosEng = this.engineChaos[this._currentEngine] || 0;
-    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine, source, position: posEng, spray: sprayEng, absence: absEng, chaos: chaosEng });
+    this.node?.port.postMessage({ type: 'grain', ...spec, rate: capped, engine: this._currentEngine, source, position: posEng, spray: sprayEng, absence: absEng, chaos: chaosEng, at: this._grainAt ?? undefined });
     // PROBE: grain-fire rate + the orb's level, once a second
     const _gp = (this as any)._gprobe || ((this as any)._gprobe = { n: 0, t: Date.now() });
     _gp.n++;
@@ -413,7 +413,9 @@ export class Microcosm {
   private engineGridN: Record<string, number> = {};     // running grid-point counter per orb
   private engineGridK: Record<string, number> = {};   // the next grid line each locked engine waits for
   private barAnchor = 0;
-  setBarAnchor(t: number): void { this.barAnchor = t; this.engineGridK = {}; }   // the bar clock re-anchored: every locked engine rejoins
+  private _grainAt: number | null = null;   // LOCK: the frame the grains being posted must start on
+  setBarAnchor(t: number): void { this.barAnchor = t; this.engineGridK = {}; }
+  nextBeatDelay(): number { const beat = 60 / this.bpm, now = this.ctx.currentTime; const phase = (((now - this.barAnchor) % beat) + beat) % beat; if (phase < beat * 0.4) return 0; return Math.max(0, beat - phase - 0.045); }   // a press just after a beat is that beat (play now); later in the beat it waits for the next   // the bar clock re-anchored: every locked engine rejoins
   setOrbLock(id: string, on: boolean): void { this.engineLocked[id] = on; }
   setOrbSubdiv(id: string, n: number): void { this.engineSubdiv[id] = n; }
   setOrbFill(id: string, f: number): void { this.engineFill[id] = Math.max(0, Math.min(1, f)); }
@@ -760,10 +762,10 @@ export class Microcosm {
             const now = this.ctx.currentTime, anchor = this.barAnchor;
             let k = this.engineGridK[id];
             if (k == null || Math.abs(anchor + k * gridSec - now) > gridSec) k = Math.ceil((now - anchor) / gridSec);   // off the grid either way (tempo or division changed): rejoin at its next line
-            if (anchor + k * gridSec <= now + STEP / 1000) {
+            if (anchor + k * gridSec <= now + 0.03) {                 // a step ahead: the grains are stamped with the line's frame
               const fill = this.engineFill[id] ?? 1;
               const seed = this.engineSeed[id] ?? 1;
-              if (fill >= 1 || this.fillRoll(seed, k) < fill) { if (fn) fn(e.level); }   // fire the grains (density still drives thickness)
+              if (fill >= 1 || this.fillRoll(seed, k) < fill) { if (fn) { this._grainAt = Math.round((anchor + k * gridSec) * this.ctx.sampleRate); fn(e.level); this._grainAt = null; } }   // fire the grains on the line (density still drives thickness)
               k += 1;
             }
             this.engineGridK[id] = k;

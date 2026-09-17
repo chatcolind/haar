@@ -19,7 +19,7 @@ import {
   microcosmInputOn, microcosmInputOff, microcosmLiveArm, microcosmSynthOn, microcosmSynthOff,
   microcosmMonitor,
   microcosmLoadSourceData,
-  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeTapStart, microcosmTapeTapStop, microcosmInstrumentRoute, microcosmBarAnchor, microcosmTapeMixTrack, microcosmTapeMixMaster, microcosmTapeMixFx, microcosmTapeMixFrame, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
+  microcosmRecordOutput, microcosmRecordBlock, microcosmTapeDecode, microcosmTapePlay, microcosmTapeTapStart, microcosmTapeTapStop, microcosmInstrumentRoute, microcosmBarAnchor, microcosmNextBeat, microcosmTapeMixTrack, microcosmTapeMixMaster, microcosmTapeMixFx, microcosmTapeMixFrame, microcosmTapeStop, microcosmRecordOpen, microcosmRecordStopAt, samplerLoopPlayStereo, samplerExportWavStereo,
   microcosmCleanSync, microcosmCleanGain, microcosmCleanStrip,
   microcosmSetEngineMode, microcosmGetEngineMode, microcosmEngineFire,
   samplerAnalyseRoot,
@@ -2159,20 +2159,33 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
     const rootHz = NOTE_BASE[lockKey] ?? 261.63;
     const snapped = snapToScale(semis);                    // SCALE-LOCK: snap the played note to key
     const hz = rootHz * Math.pow(2, (snapped / 12) + octave + (progTransposeRef.current/12));
-    microcosmSourceFreq(hz);
     setPlayNote(note); setPlaySemi(snapped);
     perfEmit('note.on', '', [snapped, octave], note);   // the musical event - what you edit
     ripplesRef.current.push({ t0: performance.now(), x: window.innerWidth / 2, hue: arrRecRef.current ? 'rgba(255,120,130,0.95)' : 'rgba(255,214,190,0.9)' });
     // CONDUCTOR: push the note offset to SAMPLE orbs (default/synth already moved via SourceFreq)
     const noteSemis = snapToScale(semis + octave * 12);   // SCALE-LOCK: snap to key when on (else raw)
     const defaultOrbIds = new Set(constRef.current.filter(c => c.sourceId === 'default').flatMap(c => c.orbIds));
-    for (const o of fieldOrbs) if (!defaultOrbIds.has(o.id)) microcosmOrbConductor(o.id, noteSemis);
     // TOUCH: a key press is also the finger - armed orbs start at this pitch (drone orbs ignore fire)
-    const gate = armRef.current; for (const o of fieldOrbs) if (!gate || gate.has(o.id)) microcosmEngineFire(o.id, true);   // THE ROOM: in Arrange only the armed track's instrument answers
+    // LOCK on the synth: hold the synth at its root and pitch the grains by rate through the conductor (as a wave is) - old grains keep
+    // their note and overlap, the grains born on the beat carry the new one. Nothing locked: pitch the synth itself, conductor at 0.
+    const lockedSynth = fieldOrbs.some(o => defaultOrbIds.has(o.id) && lockRef.current[o.id]);
+    const baseHz = rootHz * Math.pow(2, progTransposeRef.current / 12);
+    const go = () => {
+      microcosmSourceFreq(lockedSynth ? baseHz : hz);
+      for (const o of fieldOrbs) microcosmOrbConductor(o.id, defaultOrbIds.has(o.id) ? (lockedSynth ? noteSemis : 0) : noteSemis);
+      const gate = armRef.current; for (const o of fieldOrbs) if (!gate || gate.has(o.id)) microcosmEngineFire(o.id, true);   // THE ROOM: in Arrange only the armed track's instrument answers
+      keyPendingRef.current = null;
+      if (keyReleaseQueuedRef.current) { keyReleaseQueuedRef.current = false; window.setTimeout(() => { for (const o of fieldOrbs) microcosmEngineFire(o.id, false); }, 40); }   // a tap shorter than the wait: it still plays
+    };
+    // LOCK: with any engine locked, the change lands on the next beat of the bar - not on the finger
+    const wait = fieldOrbs.some(o => lockRef.current[o.id]) ? microcosmNextBeat() : 0;
+    if (keyPendingRef.current) window.clearTimeout(keyPendingRef.current);
+    if (wait > 0.005) keyPendingRef.current = window.setTimeout(go, wait * 1000); else go();
   }
   // TOUCH release: the finger comes off - every armed orb stops (its own tail finishes naturally)
   function releaseTouch() {
     perfEmit('note.off', '', [], undefined);
+    if (keyPendingRef.current) { keyReleaseQueuedRef.current = true; return; }   // released before the beat: release just after the note lands
     for (const o of fieldOrbs) microcosmEngineFire(o.id, false);
   }
   // double-click a note to LOCK it as the root (yellow); single tap to play
@@ -2464,6 +2477,7 @@ setLoopA(0); setLoopB(1);       analyseCapture(data); setCapture({ id: cid, data
   // a track names its instrument; the rack can hold an empty stock constellation of the same name - the one with engines wins
   const instByName = (name: string | null | undefined): any => name ? (constellations.find((c: any) => c.name === name && c.orbIds.length > 0) ?? constellations.find((c: any) => c.name === name) ?? null) : null;
   const [arrKeys, setArrKeys] = useState(false);   // THE KEYS in Arrange
+  const keyPendingRef = useRef<number | null>(null); const keyReleaseQueuedRef = useRef(false);   // LOCK: a key press waiting for the beat
   const armRef = useRef<Set<string> | null>(null);
   const armPrevSelRef = useRef<string | null>(null);
   useEffect(() => {

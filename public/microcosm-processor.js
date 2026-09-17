@@ -58,6 +58,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
         return;
       }
       if (m.type === 'grain') {
+        const waitAt = (typeof m.at === 'number') ? Math.max(0, Math.round(m.at - currentFrame)) : 0;   // LOCK: hold the grain until its frame
         const srcId = m.source || 'default';
         const src = this.sources[srcId] || this.sources.default;
         let pos, maxRead;
@@ -85,7 +86,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
             const behindL = guardL + Math.floor(Math.random() * this._sr * 0.5);
             let posL = src.wp - Math.min(behindL, src.len - guardL);
             posL = ((posL % src.len) + src.len) % src.len;
-            this.grains.push({ pos: posL, rate: m.rate || 1, remaining: m.lenSamp || 4800, total: m.lenSamp || 4800,
+            this.grains.push({ wait: waitAt, pos: posL, rate: m.rate || 1, remaining: m.lenSamp || 4800, total: m.lenSamp || 4800,
               gain: m.gain || 0.3, panL: Math.SQRT1_2 * (1 - (m.pan || 0)) , panR: Math.SQRT1_2 * (1 + (m.pan || 0)),
               engine: m.engine || '_', source: srcId, env: (m.env || 0), tilt: (m.tilt || 0), tLp: 0, ghost: (m.ghost || 0) });
             return;
@@ -189,7 +190,7 @@ class MicrocosmProcessor extends AudioWorkletProcessor {
           if (pos < clo) pos = clo;
           if (pos > chi) pos = chi;
         }
-        if (!dropGrain) this.grains.push({
+        if (!dropGrain) this.grains.push({ wait: waitAt,
           pos,
           source: srcId,   // which source buffer this grain reads (constellation)
           engine: m.engine || '_',
@@ -510,6 +511,7 @@ if (d.type === 'tapOn') {
       for (let g = 0; !this.frozen && g < this.grains.length; g++) {
         const gr = this.grains[g];
         if (gr.remaining <= 0) continue;
+        if (gr.wait > 0) { gr.wait--; continue; }   // not its frame yet
         const phase = (gr.total - gr.remaining) / gr.total;
         const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * phase);
         const p = gr.pos;
